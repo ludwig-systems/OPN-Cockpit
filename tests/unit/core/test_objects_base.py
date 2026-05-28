@@ -96,6 +96,12 @@ class TestCustomAdapterCanImplementProtocol:
             def to_payload(self, spec):  # type: ignore[no-untyped-def]
                 return {}
 
+            def spec_to_dict(self, spec):  # type: ignore[no-untyped-def]
+                return {}
+
+            def spec_from_dict(self, raw):  # type: ignore[no-untyped-def]
+                return _Spec()
+
         assert isinstance(_StubAdapter(), ObjectAdapter)
 
 

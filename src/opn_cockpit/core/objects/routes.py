@@ -142,6 +142,23 @@ class RouteAdapter:
             "disabled": "1" if spec.disabled else "0",
         }
 
+    def spec_to_dict(self, spec: RouteSpec) -> dict[str, Any]:
+        """Serialisiert für den Plan-Store (zwischen ``plan`` und ``apply``)."""
+        return {
+            "network": spec.network,
+            "gateway": spec.gateway,
+            "descr": spec.descr,
+            "disabled": spec.disabled,
+        }
+
+    def spec_from_dict(self, raw: dict[str, Any]) -> RouteSpec:
+        return RouteSpec(
+            network=str(raw.get("network", "")),
+            gateway=str(raw.get("gateway", "")),
+            descr=str(raw.get("descr", "")),
+            disabled=bool(raw.get("disabled", False)),
+        )
+
     def exists(
         self,
         client: HttpClient,

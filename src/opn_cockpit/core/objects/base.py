@@ -143,6 +143,21 @@ class ObjectAdapter(Protocol[TSpec, TIdent]):
         verwendet. Enthält keine Secrets.
         """
 
+    def spec_to_dict(self, spec: TSpec) -> dict[str, Any]:
+        """Serialisiert eine Spec für die persistente Plan-Datei.
+
+        Wird vom ``PlanStore`` aufgerufen, wenn ein Plan auf Platte landet
+        (zwischen ``plan`` und ``apply`` per CLI). Roundtrip-fähig mit
+        :meth:`spec_from_dict`.
+        """
+
+    def spec_from_dict(self, raw: dict[str, Any]) -> TSpec:
+        """Rekonstruiert eine Spec aus dem Plan-File.
+
+        Defensiv: unbekannte Felder werden ignoriert, fehlende mit Defaults
+        gefüllt — überlebt v1→v2-Schema-Erweiterungen.
+        """
+
 
 @runtime_checkable
 class SubsystemController(Protocol):
