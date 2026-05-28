@@ -1,0 +1,166 @@
+# Anforderungskatalog — OPNsense Multi-Site Management Tool
+
+**Dokumenttyp:** Übergabedokument für Claude Code (VS Code)
+**Zielplattform:** Windows (lokal lauffähig auf einer Admin-PAW)
+**Version des Katalogs:** 1.0
+**Scope v1:** Statische Routen + Aliase ausrollen und verifizieren über mehrere OPNsense-Instanzen
+
+---
+
+## 1. Zweck & Kontext
+
+Das Tool dient der zentralen, ferngesteuerten Konfiguration mehrerer Dutzend OPNsense-Firewalls (bis ca. 25 Standorte) über deren REST-API. Der Administrator wählt eine Aktion (z. B. „Route hinzufügen", „Alias ergänzen"), wählt eine oder mehrere Ziel-OPNsenses aus, prüft eine Vorschau und rollt die Änderung aus. Nach dem Schreiben verifiziert das Tool selbstständig, dass der Eintrag tatsächlich angelegt **und** aktiviert wurde.
+
+Das Tool läuft **vollständig lokal** auf einer Windows-Admin-Workstation (PAW). Es ist kein Server-Dienst, keine Cloud-Komponente, keine geteilte Multi-User-Instanz. Es kommuniziert ausschließlich per HTTPS direkt mit den OPNsense-APIs (kein SSH nötig).
+
+### Designprinzipien (vom Auftraggeber)
+- **Architektonische Einfachheit** — wenige Abhängigkeiten, klar getrennte Schichten.
+- **Verifikation vor Vertrauen** — jede Änderung wird nach dem Schreiben per Read-back gegen die API geprüft, nicht nur anhand der Schreib-Antwort.
+- **Vorschau vor Ausführung** — kein Ausrollen ohne vorherigen Dry-Run.
+- **Nachvollziehbarkeit** — jede Änderung wird auditierbar protokolliert.
+
+---
+
+## 2. Architektur-Vorgaben
+
+### 2.1 Schichtentrennung (verbindlich)
+Strikte Trennung in drei Schichten, damit die Kernlogik unabhängig von der GUI testbar und in reinen Batch-Skripten wiederverwendbar ist:
+
+1. **API-/Core-Layer** — gekapselte Funktionen pro Objekttyp und Operation. Keine GUI-Abhängigkeiten. Beispiel-Signaturen:
+   - `add_route(host, key, secret, network, gateway, descr, disabled=False) -> Result`
+   - `verify_route(host, key, secret, network, gateway) -> bool`
+   - `add_alias(host, key, secret, name, type, content, descr) -> Result`
+   - `verify_alias(host, key, secret, name) -> bool`
+   - `reconfigure_routes(host, key, secret) -> Result`
+   - `reconfigure_aliases(host, key, secret) -> Result`
+2. **Orchestrierungs-Layer** — nimmt eine Aktion + eine Liste von Zielen entgegen, führt sie nach der Fehlerstrategie aus, sammelt Ergebnisse, triggert Verifikation und Reconfigure.
+3. **Präsentations-Layer (GUI)** — nur Darstellung und Eingabe. Ruft ausschließlich den Orchestrierungs-Layer auf.
+
+> **Wichtig für Claude Code:** Der API-/Core-Layer muss ohne GUI lauffähig sein (Unit-tests, CLI-Batchlauf). Keine GUI-Imports im Core.
+
+### 2.2 Technologie-Empfehlung
+- **Sprache:** Python 3.11+
+- **GUI:** `tkinter` (mitgeliefert, keine Extra-Abhängigkeit) als Standard. Alternativ `PySide6`, falls eine höherwertige UI gewünscht ist — Entscheidung dem Umsetzer überlassen, aber Schichtentrennung bleibt identisch.
+- **HTTP:** `requests` oder `httpx`.
+- **Paketierung:** Lauffähig als Skript; optional `PyInstaller` für eine eigenständige `.exe` auf der PAW.
+- **Konfig-/Datenformat:** JSON oder TOML für Geräte- und Profilspeicher.
+
+---
+
+## 3. OPNsense-API — technische Eckpunkte
+
+- Authentifizierung: HTTP Basic Auth mit **API-Key:Secret** (pro Gerät hinterlegt). Erzeugt unter *System → Access → Users → API Key*.
+- Schreiboperationen (`add*`) **speichern nur in die Konfiguration**; die Änderung wird erst nach einem separaten **`reconfigure`**-Aufruf aktiv. → Bei Bulk-Ausrollung: alle Objekte pro Gerät schreiben, dann **einmal** reconfigure je Gerät, dann verifizieren.
+- Gateways werden in der Routen-API über ihren **Namen** referenziert (z. B. `V2_WANBwIn`), nicht über die IP. Groß-/Kleinschreibung ist relevant.
+- TLS: Zertifikate sind standortseitig teils noch nicht ausgerollt. Das Tool muss **pro Gerät** konfigurierbar machen, ob die Zertifikatsprüfung aktiv ist (`verify=True/False` bzw. CA-Pinning). Default-sicher gestalten (s. Abschnitt Sicherheit).
+- Relevante Endpunkte (vom Umsetzer final zu verifizieren gegen die laufende OPNsense-Version):
+  - Routen: `POST /api/routes/routes/addroute`, `.../searchroute`, `.../reconfigure`
+  - Aliase: `POST /api/firewall/alias/addItem`, `.../searchItem`/`get`, `.../reconfigure`
+
+> **Versionsnotiz:** Zielversion ist OPNsense 26.1. Der Umsetzer soll Endpunkte und Feldnamen gegen die tatsächliche API-Doku der eingesetzten Version prüfen, da sich Pfade zwischen Versionen ändern können.
+
+---
+
+## 4. Funktionale Anforderungen
+
+### 4.1 Geräteverwaltung (Inventar)
+- **R-DEV-1** — Anlegen, Bearbeiten, Löschen von OPNsense-Instanzen mit: Anzeigename, Host (IP **oder** FQDN), Port (Default 443), API-Key, API-Secret, TLS-Verify (an/aus bzw. CA-Pfad), optional Tags/Gruppen (z. B. „Außenstandorte", „Core").
+- **R-DEV-2** — IP-basierter Zugriff muss möglich sein (nicht nur FQDN).
+- **R-DEV-3** — Verbindungstest pro Gerät („Test connection") — ruft einen leichtgewichtigen Read-Endpunkt auf und meldet Erreichbarkeit + gültige Credentials.
+- **R-DEV-4** — Gruppierung/Tagging, um bei Aktionen schnell „alle Geräte einer Gruppe" auszuwählen.
+
+### 4.2 Aktionen (v1: Routen + Aliase)
+- **R-ACT-1 (Route hinzufügen)** — Eingabe: Zielnetz (CIDR), Gateway-Name, Beschreibung, disabled-Flag. Validierung des CIDR-Formats clientseitig.
+- **R-ACT-2 (Alias ergänzen)** — Eingabe: Alias-Name, Typ (host, network, port, url, …), Inhalt (eine oder mehrere Einträge), Beschreibung. Optional: zu bestehendem Alias **hinzufügen** vs. **neu anlegen** (Merge-Verhalten klar kennzeichnen).
+- **R-ACT-3** — Mehrfach-Zielauswahl: eine Aktion auf 1..n Geräte gleichzeitig ausrollen (Auswahl per Liste, Gruppe oder „alle").
+- **R-ACT-4** — Fehlerstrategie **Best-Effort**: schlägt ein Gerät fehl, laufen die übrigen weiter; alle Fehler werden gesammelt und im Ergebnis + Audit-Log protokolliert.
+
+### 4.3 Dry-Run / Vorschau (höchste Priorität)
+- **R-PRE-1** — Vor jedem Ausrollen zeigt das Tool eine **Vorschau**, die exakt auflistet: welche Aktion, mit welchen Parametern, gegen welche Geräte (Name + Host), inkl. des effektiven API-Payloads je Gerät.
+- **R-PRE-2** — Ausrollen erfordert eine **explizite Bestätigung** nach Ansicht der Vorschau (z. B. Checkbox „Ich habe die Vorschau geprüft" + Button).
+- **R-PRE-3** — Optional: „Diff"-Anzeige — falls per Read-back vorab ermittelbar, ob das Objekt bereits existiert (z. B. Alias gleichen Namens), um versehentliche Duplikate/Überschreibungen sichtbar zu machen.
+
+### 4.4 Ausrollen & Verifikation
+- **R-RUN-1** — Ablauf pro Gerät: (1) Objekt(e) per `add*` schreiben → (2) `reconfigure` für den betroffenen Subsystem-Typ → (3) **Read-back-Verifikation** via Such-/Get-Endpunkt, die bestätigt, dass der Eintrag vorhanden ist.
+- **R-RUN-2 (Verifikationstiefe: Read-back)** — Verifikation gilt nur als bestanden, wenn der angelegte Eintrag über einen separaten Lese-Aufruf der API tatsächlich gefunden wird — nicht allein anhand der `add`-Antwort (`saved`/`uuid`).
+- **R-RUN-3** — Ergebnisdarstellung je Gerät mit klarem Status: `Geschrieben`, `Aktiviert (reconfigure ok)`, `Verifiziert`, `Fehlgeschlagen (+ Grund)`. Aggregierte Übersicht über alle Ziele.
+- **R-RUN-4** — Timeout- und Retry-Verhalten je API-Call konfigurierbar; ein nicht erreichbares Gerät blockiert die übrigen nicht (Best-Effort).
+- **R-RUN-5** — Idempotenz-Hinweis: Erkennt das Tool, dass ein Objekt bereits existiert (Read-back vor Schreiben), bietet es „überspringen" statt blindem Duplizieren an.
+
+### 4.5 Audit-Log (zweithöchste Priorität)
+- **R-LOG-1** — Jede ausgeführte Aktion wird persistent protokolliert: Zeitstempel, eingeloggter Benutzer, Aktion, Parameter, Zielgeräte, je Gerät das Ergebnis (inkl. Verifikationsstatus), API-Antwort-Kurzfassung.
+- **R-LOG-2** — Log ist append-only und maschinenlesbar (JSON Lines), zusätzlich im Tool einsehbar/filterbar.
+- **R-LOG-3** — Secrets/Keys erscheinen **niemals** im Log (Maskierung).
+
+### 4.6 Profile / Templates (dritte Priorität)
+- **R-TPL-1** — Wiederverwendbare Aktions-Vorlagen speichern (z. B. „Standard-Routen-Set für neuen Außenstandort"), die als Ausgangspunkt geladen werden können.
+- **R-TPL-2** — Profile enthalten nur Aktions-/Parameterdaten, keine Credentials.
+
+### 4.7 Bulk-Import (vierte Priorität)
+- **R-IMP-1** — Import mehrerer Objekte aus CSV/JSON (z. B. Liste von Routen: Netz, Gateway, Beschreibung) zur Massenanlage.
+- **R-IMP-2** — Vor dem Import: Validierung + Vorschau (greift R-PRE-1 wieder).
+
+---
+
+## 5. Sicherheitsanforderungen
+
+- **R-SEC-1 (App-Login)** — Nach dem Start verlangt das Tool eine lokale Authentifizierung (Master-Passwort), bevor Inventar/Aktionen zugänglich sind.
+- **R-SEC-2 (Credential-Speicherung)** — API-Keys/Secrets werden **niemals im Klartext** auf Platte gehalten. Empfohlen:
+  - Windows Credential Manager über die `keyring`-Bibliothek, **oder**
+  - verschlüsselter lokaler Speicher (z. B. mit aus dem Master-Passwort abgeleitetem Schlüssel, KDF wie scrypt/Argon2; alternativ Windows DPAPI).
+- **R-SEC-3** — Das Master-Passwort wird nur als KDF-Hash gespeichert (kein Klartext, kein reversibler Speicher).
+- **R-SEC-4 (TLS)** — Zertifikatsprüfung pro Gerät konfigurierbar. Wenn deaktiviert (mangels ausgerollter Zertifikate), muss das in der UI **deutlich sichtbar markiert** sein (Warnhinweis). Sobald Zertifikate vorhanden sind, soll Pinning/CA-Verifikation der Standardpfad sein.
+- **R-SEC-5** — Keine Secrets in Logs, Fehlermeldungen, Vorschau-Payloads (dort maskieren) oder Crash-Reports.
+- **R-SEC-6** — Inaktivitäts-Sperre: nach konfigurierbarer Leerlaufzeit erneute Eingabe des Master-Passworts.
+- **R-SEC-7** — Da das Tool auf einer PAW läuft: keine ausgehenden Verbindungen außer zu den konfigurierten OPNsense-Hosts.
+
+---
+
+## 6. Nicht-funktionale Anforderungen
+
+- **R-NFR-1** — Vollständig offline/lokal lauffähig; keine externen Dienste außer den OPNsense-APIs.
+- **R-NFR-2** — Robust gegen einzelne nicht erreichbare Geräte (paralleles oder sequenzielles Abarbeiten mit Timeout, ohne Gesamtabbruch).
+- **R-NFR-3** — Klare Fehlermeldungen mit unterscheidbaren Ursachen: Netzwerk nicht erreichbar / Auth fehlgeschlagen / Validierungsfehler der API / reconfigure fehlgeschlagen / Verifikation fehlgeschlagen.
+- **R-NFR-4** — Core-Layer mit Unit-Tests abgedeckt; API-Calls in Tests mockbar.
+- **R-NFR-5** — Konfig- und Profildateien versionierbar/portierbar (Klartext-Struktur, aber ohne Secrets).
+
+---
+
+## 7. Best Practices & Inspiration (eingearbeitet)
+
+Aus etablierten Infrastruktur-Management- und Deployment-Tools übernommene Muster, die den Anforderungen oben zugrunde liegen:
+
+- **Plan/Apply-Trennung (Terraform-Muster):** Erst Vorschau („plan") generieren, dann bewusst „apply". → R-PRE-*.
+- **Idempotenz & Read-back (Ansible-Muster):** Prüfen, ob der Soll-Zustand bereits besteht, statt blind zu schreiben; Erfolg am tatsächlichen Zustand messen, nicht an der Schreib-Quittung. → R-RUN-2, R-RUN-5.
+- **Inventar mit Gruppen/Tags (Ansible Inventory):** Aktionen gegen logische Gerätegruppen statt Einzelauswahl. → R-DEV-4.
+- **Audit-Trail (Change-Management):** Unveränderliches, durchsuchbares Protokoll jeder Änderung mit Wer/Was/Wann/Ergebnis. → R-LOG-*.
+- **Best-Effort mit aggregiertem Ergebnisbericht (Fleet-Management/MDM-Muster):** Ausrollen über viele Endpunkte, Einzelfehler tolerieren, am Ende konsolidierte Statusmatrix zeigen. → R-ACT-4, R-RUN-3.
+- **Secret-Hygiene (12-Factor / Secret-Manager-Praxis):** Credentials getrennt vom Code/Config, verschlüsselt, niemals im Log. → R-SEC-2/5.
+- **Geringste Rechte / sichtbarer Unsicherheitszustand:** Deaktivierte TLS-Verifikation explizit als Risiko anzeigen, statt sie stillschweigend zuzulassen. → R-SEC-4.
+
+---
+
+## 8. Scope-Abgrenzung
+
+**In v1 enthalten:** Geräteinventar, App-Login + Credential-Speicherung, Aktionen „Route hinzufügen" und „Alias ergänzen", Mehrfach-Zielauswahl (Best-Effort), Dry-Run/Vorschau + Bestätigung, Ausrollen mit Reconfigure, Read-back-Verifikation, Audit-Log, Profile/Templates, CSV/JSON-Bulk-Import.
+
+**Für spätere Versionen vorgesehen (Architektur offenhalten, aber nicht implementieren):**
+- **Unbound DNS** — Host-Overrides / DNS-Redirects als weiterer Objekttyp.
+- **Firewall-Regeln** — Anlegen/Bearbeiten von Regeln (höheres Risiko, mehr Validierung nötig).
+- Optionale tiefere Verifikation (funktionaler Check, z. B. Route im Kernel-Routing) über reine API-Read-backs hinaus.
+
+> **Hinweis an den Umsetzer:** Der Objekttyp-Layer soll so generisch geschnitten sein (gemeinsames Interface für „add / reconfigure / verify" pro Typ), dass Unbound und Firewall-Regeln später als zusätzliche Implementierungen desselben Interfaces andocken, ohne Orchestrierung und GUI umzubauen.
+
+---
+
+## 9. Offene Punkte zur Klärung mit dem Umsetzer
+
+- Finale Endpunkt-Pfade und Feldnamen gegen die konkrete OPNsense-26.1-API verifizieren.
+- Alias-Merge-Semantik (Inhalt zu bestehendem Alias hinzufügen) gegen das tatsächliche API-Verhalten prüfen.
+- Parallel vs. sequenziell beim Ausrollen über viele Geräte (Performance vs. Last/Übersichtlichkeit) — Default festlegen.
+- GUI-Framework final wählen (tkinter vs. PySide6).
+
+
+
+
+
