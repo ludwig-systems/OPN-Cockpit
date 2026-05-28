@@ -11,6 +11,9 @@ import importlib
 
 import pytest
 
+import opn_cockpit
+from opn_cockpit.cli.main import build_parser
+
 
 @pytest.mark.parametrize(
     "module",
@@ -34,14 +37,10 @@ def test_package_importable(module: str) -> None:
 
 
 def test_version_string() -> None:
-    import opn_cockpit
-
     assert opn_cockpit.__version__ == "0.1.0"
 
 
 def test_cli_parser_lists_planned_subcommands() -> None:
-    from opn_cockpit.cli.main import build_parser
-
     parser = build_parser()
     help_text = parser.format_help()
     for sub in ("list-devices", "test-connection", "plan", "apply", "audit"):
