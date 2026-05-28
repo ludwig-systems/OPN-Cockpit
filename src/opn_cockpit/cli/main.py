@@ -41,6 +41,7 @@ from opn_cockpit.cli._io import (
 from opn_cockpit.config import AppSettings, get_app_data_dir
 from opn_cockpit.core.health import check_device
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
+from opn_cockpit.core.objects.aliases import AliasSpec
 from opn_cockpit.core.objects.routes import RouteSpec
 from opn_cockpit.inventory.store import InventoryStore
 from opn_cockpit.orchestration.executor import Executor
@@ -151,6 +152,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_plan_route.add_argument("--disabled", action="store_true")
     p_plan_route.add_argument("--target", default="all", help="Geräte-Selektor")
 
+    p_plan_alias = p_plan_sub.add_parser("add-alias", help="Plan für neuen Alias")
+    p_plan_alias.add_argument("--name", required=True)
+    p_plan_alias.add_argument(
+        "--type", required=True, dest="alias_type",
+        help="host, network, port, url, ...",
+    )
+    p_plan_alias.add_argument(
+        "--content", required=True,
+        help="Komma-separierte Einträge, z. B. '10.0.0.1,10.0.0.2'",
+    )
+    p_plan_alias.add_argument("--descr", default="")
+    p_plan_alias.add_argument("--target", default="all", help="Geräte-Selektor")
+
+    p_plan_append = p_plan_sub.add_parser(
+        "append-alias",
+        help="Plan für Erweiterung eines bestehenden Alias (Merge)",
+    )
+    p_plan_append.add_argument("--name", required=True)
+    p_plan_append.add_argument(
+        "--type", required=True, dest="alias_type",
+        help="host, network, port, url, ... (für Plan-Vorschau)",
+    )
+    p_plan_append.add_argument(
+        "--content", required=True,
+        help="Komma-separierte Einträge zum Anhängen",
+    )
+    p_plan_append.add_argument("--target", default="all", help="Geräte-Selektor")
+
     # ----- Apply -----
 
     p_apply = sub.add_parser("apply", help="Vorher erzeugte Vorschau ausrollen")
@@ -213,6 +242,56 @@ def _dispatch(args: argparse.Namespace, settings: AppSettings) -> int:
         return handlers_with_settings[cmd](args, settings)
     emit(f"Unbekannter Befehl: {cmd}", err=True)
     return EXIT_GENERAL_ERROR
+
+
+# ===========================================================================
+# Plan-Factories
+# ===========================================================================
+
+
+def _route_plan_from_args(args: argparse.Namespace) -> tuple[str, str, RouteSpec]:
+    spec = RouteSpec(
+        network=args.network,
+        gateway=args.gateway,
+        descr=args.descr,
+        disabled=bool(args.disabled),
+    )
+    return ("add_route", "routes", spec)
+
+
+def _alias_plan_from_args(args: argparse.Namespace) -> tuple[str, str, AliasSpec]:
+    content = tuple(c.strip() for c in args.content.split(",") if c.strip())
+    if not content:
+        raise ValueError("Mindestens ein Alias-Eintrag erforderlich (--content).")
+    spec = AliasSpec(
+        name=args.name,
+        type=args.alias_type,
+        content=content,
+        descr=getattr(args, "descr", ""),
+        merge_mode="create",
+    )
+    return ("add_alias", "firewall_alias", spec)
+
+
+def _alias_append_plan_from_args(args: argparse.Namespace) -> tuple[str, str, AliasSpec]:
+    content = tuple(c.strip() for c in args.content.split(",") if c.strip())
+    if not content:
+        raise ValueError("Mindestens ein Alias-Eintrag erforderlich (--content).")
+    spec = AliasSpec(
+        name=args.name,
+        type=args.alias_type,
+        content=content,
+        descr="",
+        merge_mode="append",
+    )
+    return ("append_alias", "firewall_alias", spec)
+
+
+_PLAN_FACTORIES: dict[str, Callable[[argparse.Namespace], tuple[str, str, object]]] = {
+    "add-route": _route_plan_from_args,
+    "add-alias": _alias_plan_from_args,
+    "append-alias": _alias_append_plan_from_args,
+}
 
 
 # ===========================================================================
@@ -407,7 +486,8 @@ def cmd_test_connection(args: argparse.Namespace, settings: AppSettings) -> int:
 
 
 def cmd_plan(args: argparse.Namespace, settings: AppSettings) -> int:
-    if args.plan_action != "add-route":
+    plan_factory = _PLAN_FACTORIES.get(args.plan_action)
+    if plan_factory is None:
         emit(
             f"Plan-Aktion '{args.plan_action}' wird in dieser Version nicht unterstützt.",
             err=True,
@@ -421,13 +501,12 @@ def cmd_plan(args: argparse.Namespace, settings: AppSettings) -> int:
     if not devices:
         emit(f"Keine Geräte für Selektor '{args.target}' gefunden.")
         return EXIT_GENERAL_ERROR
-    spec = RouteSpec(
-        network=args.network,
-        gateway=args.gateway,
-        descr=args.descr,
-        disabled=bool(args.disabled),
-    )
-    binding = get_binding("routes")
+    try:
+        action_name, subsystem, spec = plan_factory(args)
+    except ValueError as exc:
+        emit(str(exc), err=True)
+        return EXIT_GENERAL_ERROR
+    binding = get_binding(subsystem)
     tuning = _tuning_from_session(session)
     targets = [HttpTarget(host=d.host, port=d.port, verify=d.tls_verify) for d in devices]
     audit = AuditLog(path=default_audit_path())
@@ -439,7 +518,7 @@ def cmd_plan(args: argparse.Namespace, settings: AppSettings) -> int:
     with HttpClient(targets=targets, tuning=tuning) as client:
         try:
             plan = planner.create_plan(
-                action="add_route",
+                action=action_name,
                 spec=spec,
                 devices=devices,
                 adapter=binding.adapter,

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from opn_cockpit.core.objects.aliases import AliasAdapter, AliasesController
 from opn_cockpit.core.objects.base import ObjectAdapter, SubsystemController
 from opn_cockpit.core.objects.routes import RouteAdapter, RoutesController
 
@@ -34,9 +35,15 @@ ROUTES = SubsystemBinding(
     controller=RoutesController(),
 )
 
-# Schritt 7 fügt hier ALIASES ein.
+FIREWALL_ALIAS = SubsystemBinding(
+    name="firewall_alias",
+    adapter=AliasAdapter(),
+    controller=AliasesController(),
+)
+
 _REGISTRY: dict[str, SubsystemBinding] = {
     ROUTES.name: ROUTES,
+    FIREWALL_ALIAS.name: FIREWALL_ALIAS,
 }
 
 
