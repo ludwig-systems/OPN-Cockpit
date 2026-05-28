@@ -28,7 +28,13 @@ Write-Host "==> Repo-Root: $RepoRoot" -ForegroundColor Cyan
 
 $uv = Get-Command uv -ErrorAction SilentlyContinue
 if ($null -eq $uv) {
-    Write-Error "'uv' ist nicht installiert oder nicht im PATH. Siehe https://docs.astral.sh/uv/getting-started/installation/"
+    Write-Host ""
+    Write-Host "'uv' wurde nicht gefunden." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Installation (einmalig pro Maschine):" -ForegroundColor Yellow
+    Write-Host "  powershell -ExecutionPolicy ByPass -c ""irm https://astral.sh/uv/install.ps1 | iex""" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Anschliessend dieses Skript erneut ausfuehren." -ForegroundColor Yellow
     exit 1
 }
 
