@@ -2,6 +2,43 @@
 
 Alle nennenswerten Änderungen pro Release.
 
+## v1.1.0 — 2026-05-28 — Heartbeat + API-Discovery
+
+### Hinzugefügt
+
+- **TCP-Reachability-Heartbeat im Inventar**: Pro Gerät zeigt die GUI ein
+  Pünktchen (grün/rot/gelb/grau) für den letzten TCP-Connect-Status auf
+  den API-Port an. Im Hintergrund alle 30 s automatisch aktualisiert,
+  manueller Refresh über den "Heartbeat jetzt prüfen"-Button.
+  Bewusst kein ICMP-Ping (Windows-Admin-Rechte + Firewall-Probleme) —
+  TCP auf den Konfig-Port ist der ehrlichste Erreichbarkeits-Indikator,
+  weil es exakt der Pfad ist, den das Tool auch zum Schreiben benutzt.
+- **API-Discovery für Gateways und Aliase**: Neues `core/discovery`-Modul
+  mit `list_gateways(client, target, key, secret)` und
+  `list_aliases(client, target, key, secret)`. Defensiv gegen
+  Schema-Drift — unbekannte Antwort-Formate führen zu leerer Liste,
+  nur HTTP-Fehler wandern als `DiscoveryError` zum Aufrufer.
+- **CLI**: `discover gateways --target id:X` und
+  `discover aliases --target id:X` listen die vorhandenen Namen
+  tabellarisch.
+- **GUI**: Action-Dialoge für Route und Alias bieten optionale
+  "Vorschläge laden"-Buttons. Bei Klick erscheint die ComboBox mit
+  den Namen vom ausgewählten Referenz-Gerät — Tippfehler bei
+  case-sensitiven Gateway-Namen (`V2_WANBwIn` vs `v2_wanbwin`)
+  werden so deutlich seltener.
+
+### Geändert
+
+- `RouteAdapter` und `AliasAdapter` blieben unverändert — Discovery
+  arbeitet außerhalb der bestehenden Adapter und nutzt die bekannten
+  Endpoints.
+- Action-Dialoge sind rückwärtskompatibel: ohne injizierte Callbacks
+  verhalten sie sich wie in v0.1.0 (reine Freitext-Eingabe).
+
+### Tests
+
+- 447 Tests (32 neu vs v0.1.0), Core 91–100 %, ruff & mypy strict clean.
+
 ## v0.1.0 — 2026-05-28 — Erste lauffähige Version
 
 ### Hinzugefügt

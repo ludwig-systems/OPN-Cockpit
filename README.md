@@ -85,6 +85,8 @@ Siehe [docs/QUICKSTART.md](docs/QUICKSTART.md) für einen End-to-End-Walkthrough
 | `profile delete`    | Template löschen                                                       |
 | `bulk-import routes`  | Mehrere Routen aus CSV importieren                                   |
 | `bulk-import aliases` | Mehrere Aliasse aus JSON importieren                                 |
+| `discover gateways`   | Vorhandene Gateway-Namen auf einem Gerät über die API auflisten      |
+| `discover aliases`    | Bestehende Aliase auf einem Gerät über die API auflisten             |
 
 Detailhilfe je Sub-Command: `python -m opn_cockpit.cli <command> --help`.
 
@@ -161,6 +163,12 @@ pytest --cov                    # mit Coverage-Report
   entschlüsselte Daten aus dem Speicher.
 - Geräte mit **deaktivierter TLS-Verifikation** werden in der Oberfläche
   deutlich als Risiko markiert.
+- Im Inventar zeigt ein TCP-Heartbeat (Pünktchen pro Gerät) auf einen Blick,
+  welche OPNsense-Instanzen gerade erreichbar sind — ohne Auth-Versuch
+  und ohne Last auf den OPNsense-Endpoints.
+- Action-Dialoge bieten optional Auto-Complete für **Gateway-** und
+  **Alias-Namen** aus der laufenden OPNsense, damit case-sensitive
+  Tippfehler (z. B. `V2_WANBwIn` vs `v2_wanbwin`) seltener werden.
 - Die App spricht ausschließlich mit Hosts, die im Inventar stehen
   (Egress-Allowlist im `http_client`).
 - Audit-Log enthält maskierte Antwort-Kurzfassungen, keine vollständigen
