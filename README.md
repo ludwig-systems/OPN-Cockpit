@@ -16,8 +16,10 @@ Lokales Windows-Desktop-Tool zur zentralen, ferngesteuerten Konfiguration mehrer
 - **Sprache:** Python 3.11+
 - **GUI:** PySide6 (Qt)
 - **HTTP:** `httpx` (synchron) + `ThreadPoolExecutor` für parallelen Rollout
-- **Secret-Speicherung:** `keyring` über Windows Credential Manager
-- **Master-Passwort:** Argon2id-Hash
+- **Geräte- + Secret-Speicherung:** Verschlüsselter Tresor-File (`.opnvault`) im
+  KeePass-Stil — Argon2id-KDF + AES-256-GCM. Geräte-Inventar und API-Keys
+  liegen gemeinsam verschlüsselt auf Platte, ein einziges Master-Passwort
+  entsperrt sie beim Tool-Start.
 - **Paketmanager:** [`uv`](https://docs.astral.sh/uv/) (schnell, deterministisch)
 
 ## Setup (Windows-PAW)
@@ -75,11 +77,23 @@ pytest --cov                    # mit Coverage-Report
 
 ## Sicherheitshinweise
 
-- API-Keys/Secrets liegen ausschließlich im **Windows Credential Manager**, niemals im Klartext auf Platte.
-- Nach Inaktivität verlangt das Tool eine erneute Master-Passwort-Eingabe (Default: 10 min).
-- Geräte mit **deaktivierter TLS-Verifikation** werden in der Oberfläche deutlich als Risiko markiert.
-- Die App spricht ausschließlich mit Hosts, die im Inventar stehen (Egress-Allowlist im `http_client`).
-- Audit-Log enthält maskierte Antwort-Kurzfassungen, keine vollständigen HTTP-Bodies.
+- Geräte-Inventar und API-Keys/Secrets liegen ausschließlich in einer
+  **verschlüsselten Tresor-Datei** (`.opnvault`, Argon2id + AES-256-GCM),
+  niemals im Klartext auf Platte. Ein einziges Master-Passwort (min. 12 Zeichen)
+  entsperrt sie für die Session.
+- Tresor-Dateien sind **portabel**: per "Als Template exportieren" entsteht eine
+  zweite Datei mit identischem Inventar aber geleerten Secret-Feldern, die
+  sicher an andere Admins weitergegeben werden kann. Empfänger setzen ihr
+  eigenes Master-Passwort, fügen ihre Secrets ein.
+- Nach konfigurierbarer Inaktivität (Default: 10 min, im Tresor anpassbar)
+  verlangt das Tool eine erneute Master-Passwort-Eingabe und löscht
+  entschlüsselte Daten aus dem Speicher.
+- Geräte mit **deaktivierter TLS-Verifikation** werden in der Oberfläche
+  deutlich als Risiko markiert.
+- Die App spricht ausschließlich mit Hosts, die im Inventar stehen
+  (Egress-Allowlist im `http_client`).
+- Audit-Log enthält maskierte Antwort-Kurzfassungen, keine vollständigen
+  HTTP-Bodies.
 
 ## Referenz
 
