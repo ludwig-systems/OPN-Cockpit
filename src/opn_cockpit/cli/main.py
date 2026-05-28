@@ -39,12 +39,20 @@ from opn_cockpit.cli._io import (
     resolve_vault_path,
 )
 from opn_cockpit.config import AppSettings, get_app_data_dir
+from opn_cockpit.core.discovery import (
+    AliasSummary,
+    DiscoveryError,
+    GatewaySummary,
+    list_aliases,
+    list_gateways,
+)
 from opn_cockpit.core.health import check_device
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 from opn_cockpit.core.objects.aliases import AliasSpec, MergeMode
 from opn_cockpit.core.objects.routes import RouteSpec
 from opn_cockpit.importers.csv_routes import parse_routes_csv
 from opn_cockpit.importers.json_aliases import parse_aliases_json
+from opn_cockpit.inventory.model import Device
 from opn_cockpit.inventory.store import InventoryStore
 from opn_cockpit.orchestration.executor import Executor
 from opn_cockpit.orchestration.plan_store import PlanStore, PlanStoreError
@@ -194,6 +202,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ----- Audit -----
 
+    p_discover = sub.add_parser(
+        "discover",
+        help="Vorhandene Gateway-/Alias-Namen über die API abfragen",
+    )
+    p_discover_sub = p_discover.add_subparsers(dest="discover_action", required=True)
+    p_discover_gw = p_discover_sub.add_parser(
+        "gateways", help="Konfigurierte Gateways auf einem Gerät auflisten",
+    )
+    p_discover_gw.add_argument(
+        "--target", required=True,
+        help="Geräte-Selektor (z. B. id:..., name:..., tag:...).",
+    )
+    p_discover_aliases = p_discover_sub.add_parser(
+        "aliases", help="Bestehende Aliase auf einem Gerät auflisten",
+    )
+    p_discover_aliases.add_argument(
+        "--target", required=True,
+        help="Geräte-Selektor (z. B. id:..., name:..., tag:...).",
+    )
+
     p_import = sub.add_parser(
         "bulk-import",
         help="Mehrere Objekte aus CSV/JSON importieren und ausrollen",
@@ -300,6 +328,7 @@ def _dispatch(args: argparse.Namespace, settings: AppSettings) -> int:
         "apply": cmd_apply,
         "profile": cmd_profile,
         "bulk-import": cmd_bulk_import,
+        "discover": cmd_discover,
     }
     cmd = args.command
     if cmd in handlers_without_settings:
@@ -644,6 +673,79 @@ def cmd_apply(args: argparse.Namespace, settings: AppSettings) -> int:
         devices_by_id={d.id: d.name for d in devices_in_plan},
     ))
     return EXIT_OK if report.failures == 0 else EXIT_NETWORK_ERROR
+
+
+def cmd_discover(args: argparse.Namespace, settings: AppSettings) -> int:
+    """API-Discovery: Gateways oder Aliase eines Geraets auflisten."""
+    session = _unlock_for_command(args, settings)
+    if session is None:
+        return EXIT_AUTH_ERROR
+    device, rc = _pick_single_target(args.target, session)
+    if device is None:
+        return rc
+    return _run_discovery(args.discover_action, device, session)
+
+
+def _pick_single_target(
+    selector: str,
+    session: Session,
+) -> tuple[Device | None, int]:
+    store = InventoryStore(session=session)
+    devices = store.select(selector)
+    if not devices:
+        emit(f"Selektor '{selector}' liefert keine Geräte.", err=True)
+        return None, EXIT_GENERAL_ERROR
+    if len(devices) > 1:
+        emit(
+            f"Selektor '{selector}' trifft {len(devices)} Geräte — "
+            "bitte ein einzelnes Gerät wählen.",
+            err=True,
+        )
+        return None, EXIT_GENERAL_ERROR
+    return devices[0], EXIT_OK
+
+
+def _run_discovery(action: str, device: Device, session: Session) -> int:
+    tuning = _tuning_from_session(session)
+    target = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    try:
+        key, secret = session.credentials_for(device.id)
+    except VaultError as exc:
+        emit(f"Credentials nicht verfügbar: {exc}", err=True)
+        return EXIT_VAULT_ERROR
+    with HttpClient(targets=[target], tuning=tuning) as client:
+        try:
+            if action == "gateways":
+                return _print_gateways(list_gateways(client, target, key, secret))
+            if action == "aliases":
+                return _print_aliases(list_aliases(client, target, key, secret))
+        except DiscoveryError as exc:
+            emit(str(exc), err=True)
+            return EXIT_NETWORK_ERROR
+    emit(f"Unbekannte discover-Aktion: {action}", err=True)
+    return EXIT_GENERAL_ERROR
+
+
+def _print_gateways(gateways: Sequence[GatewaySummary]) -> int:
+    if not gateways:
+        emit("(keine Gateways gefunden)")
+        return EXIT_OK
+    emit(f"{'Name':<24} {'Adresse':<20} Status")
+    emit("-" * 60)
+    for g in gateways:
+        emit(f"{g.name:<24} {g.address:<20} {g.status}")
+    return EXIT_OK
+
+
+def _print_aliases(aliases: Sequence[AliasSummary]) -> int:
+    if not aliases:
+        emit("(keine Aliase gefunden)")
+        return EXIT_OK
+    emit(f"{'Name':<32} {'Typ':<12} Beschreibung")
+    emit("-" * 80)
+    for a in aliases:
+        emit(f"{a.name:<32} {a.type:<12} {a.descr}")
+    return EXIT_OK
 
 
 def cmd_bulk_import(args: argparse.Namespace, settings: AppSettings) -> int:

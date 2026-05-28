@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from opn_cockpit.audit.log import AuditEventKind, AuditLog, default_audit_path
 from opn_cockpit.config import AppSettings, get_app_data_dir
+from opn_cockpit.core.discovery import list_aliases, list_gateways
 from opn_cockpit.core.health import check_device
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 from opn_cockpit.core.objects.aliases import AliasSpec
@@ -250,7 +251,11 @@ class MainWindow(QMainWindow):
     # ----- Aktions-Dialoge -----
 
     def _open_add_route_dialog(self) -> None:
-        dlg = AddRouteDialog(self)
+        dlg = AddRouteDialog(
+            self,
+            devices=self._inventory.list_devices(),
+            gateway_suggestions=self._discover_gateways_for,
+        )
         if dlg.exec() != AddRouteDialog.DialogCode.Accepted:
             return
         result = dlg.result_data()
@@ -264,7 +269,11 @@ class MainWindow(QMainWindow):
         )
 
     def _open_add_alias_dialog(self) -> None:
-        dlg = AddAliasDialog(self)
+        dlg = AddAliasDialog(
+            self,
+            devices=self._inventory.list_devices(),
+            alias_suggestions=self._discover_aliases_for,
+        )
         if dlg.exec() != AddAliasDialog.DialogCode.Accepted:
             return
         result = dlg.result_data()
@@ -277,6 +286,22 @@ class MainWindow(QMainWindow):
             spec=result.spec,
             selector=result.selector,
         )
+
+    # ----- Discovery-Callbacks fuer die Action-Dialoge -----
+
+    def _discover_gateways_for(self, device: Device) -> list[str]:
+        target = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+        key, secret = self._session.credentials_for(device.id)
+        tuning = _tuning(self._session)
+        with HttpClient(targets=[target], tuning=tuning) as client:
+            return [g.name for g in list_gateways(client, target, key, secret)]
+
+    def _discover_aliases_for(self, device: Device) -> list[str]:
+        target = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+        key, secret = self._session.credentials_for(device.id)
+        tuning = _tuning(self._session)
+        with HttpClient(targets=[target], tuning=tuning) as client:
+            return [a.name for a in list_aliases(client, target, key, secret)]
 
     # ----- Plan + Apply Flow -----
 

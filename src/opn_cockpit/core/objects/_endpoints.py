@@ -28,3 +28,9 @@ ALIAS_SEARCH = "/api/firewall/alias/searchItem"
 ALIAS_GET = "/api/firewall/alias/getItem/{uuid}"
 ALIAS_SET = "/api/firewall/alias/setItem/{uuid}"
 ALIAS_RECONFIGURE = "/api/firewall/alias/reconfigure"
+
+# ---------------------------------------------------------------------------
+# Discovery (v1.1)
+# ---------------------------------------------------------------------------
+
+GATEWAY_STATUS = "/api/routes/gateway/status"
