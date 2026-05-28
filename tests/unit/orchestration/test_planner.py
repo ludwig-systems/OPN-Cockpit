@@ -153,6 +153,42 @@ class TestPlanPropertyTotals:
         assert plan.skip_count + plan.to_apply_count == plan.target_count
 
 
+class TestCreateBulkPlan:
+    def test_n_specs_m_devices_produces_nm_actions(self, audit: AuditLog) -> None:
+        dev_a, vd_a = _dev("A", "host-a")
+        dev_b, vd_b = _dev("B", "host-b")
+        session = make_session([vd_a, vd_b])
+        planner = Planner(audit=audit, session=session, max_workers=2)
+        adapter = FakeAdapter()
+        client = make_client_for_hosts(["host-a", "host-b"])
+
+        plan = planner.create_bulk_plan(
+            action="add_route",
+            specs=["spec1", "spec2", "spec3"],
+            devices=[dev_a, dev_b],
+            adapter=adapter,
+            client=client,
+        )
+        assert plan.target_count == 6  # 3 specs * 2 devices
+
+    def test_audit_records_spec_count(self, audit: AuditLog) -> None:
+        dev, vd = _dev("X", "host-x")
+        session = make_session([vd])
+        planner = Planner(audit=audit, session=session)
+        adapter = FakeAdapter()
+        client = make_client_for_hosts(["host-x"])
+        planner.create_bulk_plan(
+            action="add_route",
+            specs=["a", "b"],
+            devices=[dev],
+            adapter=adapter,
+            client=client,
+        )
+        rec = audit.read_all()[0]
+        # 2 Specs x 1 Geraet = 2 Aktionen
+        assert "2 Aktionen" in rec.summary
+
+
 @pytest.fixture()
 def audit(tmp_path: Path) -> AuditLog:
     return AuditLog(path=tmp_path / "audit.jsonl", actor="test")

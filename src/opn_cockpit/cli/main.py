@@ -41,8 +41,10 @@ from opn_cockpit.cli._io import (
 from opn_cockpit.config import AppSettings, get_app_data_dir
 from opn_cockpit.core.health import check_device
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
-from opn_cockpit.core.objects.aliases import AliasSpec
+from opn_cockpit.core.objects.aliases import AliasSpec, MergeMode
 from opn_cockpit.core.objects.routes import RouteSpec
+from opn_cockpit.importers.csv_routes import parse_routes_csv
+from opn_cockpit.importers.json_aliases import parse_aliases_json
 from opn_cockpit.inventory.store import InventoryStore
 from opn_cockpit.orchestration.executor import Executor
 from opn_cockpit.orchestration.plan_store import PlanStore, PlanStoreError
@@ -192,6 +194,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ----- Audit -----
 
+    p_import = sub.add_parser(
+        "bulk-import",
+        help="Mehrere Objekte aus CSV/JSON importieren und ausrollen",
+    )
+    p_import_sub = p_import.add_subparsers(dest="import_action", required=True)
+    p_import_routes = p_import_sub.add_parser(
+        "routes", help="Routen aus CSV (Spalten: network, gateway, descr, disabled)",
+    )
+    p_import_routes.add_argument("file", help="Pfad zur CSV-Datei")
+    p_import_routes.add_argument("--target", default="all", help="Geräte-Selektor")
+    p_import_aliases = p_import_sub.add_parser(
+        "aliases", help="Aliasse aus JSON-Liste",
+    )
+    p_import_aliases.add_argument("file", help="Pfad zur JSON-Datei")
+    p_import_aliases.add_argument("--target", default="all", help="Geräte-Selektor")
+    p_import_aliases.add_argument(
+        "--append", action="store_true",
+        help="Alle Aliasse als append/merge anwenden (überschreibt JSON-Felder)",
+    )
+
     p_profile = sub.add_parser("profile", help="Aktions-Profile (Templates) verwalten")
     p_profile_sub = p_profile.add_subparsers(dest="profile_action", required=True)
     p_profile_sub.add_parser("list", help="Gespeicherte Profile auflisten")
@@ -277,6 +299,7 @@ def _dispatch(args: argparse.Namespace, settings: AppSettings) -> int:
         "plan": cmd_plan,
         "apply": cmd_apply,
         "profile": cmd_profile,
+        "bulk-import": cmd_bulk_import,
     }
     cmd = args.command
     if cmd in handlers_without_settings:
@@ -619,6 +642,107 @@ def cmd_apply(args: argparse.Namespace, settings: AppSettings) -> int:
     emit(format_rollout_matrix(
         report,
         devices_by_id={d.id: d.name for d in devices_in_plan},
+    ))
+    return EXIT_OK if report.failures == 0 else EXIT_NETWORK_ERROR
+
+
+def cmd_bulk_import(args: argparse.Namespace, settings: AppSettings) -> int:
+    action = args.import_action
+    if action == "routes":
+        return _bulk_routes(args, settings)
+    if action == "aliases":
+        return _bulk_aliases(args, settings)
+    emit(f"Unbekannte bulk-import-Aktion: {action}", err=True)
+    return EXIT_GENERAL_ERROR
+
+
+def _bulk_routes(args: argparse.Namespace, settings: AppSettings) -> int:
+    result = parse_routes_csv(args.file)
+    for err in result.errors:
+        emit(err, err=True)
+    if not result.specs:
+        return EXIT_GENERAL_ERROR
+    if result.has_errors and not confirm("Trotz Fehlern weitermachen?"):
+        return EXIT_USER_ABORT
+    return _bulk_plan_and_apply(
+        args, settings,
+        action_name="add_route", subsystem="routes",
+        specs=list(result.specs),
+    )
+
+
+def _bulk_aliases(args: argparse.Namespace, settings: AppSettings) -> int:
+    override: MergeMode | None = "append" if args.append else None
+    result = parse_aliases_json(args.file, override_merge_mode=override)
+    for err in result.errors:
+        emit(err, err=True)
+    if not result.specs:
+        return EXIT_GENERAL_ERROR
+    if result.has_errors and not confirm("Trotz Fehlern weitermachen?"):
+        return EXIT_USER_ABORT
+    # Bulk-Aliase werden aktuell pro Action "add_alias" oder "append_alias"
+    # einheitlich behandelt; wenn override gesetzt ist, sind alle append.
+    has_append = any(s.merge_mode == "append" for s in result.specs)
+    action_name = "append_alias" if has_append else "add_alias"
+    return _bulk_plan_and_apply(
+        args, settings,
+        action_name=action_name, subsystem="firewall_alias",
+        specs=list(result.specs),
+    )
+
+
+def _bulk_plan_and_apply(
+    args: argparse.Namespace,
+    settings: AppSettings,
+    *,
+    action_name: str,
+    subsystem: str,
+    specs: list[object],
+) -> int:
+    session = _unlock_for_command(args, settings)
+    if session is None:
+        return EXIT_AUTH_ERROR
+    store = InventoryStore(session=session)
+    devices = store.select(args.target)
+    if not devices:
+        emit(f"Selektor '{args.target}' liefert keine Geräte.")
+        return EXIT_GENERAL_ERROR
+    binding = get_binding(subsystem)
+    tuning = _tuning_from_session(session)
+    targets = [HttpTarget(host=d.host, port=d.port, verify=d.tls_verify) for d in devices]
+    audit = AuditLog(path=default_audit_path())
+    planner = Planner(
+        audit=audit, session=session,
+        max_workers=session.opened.data.settings.max_workers,
+    )
+    with HttpClient(targets=targets, tuning=tuning) as client:
+        plan = planner.create_bulk_plan(
+            action=action_name, specs=specs,
+            devices=devices, adapter=binding.adapter, client=client,
+        )
+        plan_store = PlanStore(base_dir=get_app_data_dir() / "plans")
+        plan_store.save(plan)
+        emit(format_plan_preview(plan))
+        emit("")
+        emit(format_plan_summary(plan))
+        emit("")
+        if not confirm("Diese Aktionen jetzt ausrollen?"):
+            emit(
+                f"Abbruch — Plan {plan.plan_id} ist gespeichert und kann "
+                "später ausgerollt werden.",
+            )
+            return EXIT_USER_ABORT
+        executor = Executor(
+            session=session, audit=audit,
+            max_workers=session.opened.data.settings.max_workers,
+        )
+        report = executor.apply(
+            plan, adapter=binding.adapter, controller=binding.controller, client=client,
+        )
+    emit("")
+    emit(format_rollout_matrix(
+        report,
+        devices_by_id={d.id: d.name for d in devices},
     ))
     return EXIT_OK if report.failures == 0 else EXIT_NETWORK_ERROR
 

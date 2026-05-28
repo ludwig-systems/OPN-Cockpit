@@ -131,35 +131,58 @@ class Planner:
         adapter: ObjectAdapter[Any, Any],
         client: HttpClient,
     ) -> Plan:
-        """Erzeugt einen Plan für ``action`` über ``devices``.
+        """Erzeugt einen Plan für ``action`` über ``devices`` (eine Spec).
 
-        Der Pre-Check (``adapter.exists``) läuft pro Gerät in einem
-        ThreadPool. Best-Effort: Ein Pre-Check-Fehler degradiert die
-        betreffende Geräte-Aktion zu ``DiffKind.NEW`` mit Hinweis im
-        ``summary`` — der Executor versucht dann normal zu schreiben und
-        meldet einen Fehler, falls die Konfliktlage real ist.
+        Convenience-Wrapper um :meth:`create_bulk_plan` mit ``specs=[spec]``.
+        """
+        return self.create_bulk_plan(
+            action=action, specs=[spec], devices=devices,
+            adapter=adapter, client=client,
+        )
+
+    def create_bulk_plan(
+        self,
+        *,
+        action: str,
+        specs: list[Any],
+        devices: Iterable[Device],
+        adapter: ObjectAdapter[Any, Any],
+        client: HttpClient,
+    ) -> Plan:
+        """Erzeugt einen Plan über N Specs x M Geräte.
+
+        Pro Gerät werden parallel alle Specs durch den Pre-Check geschickt.
+        Das Resultat ist ein Plan mit N x M Aktionen, gruppiert pro Gerät
+        durch den Executor. Best-Effort: Pre-Check-Fehler pro Spec werden
+        als NEW mit Hinweis im Diff durchgereicht.
         """
         devices_list = list(devices)
         plan_id = generate_plan_id()
         created_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
-        planned = self._plan_per_device(devices_list, spec, adapter, client)
+        all_planned: list[PlannedDeviceAction] = []
+        for spec in specs:
+            all_planned.extend(
+                self._plan_per_device(devices_list, spec, adapter, client)
+            )
 
         plan = Plan(
             plan_id=plan_id,
             action=action,
             subsystem=adapter.subsystem,
             created_at_utc=created_at,
-            actions=tuple(planned),
+            actions=tuple(all_planned),
         )
 
+        masked_specs = [adapter.spec_to_dict(spec) for spec in specs]
         self.audit.append(
             AuditEventKind.PLAN_GENERATED,
             action=action,
             target_count=plan.target_count,
-            parameters=mask_dict({"spec": adapter.spec_to_dict(spec)}),
+            parameters=mask_dict({"specs": masked_specs}),
             summary=(
-                f"Plan {plan_id} für {action}: {plan.target_count} Ziele, "
+                f"Plan {plan_id} für {action}: {plan.target_count} Aktionen "
+                f"({len(specs)} Spec(s) x {len(devices_list)} Geräte), "
                 f"{plan.to_apply_count} schreiben, {plan.skip_count} überspringen."
             ),
         )
