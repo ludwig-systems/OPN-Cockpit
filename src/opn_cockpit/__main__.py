@@ -1,21 +1,12 @@
-"""Entry-Point für ``python -m opn_cockpit``.
-
-In v1 wird hier später die PySide6-GUI gestartet (Schritt 8 des Plans). Aktuell
-ist nur das Projektgerüst vorhanden, daher endet der Aufruf mit einem klaren
-Hinweis.
-"""
+"""Entry-Point für ``python -m opn_cockpit`` — startet die PySide6-GUI."""
 
 from __future__ import annotations
 
-import sys
+from opn_cockpit.gui.app import run
 
 
 def main() -> int:
-    sys.stderr.write(
-        "OPN-Cockpit GUI ist noch nicht implementiert (siehe Plan Schritt 8).\n"
-        "Headless-CLI: python -m opn_cockpit.cli --help\n"
-    )
-    return 1
+    return run()
 
 
 if __name__ == "__main__":
