@@ -53,6 +53,11 @@ from opn_cockpit.orchestration.reporter import (
     format_plan_summary,
     format_rollout_matrix,
 )
+from opn_cockpit.profiles.store import (
+    ProfileStore,
+    ProfileStoreError,
+    default_profiles_path,
+)
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.errors import (
     InvalidPasswordError,
@@ -187,6 +192,43 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ----- Audit -----
 
+    p_profile = sub.add_parser("profile", help="Aktions-Profile (Templates) verwalten")
+    p_profile_sub = p_profile.add_subparsers(dest="profile_action", required=True)
+    p_profile_sub.add_parser("list", help="Gespeicherte Profile auflisten")
+    p_profile_delete = p_profile_sub.add_parser("delete", help="Profil löschen")
+    p_profile_delete.add_argument("profile_id")
+    p_profile_apply = p_profile_sub.add_parser(
+        "apply", help="Profil laden und sofort ausrollen",
+    )
+    p_profile_apply.add_argument("profile_id_or_name")
+    p_profile_apply.add_argument(
+        "--target", default=None,
+        help="Selektor überschreiben (Default: aus dem Profil)",
+    )
+    p_profile_save = p_profile_sub.add_parser(
+        "save-route", help="Routen-Aktion als Profil speichern",
+    )
+    p_profile_save.add_argument("--name", required=True, dest="profile_name")
+    p_profile_save.add_argument("--network", required=True)
+    p_profile_save.add_argument("--gateway", required=True)
+    p_profile_save.add_argument("--descr", default="")
+    p_profile_save.add_argument("--disabled", action="store_true")
+    p_profile_save.add_argument("--target", default="all")
+
+    p_profile_save_alias = p_profile_sub.add_parser(
+        "save-alias", help="Alias-Aktion als Profil speichern",
+    )
+    p_profile_save_alias.add_argument("--name", required=True, dest="profile_name")
+    p_profile_save_alias.add_argument("--alias-name", required=True, dest="alias_name")
+    p_profile_save_alias.add_argument("--type", required=True, dest="alias_type")
+    p_profile_save_alias.add_argument("--content", required=True)
+    p_profile_save_alias.add_argument("--descr", default="")
+    p_profile_save_alias.add_argument(
+        "--append", action="store_true",
+        help="Profil als append/merge speichern (Default: create)",
+    )
+    p_profile_save_alias.add_argument("--target", default="all")
+
     p_audit = sub.add_parser("audit", help="Audit-Log filtern und anzeigen")
     p_audit.add_argument("--event")
     p_audit.add_argument("--action")
@@ -234,6 +276,7 @@ def _dispatch(args: argparse.Namespace, settings: AppSettings) -> int:
         "test-connection": cmd_test_connection,
         "plan": cmd_plan,
         "apply": cmd_apply,
+        "profile": cmd_profile,
     }
     cmd = args.command
     if cmd in handlers_without_settings:
@@ -576,6 +619,167 @@ def cmd_apply(args: argparse.Namespace, settings: AppSettings) -> int:
     emit(format_rollout_matrix(
         report,
         devices_by_id={d.id: d.name for d in devices_in_plan},
+    ))
+    return EXIT_OK if report.failures == 0 else EXIT_NETWORK_ERROR
+
+
+def cmd_profile(args: argparse.Namespace, settings: AppSettings) -> int:
+    """Profile-Handler: list / save-route / save-alias / delete / apply."""
+    store = ProfileStore(path=default_profiles_path())
+    action = args.profile_action
+    if action == "list":
+        return _profile_list(store)
+    if action == "save-route":
+        return _profile_save_route(store, args)
+    if action == "save-alias":
+        return _profile_save_alias(store, args)
+    if action == "delete":
+        return _profile_delete(store, args)
+    if action == "apply":
+        return _profile_apply(store, args, settings)
+    emit(f"Unbekannte Profil-Aktion: {action}", err=True)
+    return EXIT_GENERAL_ERROR
+
+
+def _profile_list(store: ProfileStore) -> int:
+    try:
+        profiles = store.list_profiles()
+    except ProfileStoreError as exc:
+        emit(str(exc), err=True)
+        return EXIT_GENERAL_ERROR
+    if not profiles:
+        emit("(keine gespeicherten Profile)")
+        return EXIT_OK
+    emit(f"{'ID':<14} {'Aktion':<14} {'Selektor':<22} Name")
+    emit("-" * 90)
+    for p in profiles:
+        emit(f"{p.id:<14} {p.action:<14} {p.default_selector:<22} {p.name}")
+    return EXIT_OK
+
+
+def _profile_save_route(store: ProfileStore, args: argparse.Namespace) -> int:
+    try:
+        store.save_new(
+            name=args.profile_name,
+            action="add_route",
+            subsystem="routes",
+            default_selector=args.target,
+            spec={
+                "network": args.network,
+                "gateway": args.gateway,
+                "descr": args.descr,
+                "disabled": bool(args.disabled),
+            },
+        )
+    except ProfileStoreError as exc:
+        emit(str(exc), err=True)
+        return EXIT_GENERAL_ERROR
+    emit(f"Profil '{args.profile_name}' gespeichert.")
+    return EXIT_OK
+
+
+def _profile_save_alias(store: ProfileStore, args: argparse.Namespace) -> int:
+    content = [c.strip() for c in args.content.split(",") if c.strip()]
+    if not content:
+        emit("Mindestens ein Alias-Eintrag erforderlich (--content).", err=True)
+        return EXIT_GENERAL_ERROR
+    action_name = "append_alias" if args.append else "add_alias"
+    try:
+        store.save_new(
+            name=args.profile_name,
+            action=action_name,
+            subsystem="firewall_alias",
+            default_selector=args.target,
+            spec={
+                "name": args.alias_name,
+                "type": args.alias_type,
+                "content": content,
+                "descr": args.descr,
+                "merge_mode": "append" if args.append else "create",
+            },
+        )
+    except ProfileStoreError as exc:
+        emit(str(exc), err=True)
+        return EXIT_GENERAL_ERROR
+    emit(f"Profil '{args.profile_name}' gespeichert.")
+    return EXIT_OK
+
+
+def _profile_delete(store: ProfileStore, args: argparse.Namespace) -> int:
+    try:
+        deleted = store.delete(args.profile_id)
+    except ProfileStoreError as exc:
+        emit(str(exc), err=True)
+        return EXIT_GENERAL_ERROR
+    if not deleted:
+        emit(f"Profil-ID '{args.profile_id}' nicht gefunden.", err=True)
+        return EXIT_GENERAL_ERROR
+    emit("Profil gelöscht.")
+    return EXIT_OK
+
+
+def _profile_apply(
+    store: ProfileStore,
+    args: argparse.Namespace,
+    settings: AppSettings,
+) -> int:
+    """Lädt ein Profil und delegiert an cmd_plan/cmd_apply-ähnliche Logik."""
+    try:
+        profiles = store.list_profiles()
+    except ProfileStoreError as exc:
+        emit(str(exc), err=True)
+        return EXIT_GENERAL_ERROR
+    identifier = args.profile_id_or_name
+    profile = next(
+        (p for p in profiles if identifier in (p.id, p.name)),
+        None,
+    )
+    if profile is None:
+        emit(f"Profil '{identifier}' nicht gefunden.", err=True)
+        return EXIT_GENERAL_ERROR
+
+    selector = args.target or profile.default_selector
+    session = _unlock_for_command(args, settings)
+    if session is None:
+        return EXIT_AUTH_ERROR
+    store_inv = InventoryStore(session=session)
+    devices = store_inv.select(selector)
+    if not devices:
+        emit(f"Selektor '{selector}' liefert keine Geräte.")
+        return EXIT_GENERAL_ERROR
+
+    binding = get_binding(profile.subsystem)
+    spec = binding.adapter.spec_from_dict(profile.spec)
+    tuning = _tuning_from_session(session)
+    targets = [HttpTarget(host=d.host, port=d.port, verify=d.tls_verify) for d in devices]
+    audit = AuditLog(path=default_audit_path())
+
+    planner = Planner(
+        audit=audit,
+        session=session,
+        max_workers=session.opened.data.settings.max_workers,
+    )
+    with HttpClient(targets=targets, tuning=tuning) as client:
+        plan = planner.create_plan(
+            action=profile.action, spec=spec,
+            devices=devices, adapter=binding.adapter, client=client,
+        )
+        emit(format_plan_preview(plan))
+        emit("")
+        if not confirm("Diese Aktionen jetzt ausrollen?"):
+            emit("Abbruch — nichts wurde ausgeführt.")
+            return EXIT_USER_ABORT
+        executor = Executor(
+            session=session, audit=audit,
+            max_workers=session.opened.data.settings.max_workers,
+        )
+        report = executor.apply(
+            plan, adapter=binding.adapter, controller=binding.controller, client=client,
+        )
+    emit("")
+    emit(format_rollout_matrix(
+        report,
+        devices_by_id={d.id: d.name for d in devices},
     ))
     return EXIT_OK if report.failures == 0 else EXIT_NETWORK_ERROR
 

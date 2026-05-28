@@ -57,6 +57,8 @@ ignore = ["PLR0913"]  # many arguments often legit for adapter signatures
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR2004", "S101"]
+# build_parser ist intentional eine lange Aufzählung von Sub-Commands.
+"src/opn_cockpit/cli/main.py" = ["PLR0915"]
 
 [tool.mypy]
 python_version = "3.11"
