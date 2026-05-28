@@ -24,7 +24,7 @@ from opn_cockpit.gui.app import install_masking_excepthook, restore_excepthook
 from opn_cockpit.gui.login_dialog import LoginDialog
 from opn_cockpit.gui.preview_dialog import PreviewDialog
 from opn_cockpit.gui.result_dialog import ResultDialog
-from opn_cockpit.gui.widgets.badges import tls_badge
+from opn_cockpit.gui.widgets.badges import ReachabilityBadge, tls_badge
 from opn_cockpit.orchestration.planner import Plan
 
 
@@ -81,6 +81,37 @@ class TestTlsBadge:
         label = tls_badge(verify_enabled=False)
         assert "AUS" in label.text()
         assert label.toolTip()
+
+
+class TestReachabilityBadge:
+    def test_initial_state_is_unknown(self, qapp: QApplication) -> None:
+        badge = ReachabilityBadge(host="opn-lab", port=443)
+        assert badge.state == "unknown"
+        assert badge.text() == "○"
+
+    def test_state_ok_is_green_dot(self, qapp: QApplication) -> None:
+        badge = ReachabilityBadge(host="opn-lab", port=443)
+        badge.set_state("ok")
+        assert badge.state == "ok"
+        assert badge.text() == "●"
+        assert "Erreichbar" in badge.toolTip()
+
+    def test_state_fail_is_red_dot_with_tooltip(self, qapp: QApplication) -> None:
+        badge = ReachabilityBadge(host="opn-lab", port=443)
+        badge.set_state("fail")
+        assert badge.state == "fail"
+        assert "Nicht erreichbar" in badge.toolTip()
+
+    def test_state_probing_shows_yellow(self, qapp: QApplication) -> None:
+        badge = ReachabilityBadge(host="opn-lab", port=443)
+        badge.set_state("probing")
+        assert badge.state == "probing"
+        assert "Pruefe" in badge.toolTip()
+
+    def test_includes_host_port_in_tooltip(self, qapp: QApplication) -> None:
+        badge = ReachabilityBadge(host="opn-berlin.lab", port=8443)
+        badge.set_state("ok")
+        assert "opn-berlin.lab:8443" in badge.toolTip()
 
 
 class TestMaskingExcepthook:

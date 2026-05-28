@@ -1,10 +1,13 @@
-"""Tests für core.health — check_device."""
+"""Tests für core.health — check_device + tcp_probe."""
 
 from __future__ import annotations
 
+import socket
+import threading
+
 import httpx
 
-from opn_cockpit.core.health import HEALTH_ENDPOINT, HealthResult, check_device
+from opn_cockpit.core.health import HEALTH_ENDPOINT, HealthResult, check_device, tcp_probe
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 
 
@@ -71,3 +74,53 @@ class TestCheckDevice:
         client, target = _client_with_handler(capture)
         check_device(client, target, "k", "s")
         assert seen == [HEALTH_ENDPOINT]
+
+
+class TestTcpProbe:
+    """Tests fuer den TCP-Connect-Probe ohne HTTP/Auth.
+
+    Wir spinnen einen lokalen Listener auf 127.0.0.1 hoch, damit der Probe
+    nicht aufs externe Netzwerk angewiesen ist.
+    """
+
+    def test_returns_true_for_open_port(self) -> None:
+        # Ephemeral Listener
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        # In Background-Thread accept() aufrufen, damit der Probe sauber
+        # zurueckkommen kann.
+        def _accept_and_close() -> None:
+            conn, _ = srv.accept()
+            conn.close()
+
+        accept_thread = threading.Thread(target=_accept_and_close)
+        accept_thread.start()
+        try:
+            assert tcp_probe("127.0.0.1", port, timeout_s=2.0) is True
+        finally:
+            accept_thread.join(timeout=2.0)
+            srv.close()
+
+    def test_returns_false_for_closed_port(self) -> None:
+        # Wir nehmen Port 1 (privilegiert + per Default nicht offen)
+        # auf einer reservierten Adresse — fast garantiert geschlossen.
+        # Falls auf irgendeinem CI-Runner Port 1 doch offen sein sollte,
+        # ist 65534 als Fallback unwahrscheinlich.
+        assert tcp_probe("127.0.0.1", 1, timeout_s=1.0) is False
+
+    def test_returns_false_for_unreachable_host(self) -> None:
+        # 240.0.0.0/4 ist reserviert + nicht-routbar — Connect-Versuch
+        # läuft in Timeout.
+        assert tcp_probe("240.0.0.1", 443, timeout_s=0.5) is False
+
+    def test_returns_false_for_dns_resolution_failure(self) -> None:
+        # Garantiert nicht aufloesbarer Hostname
+        assert tcp_probe("nonexistent-host-xyz.invalid", 443, timeout_s=1.0) is False
+
+    def test_does_not_raise_on_any_error(self) -> None:
+        # Heartbeat soll robust sein — kein Aufrufer will Exceptions
+        # behandeln muessen.
+        tcp_probe("", 443, timeout_s=0.5)
+        tcp_probe("not a host name", -1, timeout_s=0.5)

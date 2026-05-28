@@ -12,12 +12,14 @@ schmaleren Endpunkt getauscht.
 
 from __future__ import annotations
 
+import socket
 from dataclasses import dataclass
 
 from opn_cockpit.core.errors import AuthError, OpnCockpitError, UnreachableError
 from opn_cockpit.core.http_client import HttpClient, HttpTarget
 
 HEALTH_ENDPOINT = "/api/core/menu/tree"
+DEFAULT_TCP_PROBE_TIMEOUT_S = 3.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,3 +80,29 @@ def check_device(
             authenticated=False,
             summary=f"Antwort ungewöhnlich: {exc.context.error_kind}",
         )
+
+
+def tcp_probe(
+    host: str,
+    port: int,
+    *,
+    timeout_s: float = DEFAULT_TCP_PROBE_TIMEOUT_S,
+) -> bool:
+    """Schneller TCP-Connect ohne HTTP/Auth.
+
+    Wird vom Hintergrund-Heartbeat im GUI-Inventar verwendet, um pro Gerät
+    in 1-3 Sekunden zu klären, ob der API-Port überhaupt erreichbar ist.
+    Bewusst KEIN HTTP-Aufruf — der Heartbeat soll keine Last auf den
+    OPNsense-Endpoints erzeugen und keine Auth-Versuche im Audit-Log
+    der Box hinterlassen.
+
+    Liefert ``True``, wenn der 3-Way-Handshake innerhalb von
+    ``timeout_s`` zustande kommt; sonst ``False``. Wirft niemals — Fehler
+    werden zu ``False`` reduziert, weil die Aufrufer (UI-Heartbeat) nur
+    am Boolean-Ergebnis interessiert sind.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except (TimeoutError, OSError):
+        return False
