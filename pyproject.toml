@@ -63,6 +63,8 @@ ignore = ["PLR0913"]  # many arguments often legit for adapter signatures
 "tests/**" = ["PLR2004", "S101"]
 # build_parser ist intentional eine lange Aufzählung von Sub-Commands.
 "src/opn_cockpit/cli/main.py" = ["PLR0915"]
+# FastAPI nutzt `Depends(...)` als Default-Argument — Standard-Pattern.
+"src/opn_cockpit/web/**" = ["B008"]
 
 [tool.mypy]
 python_version = "3.11"

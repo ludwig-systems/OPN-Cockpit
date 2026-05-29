@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 
 from opn_cockpit import __version__
 from opn_cockpit.web.api import register_api_routes
+from opn_cockpit.web.auth.manager import SessionManager
 
 WEB_DIR = Path(__file__).parent
 STATIC_DIR = WEB_DIR / "static"
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     app.state.templates = templates
+    app.state.session_manager = SessionManager()
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

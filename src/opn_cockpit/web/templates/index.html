@@ -8,15 +8,143 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <div id="app">
-    <div class="boot-splash">
+  <div id="app" data-state="boot">
+
+    <!-- ================ BOOT-SPLASH ================ -->
+    <section class="screen screen-boot" data-screen="boot">
       <div class="boot-brand">
         <h1>OPN-Cockpit</h1>
-        <span class="boot-version">v{{ version }}</span>
+        <span class="brand-version">v{{ version }}</span>
       </div>
-      <div class="boot-status">Initialisiere…</div>
-    </div>
+      <div class="boot-status" id="boot-status">Initialisiere…</div>
+    </section>
+
+    <!-- ================ LOGIN ================ -->
+    <section class="screen screen-login" data-screen="login" hidden>
+      <div class="login-card">
+        <div class="login-header">
+          <h1>OPN-Cockpit</h1>
+          <span class="brand-version">v{{ version }}</span>
+        </div>
+
+        <!-- Vault picker view -->
+        <div class="login-view" data-view="picker">
+          <p class="login-hint" id="login-hint"></p>
+
+          <label class="form-label" for="vault-select">Tresor</label>
+          <select id="vault-select" class="form-select"></select>
+
+          <label class="form-label" for="password-input">Master-Passwort</label>
+          <input
+            id="password-input"
+            class="form-input"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Passwort"
+          />
+
+          <div class="form-error" id="login-error" hidden></div>
+
+          <button class="btn-primary" id="unlock-btn">Entsperren</button>
+
+          <div class="login-secondary-row">
+            <button class="btn-link" id="create-vault-btn">Neuen Tresor anlegen…</button>
+            <button class="btn-link" id="theme-toggle-login">Theme</button>
+          </div>
+        </div>
+
+        <!-- Create-vault view -->
+        <div class="login-view" data-view="create" hidden>
+          <p class="login-hint">
+            Lege einen neuen Tresor an. Das Master-Passwort schützt deine
+            Geräte-Daten und API-Schlüssel. Es lässt sich später ändern.
+          </p>
+
+          <label class="form-label" for="new-vault-path">Speicherort</label>
+          <input id="new-vault-path" class="form-input" type="text" />
+
+          <label class="form-label" for="new-vault-pw1">Master-Passwort (min. 12 Zeichen)</label>
+          <input
+            id="new-vault-pw1"
+            class="form-input"
+            type="password"
+            autocomplete="new-password"
+          />
+
+          <label class="form-label" for="new-vault-pw2">Wiederholen</label>
+          <input
+            id="new-vault-pw2"
+            class="form-input"
+            type="password"
+            autocomplete="new-password"
+          />
+
+          <div class="form-error" id="create-error" hidden></div>
+
+          <button class="btn-primary" id="create-confirm-btn">Tresor anlegen</button>
+
+          <div class="login-secondary-row">
+            <button class="btn-link" id="create-back-btn">← Zurück</button>
+          </div>
+        </div>
+      </div>
+
+      <footer class="login-footer">
+        <span>OPN-Cockpit · Multi-Site-Management für OPNsense</span>
+      </footer>
+    </section>
+
+    <!-- ================ MAIN-PLATZHALTER (Iter 3+) ================ -->
+    <section class="screen screen-main" data-screen="main" hidden>
+      <header class="topbar">
+        <div class="brand">
+          <h1>OPN-Cockpit</h1>
+          <span class="vault-name" id="current-vault">—</span>
+        </div>
+        <div class="topbar-spacer"></div>
+        <div class="topbar-actions">
+          <button class="icon-btn" id="theme-toggle-main" title="Theme wechseln">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <circle cx="7.5" cy="7.5" r="2.5" />
+              <line x1="7.5" y1="1.5" x2="7.5" y2="3" />
+              <line x1="7.5" y1="12" x2="7.5" y2="13.5" />
+              <line x1="1.5" y1="7.5" x2="3" y2="7.5" />
+              <line x1="12" y1="7.5" x2="13.5" y2="7.5" />
+              <line x1="3.1" y1="3.1" x2="4.2" y2="4.2" />
+              <line x1="10.8" y1="10.8" x2="11.9" y2="11.9" />
+              <line x1="3.1" y1="11.9" x2="4.2" y2="10.8" />
+              <line x1="10.8" y1="4.2" x2="11.9" y2="3.1" />
+            </svg>
+          </button>
+          <div class="topbar-divider"></div>
+          <button class="icon-btn lock-btn" id="lock-btn">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2.5" y="6" width="8" height="5.5" rx="1" />
+              <path d="M4 6V4a2.5 2.5 0 015 0v2" />
+            </svg>
+            <span>Sperren</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <div class="placeholder">
+          <div class="placeholder-eyebrow">Iteration 3 in Vorbereitung</div>
+          <h2>Inventar</h2>
+          <p>
+            Die Kachel-Ansicht aus dem Mockup landet in der nächsten Iteration hier.
+            Aktuell zeigt das Backend: Tresor erfolgreich entsperrt, Session aktiv,
+            Auto-Sperre nach <strong id="timeout-display">—</strong> Minuten Inaktivität.
+          </p>
+          <div class="placeholder-meta">
+            <span>Session läuft ab in <span id="expiry-display">—</span></span>
+          </div>
+        </div>
+      </main>
+    </section>
+
   </div>
+
   <script src="/static/app.js"></script>
 </body>
 </html>

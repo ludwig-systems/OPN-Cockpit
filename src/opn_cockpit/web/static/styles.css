@@ -1,6 +1,6 @@
 /*
- * OPN-Cockpit Frontend Stylesheet (Iteration 1 — Boot-Splash only).
- * Komplette Inventar-/Login-Styles kommen in Iteration 2+ aus dem
+ * OPN-Cockpit Stylesheet (Iter 2 — Boot + Login + Main-Platzhalter).
+ * Die voll ausgebaute Inventar-Ansicht kommt in Iter 3 aus dem
  * web-mockup.html herueber.
  */
 
@@ -11,20 +11,50 @@
     'Segoe UI Variable', 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono',
     'Menlo', 'Consolas', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
 }
 
 [data-theme='dark'] {
   --bg: #0a0b0e;
+  --bg-elevated: #131419;
+  --bg-card: #16171c;
+  --bg-card-hover: #1c1d23;
+  --bg-input: #101117;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.14);
   --text: #ecedef;
   --text-muted: #8c8e96;
+  --text-subtle: #585a62;
+  --text-faint: #3a3b42;
   --accent: #84d4b3;
+  --accent-soft: rgba(132, 212, 179, 0.12);
+  --accent-line: rgba(132, 212, 179, 0.5);
+  --accent-text-on: #0a0b0e;
+  --danger: #db5a4a;
+  --danger-bg: rgba(219, 90, 74, 0.08);
 }
 
 [data-theme='light'] {
   --bg: #f6f5f0;
+  --bg-elevated: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #fbfaf5;
+  --bg-input: #ffffff;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.22);
   --text: #1c1d20;
   --text-muted: #6b6d75;
+  --text-subtle: #9c9ea5;
+  --text-faint: #c8c9ce;
   --accent: #2c8867;
+  --accent-soft: rgba(44, 136, 103, 0.10);
+  --accent-line: rgba(44, 136, 103, 0.45);
+  --accent-text-on: #ffffff;
+  --danger: #b03a2e;
+  --danger-bg: rgba(176, 58, 46, 0.06);
 }
 
 * {
@@ -33,9 +63,9 @@
   padding: 0;
 }
 
-html,
-body {
+html, body {
   height: 100%;
+  overflow: hidden;
 }
 
 body {
@@ -43,43 +73,393 @@ body {
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'ss01', 'cv11';
+  letter-spacing: -0.005em;
+}
+
+[data-theme] *, [data-theme] *::before, [data-theme] *::after {
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.18s;
+  transition-timing-function: ease;
 }
 
 #app {
   height: 100vh;
+}
+
+.screen {
+  height: 100%;
+}
+
+.screen[hidden] {
+  display: none !important;
+}
+
+/* === Brand reuses === */
+
+.brand-version,
+.boot-version {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-subtle);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ============================================================ */
+/* BOOT-SPLASH                                                    */
+/* ============================================================ */
+
+.screen-boot {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.boot-splash {
+.boot-brand {
   text-align: center;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 4px;
   align-items: center;
 }
 
 .boot-brand h1 {
   font-family: var(--font-display);
-  font-size: 36px;
+  font-size: 38px;
   font-style: italic;
   font-weight: 400;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  line-height: 1;
 }
 
-.boot-version {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+.boot-status {
+  font-size: 11.5px;
   color: var(--text-muted);
+  font-family: var(--font-mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.boot-status {
-  font-size: 12px;
+/* ============================================================ */
+/* LOGIN                                                          */
+/* ============================================================ */
+
+.screen-login {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  position: relative;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 36px 36px 28px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.25);
+  animation: card-fade 0.45s cubic-bezier(.2,.7,.3,1) backwards;
+}
+
+@keyframes card-fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+
+.login-header h1 {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1;
+}
+
+.login-view[hidden] {
+  display: none !important;
+}
+
+.login-hint {
+  font-size: 13px;
   color: var(--text-muted);
+  margin-bottom: 20px;
+  line-height: 1.55;
+}
+
+.form-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  margin: 16px 0 6px;
+}
+
+.form-label:first-child {
+  margin-top: 0;
+}
+
+.form-input,
+.form-select {
+  width: 100%;
+  height: 38px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0 12px;
+  font-size: 13.5px;
+  font-family: var(--font-sans);
+  color: var(--text);
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.form-input:focus,
+.form-select:focus {
+  outline: none;
+  border-color: var(--border-strong);
+}
+
+.form-input::placeholder {
+  color: var(--text-subtle);
+}
+
+.form-error {
+  margin-top: 12px;
+  padding: 9px 11px;
+  font-size: 12.5px;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+}
+
+.btn-primary {
+  width: 100%;
+  height: 40px;
+  margin-top: 22px;
+  background: var(--accent);
+  color: var(--accent-text-on);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: filter 0.12s, transform 0.12s;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.06);
+}
+
+.btn-primary:active {
+  transform: translateY(1px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 4px 0;
+  letter-spacing: -0.005em;
+  transition: color 0.12s;
+}
+
+.btn-link:hover {
+  color: var(--text);
+}
+
+.login-secondary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 18px;
+}
+
+.login-footer {
+  margin-top: 24px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-subtle);
+  letter-spacing: 0.04em;
+}
+
+/* ============================================================ */
+/* MAIN — Iter-2-Platzhalter                                      */
+/* ============================================================ */
+
+.screen-main {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  padding: 0 22px 0 24px;
+  gap: 24px;
+  height: 64px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.brand h1 {
+  font-family: var(--font-display);
+  font-size: 23px;
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.vault-name {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-subtle);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.topbar-spacer {
+  flex: 1;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.topbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.icon-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.lock-btn {
+  padding: 0 12px 0 10px;
+  width: auto;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+.lock-btn:hover {
+  color: var(--text);
+}
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 60px 44px;
+}
+
+.placeholder {
+  max-width: 640px;
+  margin: 80px auto 0;
+  text-align: center;
+}
+
+.placeholder-eyebrow {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-subtle);
+  margin-bottom: 14px;
+}
+
+.placeholder h2 {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  margin-bottom: 16px;
+  line-height: 1;
+}
+
+.placeholder p {
+  font-size: 14.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.placeholder p strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.placeholder-meta {
+  margin-top: 22px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-subtle);
   letter-spacing: 0.05em;
+}
+
+.placeholder-meta span span {
+  color: var(--accent);
 }
