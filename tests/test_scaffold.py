@@ -29,7 +29,7 @@ from opn_cockpit.cli.main import build_parser
         "opn_cockpit.importers",
         "opn_cockpit.cli",
         "opn_cockpit.cli.main",
-        "opn_cockpit.gui",
+        "opn_cockpit.web",
     ],
 )
 def test_package_importable(module: str) -> None:

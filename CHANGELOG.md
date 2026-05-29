@@ -2,7 +2,7 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v2.0.0 (in Arbeit) — Web-Pivot
+## v2.0.0 — Web-Pivot
 
 Komplette Umstellung der Präsentations-Schicht von PySide6-Desktop-GUI auf
 lokale **FastAPI + Web-Frontend**. Core, Orchestrierung, Vault, Audit
@@ -42,11 +42,39 @@ einer publikations-tauglichen Optik („Calm Precision"-Aesthetik, siehe
     2-Klick-Lösch-Pfad mit Puls-Animation.
   - Externer-Link-Icon auf jeder Karte für den direkten OPNsense-
     Webaufruf.
-- ⏸ **Iter 4**: Plan/Apply für Routen + Aliase via Web-API + Modal-UI.
-- ⏸ **Iter 5**: Discovery, Audit-View, Profile-CRUD, Bulk-Import-Wizard.
-- ⏸ **Iter 6**: PySide6 + alle GUI-Tests entfernen, README + QUICKSTART
-  auf GUI-First umstellen, Inno-Setup-/MSIX-Installer mit Desktop-
-  Verknüpfung, optionale Vorbereitung für Windows-Dienst-Modus.
+- ✅ **Iter 4** (`55d3925`): Plan/Apply für Routen + Aliase via Web — drei-
+  stufiges Modal (Eingabe → Vorschau mit Confirm-Gate → Result-Matrix),
+  Multi-Device-Picker, Bulk-Plan-Support, Cross-Tool-Sharing mit der CLI
+  über denselben PlanStore.
+- ✅ **Iter 5a** (`daf8144`): Audit-View. Topbar-Icon öffnet ein Modal mit
+  Filter-Reihe (Event-Kind / Action / Geräte-ID), Truncate-Hinweis,
+  Status-Pills semantisch eingefärbt.
+- ✅ **Iter 5b** (`27dad8c`): Discovery — `/api/discover/...` für Gateway-
+  und Alias-Namen aus der laufenden OPNsense. Frontend integriert das als
+  Lazy-Load-Datalist im Plan-Modal („Vorschläge laden"-Button), nicht
+  automatisch beim Modal-Öffnen wegen Offline-Geräten.
+- ✅ **Iter 5c** (`c465a03`): Profile (Templates) — Vorlagen-Dropdown im
+  Plan-Modal + „Als Vorlage speichern". Secrets werden beim Speichern
+  via Whitelist sanitisiert, gemeinsamer Store mit der CLI.
+- ✅ **Iter 5d** (`723044a`, später ersetzt durch 5.1): erste Bulk-Import-
+  Variante für Routen-CSV / Alias-JSON.
+- ✅ **Iter 5.1** (`59e73e8`): Architektur-Refactor nach User-Feedback —
+  Bulk-Import sind jetzt **Firewall-Stammdaten** (CSV/JSON), nicht mehr
+  Routen/Aliase. Karten kriegen sichtbare Auswahl-Checkbox mit Olive-
+  Highlight. Neue Selection-Bar über dem Grid mit „Alle / Nur erreichbare
+  / Keine". Plan-Modal hat keinen eigenen Device-Picker mehr — Aktionen
+  laufen gegen die globale Karten-Selektion. Karten-Padding angepasst,
+  damit die Auswahl-Checkbox die TLS- und URL-Icons nicht überdeckt
+  (`021be1f`).
+- ✅ **Iter 5.2** (`c0bf7b3`): Apply-Reports werden persistiert, neuer
+  Endpunkt `/api/plans/outstanding`, Retry-Pfad mit `device_ids`-Filter
+  im Apply-Body. Karten zeigen einen Amber-„N offen"-Badge, wenn Geräte
+  in alten Plänen noch nicht Verifiziert sind. Result-Phase bietet
+  „N fehlgeschlagene erneut versuchen". Verlustarme Auto-Recovery für
+  „eine Box war offline"-Szenarien.
+- ✅ **Iter 6**: PySide6 + alle GUI-Tests entfernt, README + QUICKSTART
+  auf Web-First umgeschrieben, Inno-Setup-Skript in `installer/`
+  abgelegt, CHANGELOG abgeschlossen.
 
 ### Architektur-Entscheidungen
 
@@ -65,10 +93,10 @@ Hinzugefügt: `fastapi >= 0.115`, `uvicorn[standard] >= 0.32`,
 `jinja2 >= 3.1`, `python-multipart >= 0.0.12`. `PySide6` bleibt
 vorerst installiert, wird in Iter 6 entfernt.
 
-### Tests-Stand v2.0-Iter-3.1-Ende
+### Tests-Stand v2.0-Final
 
-513 Tests grün (54 im `tests/unit/web/`-Tree, zwei Wrong-Password-Tests
-entfallen mit dem Session-Cache), ruff + mypy strict clean.
+550+ Tests grün (130+ im `tests/unit/web/`-Tree). PySide6-Tests komplett
+entfallen. ruff + mypy strict clean. 81 Source-Files in `src/`.
 
 ---
 

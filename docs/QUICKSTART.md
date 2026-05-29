@@ -1,185 +1,139 @@
-# Quickstart — OPN-Cockpit v1
+# Quickstart — OPN-Cockpit v2
 
-End-to-End-Walkthrough vom ersten Tresor bis zum verifizierten Rollout
-einer Route auf mehreren OPNsense-Instanzen. Dauert ca. 10 Minuten.
+Web-Oberfläche im Browser. Vom ersten Tresor bis zum verifizierten Rollout
+in ca. 10 Minuten.
 
-## 0. Vor dem ersten Live-Lauf
+## 1. Setup (einmalig)
 
-Bitte einmal den **API-Spike** gegen die laufende OPNsense-Test-Instanz
-durchführen und die in [opnsense-api-26.1.md](opnsense-api-26.1.md)
-notierten Endpoints bestätigen. Das Tool ist gegen die dort dokumentierten
-Pfade gebaut. Wenn deine Version andere Pfade hat, passen sich nur die
-Konstanten in `src/opn_cockpit/core/objects/_endpoints.py` an —
-Orchestrierung, CLI und GUI bleiben unverändert.
-
-## 1. Setup
+Voraussetzung: Python 3.11+ und [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```powershell
 # Im Repo-Root:
 .\scripts\setup-venv.ps1
 ```
 
-Das Skript erzeugt `.venv\`, installiert das Paket editierbar samt
-Dev-Tooling und führt `pytest -q` als Sanity-Check.
+Erzeugt `.venv\`, installiert das Paket samt Dev-Tooling und führt
+`pytest -q` als Sanity-Check.
 
-## 2. Tresor anlegen
+## 2. App starten
 
 ```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli `
-    create-vault C:\vaults\produktion.opnvault
+.\start.bat
 ```
 
-Du wirst nach einem Master-Passwort gefragt (min. 12 Zeichen). Der Tresor
-wird mit Argon2id-Schlüsselableitung + AES-256-GCM verschlüsselt geschrieben.
+Doppelklick funktioniert auch. Die Batch:
+- Prüft ob Port 9876 von einer alten Cockpit-Instanz belegt ist und beendet
+  sie sauber
+- Startet den lokalen FastAPI-Server
+- Öffnet automatisch den Browser auf `http://127.0.0.1:9876`
+
+Beim allerersten Start klickst du im Login-Screen **„Neuen Tresor anlegen…"**
+und vergibst ein Master-Passwort (min. 12 Zeichen). Pfad wird vorgeschlagen
+(`%APPDATA%\OPN-Cockpit\…opnvault`).
 
 ## 3. Erstes Gerät hinzufügen
 
-```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli `
-    --vault C:\vaults\produktion.opnvault add-device `
-    --name "HQ Berlin" `
-    --host opn-berlin.lab `
-    --port 443 `
-    --tls-verify `
-    --tags branches,germany,core
+Im Inventar links in der Sidebar **„Gerät hinzufügen"** klicken und
+ausfüllen:
+- Name (z. B. „HQ Berlin")
+- Hostname / IP (z. B. `opn-berlin.lab`)
+- Port (Default 443)
+- TLS verifizieren — abhaken nur bei selbst-signierten Zertifikaten
+- Tags komma-getrennt (z. B. `branches, germany, core`)
+- API-Key und API-Secret aus der OPNsense
+
+## 4. Verbindung testen
+
+Klick auf die Karte → Detail-Modal → **„Verbindung testen"**. Der Test:
+1. Baut einen TLS-Handshake auf (oder akzeptiert das Risiko, wenn
+   TLS-Verifikation aus ist)
+2. Schickt einen GET gegen `/api/core/menu/tree` mit Basic-Auth
+3. Zeigt „erreichbar + authentifiziert", „Auth abgelehnt" oder
+   „nicht erreichbar"
+
+Zusätzlich gibt es einen TCP-Heartbeat im Hintergrund (alle 30 s), der
+ohne Auth-Versuch nur den Port checkt — Status-Dot wird grün/rot ohne
+Last für die OPNsense.
+
+## 5. Bulk-Import von Firewalls
+
+Sidebar **„Bulk-Import"** für CSV oder JSON mit Stammdaten:
+
+```csv
+name,host,port,tls_verify,tags,descr,api_key,api_secret
+HQ Berlin,opn-berlin.lab,443,true,branches;germany,HQ,KEY,SECRET
+Branch Munich,opn-munich.lab,443,false,branches,,KEY2,SECRET2
 ```
 
-Anschließend interaktiv:
-- Master-Passwort des Tresors (zum Entsperren)
-- API-Key des OPNsense-Geräts
-- API-Secret des OPNsense-Geräts
-- nochmal Master-Passwort (zum Speichern der Änderung)
+Tags semikolon-getrennt (Komma kollidiert mit CSV-Trennung). Header-Zeile
+zwingend. Geräte mit existierendem Namen werden übersprungen.
 
-Wiederholt für jede weitere OPNsense.
+## 6. Aktion auf mehrere Firewalls ausrollen
 
-## 4. Verbindungstest
+Der Plan/Apply-Flow:
 
-```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli `
-    --vault C:\vaults\produktion.opnvault test-connection --target all
-```
+1. **Auswählen** — Checkbox oben rechts auf den Karten anhaken (oder
+   Schnellauswahl „Alle" / „Nur erreichbare" / „Keine" über dem Grid)
+2. **Aktion definieren** — Sidebar „Route hinzufügen" oder „Alias
+   hinzufügen". Felder ausfüllen, optional „Vorschläge laden" für die
+   Gateway/Alias-Namen.
+3. **Vorschau prüfen** — Liste pro Gerät: NEW / UPDATE / SKIP mit
+   Diff-Summary. Hier ist noch nichts ausgerollt.
+4. **Bestätigen + Aktivieren** — Confirm-Checkbox, dann „Aktivieren".
+   Parallel-Rollout über alle Geräte mit Write → Reconfigure → Read-back.
+5. **Result-Matrix** — pro Gerät Status (Verifiziert/Fehlgeschlagen/
+   Übersprungen) + Dauer.
 
-Erwartete Ausgabe:
+## 7. Fehlgeschlagene Geräte nachziehen
 
-```
-Gerät                          Status         Hinweis
-------------------------------------------------------------------------------
-HQ Berlin                      OK             erreichbar + authentifiziert (opn-berlin.lab)
-HQ München                     OK             erreichbar + authentifiziert (opn-muenchen.lab)
-Zweigstelle Hamburg            NO-AUTH        erreichbar, aber Auth abgelehnt: Schlüssel/Secret falsch
-```
+Wenn ein paar Boxen offline waren:
+- **Result-Phase:** Button „N fehlgeschlagene erneut versuchen" — wechselt
+  zurück in die Vorschau, gefiltert auf die offenen Geräte.
+- **Später:** auf jeder Karte mit offenen Aktionen erscheint ein
+  Amber-Badge „N offen". Klick darauf → lädt den jüngsten betroffenen
+  Plan, vorausgewählt auf das eine Gerät.
 
-## 5. Erste Route ausrollen
+Der Plan und sein Apply-Report bleiben persistiert unter
+`%APPDATA%\OPN-Cockpit\plans\{plan-id}.json` (+ `.report.json`). Web und CLI
+teilen sich denselben Store.
 
-### Plan erzeugen
+## 8. Audit-Log einsehen
 
-```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli `
-    --vault C:\vaults\produktion.opnvault plan add-route `
-    --network 10.99.0.0/24 `
-    --gateway WAN_GW `
-    --descr "Pilot-Tunnel" `
-    --target tag:branches
-```
+Topbar-Icon (drei Linien) öffnet das Audit-Modal. Filter nach Event-Kind,
+Action, Geräte-ID. Pro Eintrag: Zeit, Event, Summary, Status-Pill.
+Speicherort: `%APPDATA%\OPN-Cockpit\audit.jsonl` (append-only JSON Lines).
 
-Du siehst die Vorschau pro Gerät: `NEW` (wird angelegt), `SKIP`
-(existiert bereits identisch), inklusive maskierter Payload. Am Ende
-wird die Plan-ID gedruckt, z. B. `pl-A1B2C3D4`.
+## 9. Vorlagen (Profile)
 
-### Plan ausrollen
+Im Plan-Modal kannst du „Als Vorlage speichern" — Aktionsparameter werden
+in `%APPDATA%\OPN-Cockpit\profiles.json` abgelegt (ohne Credentials,
+Whitelist-sanitisiert). Spätere Plans starten mit „Aus Vorlage laden".
 
-```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli `
-    --vault C:\vaults\produktion.opnvault apply pl-A1B2C3D4
-```
+## CLI als Alternative
 
-Vor der Ausführung erscheint die Vorschau erneut und verlangt eine
-explizite Bestätigung mit `ja` (R-PRE-2). Anschließend laufen pro Gerät:
-
-1. **WRITE** — alle `add`-Calls
-2. **ACTIVATE** — genau ein `reconfigure`
-3. **VERIFY** — Read-back gegen den Such-Endpoint
-
-Die Result-Matrix zeigt pro Gerät den finalen Status:
-
-```
-Gerät                          Status   Phase      ms  Hinweis
-------------------------------------------------------------------------
-HQ Berlin                      OK       verify   1240  1 Eintrag/Einträge ok.
-HQ München                     OK       verify   1180  1 Eintrag/Einträge ok.
-
-Gesamt: 2/2 ok, 0 fehlgeschlagen, 0 übersprungen
-```
-
-## 6. Audit-Log einsehen
-
-```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli audit --limit 20
-```
-
-Alle Aktionen, Vault-Operationen und Resultate sind als JSON-Lines unter
-`%APPDATA%\OPN-Cockpit\audit.jsonl` persistiert. Klartext-Secrets erscheinen
-dort nie — sensitive Schlüssel werden vor dem Schreiben durch
-`security.masking.mask_dict` maskiert.
-
-## 7. Wiederverwendbares Profil speichern
+Die CLI bleibt als Headless-Schnittstelle für Automatisierung erhalten.
+Sub-Commands sind unverändert: `create-vault`, `add-device`, `plan`,
+`apply`, `audit`, `bulk-import routes`, …
 
 ```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli profile save-route `
-    --name "Standard Branch Tunnel" `
-    --network 10.99.0.0/24 `
-    --gateway WAN_GW `
-    --target tag:branches
+.\.venv\Scripts\python.exe -m opn_cockpit.cli --help
 ```
 
-Profile enthalten **keine** Credentials und sind portabel. Anwenden:
+Plan-Files und Audit-Log sind dieselben — du kannst im Web planen und
+per CLI ausrollen, oder umgekehrt.
 
-```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli `
-    --vault C:\vaults\produktion.opnvault `
-    profile apply "Standard Branch Tunnel"
-```
+## Sicherheit auf einen Blick
 
-## 8. Bulk-Import aus CSV
-
-```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli `
-    --vault C:\vaults\produktion.opnvault `
-    bulk-import routes docs\example-routes.csv --target tag:branches
-```
-
-Validierungsfehler werden pro Zeile gemeldet. Beim Teil-Erfolg fragt
-das Tool nach, ob trotzdem ausgerollt werden soll. Plan-Vorschau und
-`ja`-Bestätigung bleiben Pflicht.
-
-## 9. Tresor an anderen Admin weitergeben (Template)
-
-```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit.cli `
-    --vault C:\vaults\produktion.opnvault `
-    export-template C:\vaults\template-fuer-kollegen.opnvault
-```
-
-Der Empfänger kennt das Master-Passwort (sicheres Kanalbedarf). Nach dem
-Öffnen leert das Template alle `api_key` und `api_secret`. Der Kollege
-trägt seine eigenen Credentials ein und kann das Master-Passwort ändern.
-
-## 10. GUI starten
-
-```powershell
-.\.venv\Scripts\python.exe -m opn_cockpit
-```
-
-Login-Fenster → Master-Passwort → Hauptfenster mit Tabs (Inventar,
-Audit-Log) und Aktions-Menü. Inaktivitäts-Sperre nach 10 Minuten (im
-Tresor anpassbar).
-
-## Fehlersuche
-
-| Symptom | Lösung |
-|---|---|
-| `Tresor-Datei nicht gefunden` | Pfad mit `--vault` prüfen oder Default in `%APPDATA%\OPN-Cockpit\settings.json` setzen. |
-| `Master-Passwort falsch` | Passwort prüfen. Audit-Log enthält `LOGIN_FAILED`-Einträge. |
-| `Auth abgelehnt` | API-Key/Secret in der OPNsense unter *System → Access → Users → API Key* erneut erzeugen. |
-| Read-back schlägt fehl | OPNsense-Version + Endpoint-Pfade in `docs/opnsense-api-26.1.md` abgleichen. |
-| GUI startet nicht | `python -m opn_cockpit.cli --help` prüfen (CLI funktioniert weiterhin). PySide6 via `uv pip install PySide6` nachinstallieren. |
+- Geräte-Inventar + API-Credentials nur im verschlüsselten Tresor
+  (Argon2id + AES-256-GCM, RFC 9106 Defaults).
+- Master-Passwort wird beim Unlock einmalig erfragt und in der
+  Session gecached — Schreibvorgänge brauchen es nicht erneut. Cache
+  lebt nur während der entsperrten Session, wird beim Sperren / Auto-
+  Lock überschrieben.
+- Inaktivitätstimer (Default 10 min, pro Tresor änderbar) sperrt die
+  Session automatisch.
+- TCP-Heartbeat erzeugt keine Auth-Logs auf der OPNsense.
+- Audit-Log enthält maskierte Antworten, keine vollständigen HTTP-Bodies.
+- Server bindet auf `127.0.0.1:9876` (Loopback). Multi-User-Erweiterung
+  ist im Schema vorbereitet (Token-Auth pro Session), aber v2.0 ist
+  Single-User-PAW.
