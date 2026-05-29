@@ -203,6 +203,17 @@
             <div class="status-summary" id="status-summary"></div>
           </header>
 
+          <div class="selection-bar" id="selection-bar">
+            <div class="selection-bar-info">
+              <span class="selection-count" id="selection-count">0 ausgewählt</span>
+            </div>
+            <div class="selection-bar-actions">
+              <button class="btn-link" id="sel-all">Alle</button>
+              <button class="btn-link" id="sel-reachable">Nur erreichbare</button>
+              <button class="btn-link" id="sel-none">Keine</button>
+            </div>
+          </div>
+
           <div class="card-grid" id="card-grid"></div>
 
           <div class="empty-state" id="empty-state" hidden>
@@ -367,11 +378,11 @@
       </div>
     </div>
 
-    <!-- ================ MODAL: Bulk-Import ================ -->
+    <!-- ================ MODAL: Bulk-Import (Firewalls) ================ -->
     <div class="modal-backdrop" id="bulk-modal" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="bulk-modal-title">
         <div class="modal-header">
-          <h2 id="bulk-modal-title">Bulk-Import</h2>
+          <h2 id="bulk-modal-title">Firewalls importieren</h2>
           <button class="icon-btn modal-close" id="bulk-modal-close" aria-label="Schließen">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
               <line x1="3" y1="3" x2="11" y2="11"/>
@@ -381,17 +392,22 @@
         </div>
 
         <div class="modal-body">
+          <div class="form-hint" style="margin-bottom: 14px;">
+            Lade eine CSV oder JSON mit Firewall-Stammdaten hoch — Name, Host, API-Credentials und Tags.
+            Bereits vorhandene Namen werden übersprungen.
+          </div>
+
           <div class="form-row">
             <div class="form-col">
-              <label class="form-label">Typ</label>
+              <label class="form-label">Format</label>
               <div class="bulk-type-row">
                 <label class="form-checkbox">
-                  <input type="radio" name="bulk-type" id="bk-type-routes" value="routes" checked />
-                  <span>Routen aus CSV</span>
+                  <input type="radio" name="bulk-format" id="bk-fmt-csv" value="csv" checked />
+                  <span>CSV</span>
                 </label>
                 <label class="form-checkbox">
-                  <input type="radio" name="bulk-type" id="bk-type-aliases" value="aliases" />
-                  <span>Aliase aus JSON</span>
+                  <input type="radio" name="bulk-format" id="bk-fmt-json" value="json" />
+                  <span>JSON</span>
                 </label>
               </div>
             </div>
@@ -400,30 +416,12 @@
           <div class="form-row">
             <div class="form-col">
               <label class="form-label" for="bk-file">Datei</label>
-              <input id="bk-file" class="form-input" type="file" accept=".csv,.json,text/csv,application/json" />
+              <input id="bk-file" class="form-input" type="file" accept=".csv,text/csv" />
               <div class="form-hint" id="bk-format-hint">
-                CSV-Spalten: <code>network, gateway, descr, disabled</code>. Header-Zeile zwingend.
+                CSV-Spalten: <code>name, host, port, tls_verify, tags, descr, api_key, api_secret</code>.
+                Tags semikolon-getrennt. Header-Zeile zwingend.
               </div>
             </div>
-          </div>
-
-          <div class="form-row" id="bk-append-row" hidden>
-            <div class="form-col">
-              <label class="form-checkbox">
-                <input id="bk-append" type="checkbox" />
-                <span>An bestehende Aliase anhängen (statt neu anlegen)</span>
-              </label>
-            </div>
-          </div>
-
-          <label class="form-label">Zielgeräte</label>
-          <div class="device-picker">
-            <div class="device-picker-controls">
-              <button class="btn-link" id="bk-pick-all" type="button">Alle</button>
-              <button class="btn-link" id="bk-pick-none" type="button">Keine</button>
-              <span class="device-picker-count" id="bk-pick-count">0 ausgewählt</span>
-            </div>
-            <div class="device-picker-list" id="bk-device-list"></div>
           </div>
 
           <div class="form-error" id="bulk-modal-error" hidden></div>
@@ -432,7 +430,7 @@
 
         <div class="modal-footer">
           <button class="btn-link" id="bulk-modal-cancel">Abbrechen</button>
-          <button class="btn-primary btn-primary-inline" id="bulk-submit-btn">Importieren & Vorschau</button>
+          <button class="btn-primary btn-primary-inline" id="bulk-submit-btn">Importieren</button>
         </div>
       </div>
     </div>
@@ -590,15 +588,7 @@
 
             <div class="form-divider"></div>
 
-            <label class="form-label">Zielgeräte</label>
-            <div class="device-picker">
-              <div class="device-picker-controls">
-                <button class="btn-link" id="pl-pick-all">Alle</button>
-                <button class="btn-link" id="pl-pick-none">Keine</button>
-                <span class="device-picker-count" id="pl-pick-count">0 ausgewählt</span>
-              </div>
-              <div class="device-picker-list" id="pl-device-list"></div>
-            </div>
+            <div class="selection-summary" id="pl-selection-summary"></div>
 
             <div class="form-error" id="plan-modal-error" hidden></div>
           </div>

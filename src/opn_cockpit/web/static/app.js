@@ -31,6 +31,7 @@
     search: '',           // freitext
     sessionInfo: null,
     heartbeatInFlight: false,
+    selectedDeviceIds: new Set(),  // globale Multi-Auswahl fuer Plan/Apply
   };
 
   let heartbeatHandle = null;
@@ -260,6 +261,7 @@
     const data = await response.json();
     state.devices = data.devices || [];
     state.tags = data.tags || [];
+    pruneSelectionToExistingDevices();
     renderSidebar();
     renderGrid();
   }
@@ -317,10 +319,13 @@
       grid.innerHTML = '';
       empty.hidden = false;
       $('#status-summary').innerHTML = '';
+      $('#selection-bar').hidden = true;
+      updateSelectionBar();
       return;
     }
 
     empty.hidden = true;
+    $('#selection-bar').hidden = false;
     const visible = state.devices.filter(deviceMatchesFilter);
 
     grid.innerHTML = '';
@@ -329,6 +334,7 @@
     }
 
     renderStatusSummary(state.devices);
+    updateSelectionBar();
   }
 
   function deviceMatchesFilter(device) {
@@ -353,6 +359,20 @@
     article.className = 'card';
     if (reachability === 'offline') article.classList.add('offline');
     if (!device.tls_verify) article.classList.add('tls-warning');
+    if (state.selectedDeviceIds.has(device.id)) article.classList.add('selected');
+
+    // Checkbox (oben rechts)
+    const checkbox = document.createElement('div');
+    checkbox.className = 'card-checkbox';
+    checkbox.title = 'Für Aktion auswählen';
+    checkbox.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 6.5l2.5 2.5L10 3.5"/>
+    </svg>`;
+    checkbox.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDeviceSelection(device.id);
+    });
+    article.appendChild(checkbox);
 
     // Status row
     const row = document.createElement('div');
@@ -441,6 +461,56 @@
     if (age < 60) return `vor ${age} s`;
     const mins = Math.round(age / 60);
     return `vor ${mins} min`;
+  }
+
+  // -------------------- Selektion --------------------
+
+  function toggleDeviceSelection(deviceId) {
+    if (state.selectedDeviceIds.has(deviceId)) {
+      state.selectedDeviceIds.delete(deviceId);
+    } else {
+      state.selectedDeviceIds.add(deviceId);
+    }
+    renderGrid();
+  }
+
+  function selectAllDevices() {
+    state.selectedDeviceIds = new Set(state.devices.map((d) => d.id));
+    renderGrid();
+  }
+
+  function selectNoDevices() {
+    state.selectedDeviceIds = new Set();
+    renderGrid();
+  }
+
+  function selectReachableDevices() {
+    state.selectedDeviceIds = new Set(
+      state.devices
+        .filter((d) => computeReachability(state.heartbeat[d.id]) === 'online')
+        .map((d) => d.id),
+    );
+    renderGrid();
+  }
+
+  function updateSelectionBar() {
+    const n = state.selectedDeviceIds.size;
+    const total = state.devices.length;
+    const label = n === 0
+      ? `0 ausgewählt · ${total} insgesamt`
+      : n === total
+        ? `alle ${n} ausgewählt`
+        : `${n} von ${total} ausgewählt`;
+    const el = $('#selection-count');
+    el.textContent = label;
+    el.classList.toggle('has-selection', n > 0);
+  }
+
+  function pruneSelectionToExistingDevices() {
+    const ids = new Set(state.devices.map((d) => d.id));
+    for (const sid of Array.from(state.selectedDeviceIds)) {
+      if (!ids.has(sid)) state.selectedDeviceIds.delete(sid);
+    }
   }
 
   function renderStatusSummary(devices) {
@@ -929,26 +999,28 @@
 
   // Modus: 'route' oder 'alias'
   // Phasen: 'input' -> 'preview' -> 'result'
+  // Zielgeraete kommen aus state.selectedDeviceIds (globale Karten-Auswahl).
   let planMode = 'route';
   let planPhase = 'input';
   let currentPlan = null;       // PlanResponse vom Server
-  let planDeviceIds = new Set(); // ausgewaehlte Geraete
 
   function openPlanModal(mode) {
+    if (state.selectedDeviceIds.size === 0) {
+      showToast('Bitte erst Firewalls auswählen (Checkbox auf den Karten).', true);
+      return;
+    }
     planMode = mode;
     planPhase = 'input';
     currentPlan = null;
-    planDeviceIds = new Set(state.devices.map((d) => d.id));  // default: alle
     resetPlanInputs();
     showPlanFieldSet(mode);
-    renderDevicePicker();
+    renderPlanSelectionSummary();
     showPlanPhase('input');
     $('#plan-modal-title').textContent =
-      mode === 'route' ? 'Neue Route über mehrere Geräte' : 'Neuer Alias über mehrere Geräte';
+      mode === 'route' ? 'Neue Route auf Auswahl ausrollen' : 'Neuer Alias auf Auswahl ausrollen';
     $('#plan-modal-error').hidden = true;
     $('#plan-preview-error').hidden = true;
     $('#plan-modal').hidden = false;
-    // Profile passend zum Mode laden (async, ohne Modal-Open zu blockieren).
     loadPlanProfiles().catch(() => {});
     setTimeout(() => {
       const focusEl = mode === 'route' ? $('#pl-route-network') : $('#pl-alias-name');
@@ -961,7 +1033,25 @@
     planMode = 'route';
     planPhase = 'input';
     currentPlan = null;
-    planDeviceIds = new Set();
+  }
+
+  function renderPlanSelectionSummary() {
+    const summary = $('#pl-selection-summary');
+    const ids = Array.from(state.selectedDeviceIds);
+    const total = state.devices.length;
+    const selected = state.devices.filter((d) => state.selectedDeviceIds.has(d.id));
+    if (selected.length === 0) {
+      summary.className = 'selection-summary no-selection';
+      summary.textContent = 'Keine Firewalls ausgewählt — Modal schließen und Karten markieren.';
+      return;
+    }
+    summary.className = 'selection-summary';
+    const names = selected.map((d) => d.name).join(', ');
+    const namesShort = names.length > 200 ? names.substring(0, 197) + '…' : names;
+    summary.innerHTML = `
+      <div>Aktion wird auf <span class="selection-summary-count">${selected.length}</span> von ${total} Firewalls ausgerollt.</div>
+      <div class="selection-summary-list">${namesShort}</div>
+    `;
   }
 
   function resetPlanInputs() {
@@ -1015,59 +1105,6 @@
     }
   }
 
-  function renderDevicePicker() {
-    const list = $('#pl-device-list');
-    list.innerHTML = '';
-    if (!state.devices.length) {
-      list.innerHTML = '<div class="form-hint" style="padding:14px 12px">Keine Geräte im Tresor.</div>';
-      updateDevicePickerCount();
-      return;
-    }
-    for (const device of state.devices) {
-      const row = document.createElement('label');
-      row.className = 'device-picker-item';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = device.id;
-      cb.checked = planDeviceIds.has(device.id);
-      cb.addEventListener('change', () => {
-        if (cb.checked) planDeviceIds.add(device.id);
-        else planDeviceIds.delete(device.id);
-        updateDevicePickerCount();
-      });
-      const name = document.createElement('span');
-      name.className = 'device-picker-item-name';
-      name.textContent = device.name;
-      const host = document.createElement('span');
-      host.className = 'device-picker-item-host';
-      host.textContent = `${device.host}:${device.port}`;
-      row.appendChild(cb);
-      row.appendChild(name);
-      row.appendChild(host);
-      list.appendChild(row);
-    }
-    updateDevicePickerCount();
-  }
-
-  function updateDevicePickerCount() {
-    const n = planDeviceIds.size;
-    const total = state.devices.length;
-    $('#pl-pick-count').textContent =
-      n === 0 ? 'keins ausgewählt' :
-      n === total ? 'alle ausgewählt' :
-      `${n} von ${total} ausgewählt`;
-  }
-
-  function pickAllDevices() {
-    planDeviceIds = new Set(state.devices.map((d) => d.id));
-    renderDevicePicker();
-  }
-
-  function pickNoDevices() {
-    planDeviceIds = new Set();
-    renderDevicePicker();
-  }
-
   async function planNextOrApply() {
     if (planPhase === 'input') {
       await submitPlanInput();
@@ -1079,8 +1116,8 @@
   async function submitPlanInput() {
     const errorBox = $('#plan-modal-error');
     errorBox.hidden = true;
-    if (planDeviceIds.size === 0) {
-      return showPlanError('Mindestens ein Zielgerät auswählen.');
+    if (state.selectedDeviceIds.size === 0) {
+      return showPlanError('Keine Firewalls ausgewählt — Modal schließen und Karten markieren.');
     }
     let body = null;
     let url = null;
@@ -1095,7 +1132,7 @@
         gateway,
         descr: $('#pl-route-descr').value.trim(),
         disabled: $('#pl-route-disabled').checked,
-        target_device_ids: Array.from(planDeviceIds),
+        target_device_ids: Array.from(state.selectedDeviceIds),
       };
       url = '/api/plans/route';
     } else {
@@ -1118,7 +1155,7 @@
         content,
         descr: $('#pl-alias-descr').value.trim(),
         merge_mode: $('#pl-alias-merge').checked ? 'append' : 'create',
-        target_device_ids: Array.from(planDeviceIds),
+        target_device_ids: Array.from(state.selectedDeviceIds),
       };
       url = '/api/plans/alias';
     }
@@ -1261,9 +1298,9 @@
   // -------------------- Discovery (Auto-Suggest) --------------------
 
   function _pickDiscoveryDevice() {
-    // Erstes ausgewaehltes Geraet — sonst null.
-    if (planDeviceIds.size === 0) return null;
-    for (const id of planDeviceIds) {
+    // Erstes global ausgewaehltes Geraet — sonst null.
+    if (state.selectedDeviceIds.size === 0) return null;
+    for (const id of state.selectedDeviceIds) {
       const d = state.devices.find((x) => x.id === id);
       if (d) return d;
     }
@@ -1463,21 +1500,15 @@
     }
   }
 
-  // -------------------- Bulk-Import-Modal --------------------
-
-  let bulkDeviceIds = new Set();
+  // -------------------- Bulk-Import (Firewalls) --------------------
 
   function openBulkModal() {
-    bulkDeviceIds = new Set(state.devices.map((d) => d.id));
-    $('#bk-type-routes').checked = true;
-    $('#bk-type-aliases').checked = false;
+    $('#bk-fmt-csv').checked = true;
+    $('#bk-fmt-json').checked = false;
     $('#bk-file').value = '';
-    $('#bk-append').checked = false;
-    $('#bk-append-row').hidden = true;
     $('#bulk-modal-error').hidden = true;
     $('#bulk-parse-errors').hidden = true;
     updateBulkFormatHint();
-    renderBulkDevicePicker();
     $('#bulk-modal').hidden = false;
   }
 
@@ -1486,60 +1517,17 @@
   }
 
   function updateBulkFormatHint() {
-    const isRoutes = $('#bk-type-routes').checked;
-    $('#bk-append-row').hidden = isRoutes;
-    if (isRoutes) {
+    const isCsv = $('#bk-fmt-csv').checked;
+    if (isCsv) {
       $('#bk-format-hint').innerHTML =
-        'CSV-Spalten: <code>network, gateway, descr, disabled</code>. Header-Zeile zwingend.';
+        'CSV-Spalten: <code>name, host, port, tls_verify, tags, descr, api_key, api_secret</code>. ' +
+        'Tags semikolon-getrennt. Header-Zeile zwingend.';
       $('#bk-file').setAttribute('accept', '.csv,text/csv');
     } else {
       $('#bk-format-hint').innerHTML =
-        'JSON-Array von Objekten: <code>name, type, content[], descr?, merge_mode?</code>.';
+        'JSON-Array von Objekten: <code>{name, host, port, tls_verify, tags[], descr, api_key, api_secret}</code>.';
       $('#bk-file').setAttribute('accept', '.json,application/json');
     }
-  }
-
-  function renderBulkDevicePicker() {
-    const list = $('#bk-device-list');
-    list.innerHTML = '';
-    if (!state.devices.length) {
-      list.innerHTML = '<div class="form-hint" style="padding:14px 12px">Keine Geräte im Tresor.</div>';
-      updateBulkDeviceCount();
-      return;
-    }
-    for (const device of state.devices) {
-      const row = document.createElement('label');
-      row.className = 'device-picker-item';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = device.id;
-      cb.checked = bulkDeviceIds.has(device.id);
-      cb.addEventListener('change', () => {
-        if (cb.checked) bulkDeviceIds.add(device.id);
-        else bulkDeviceIds.delete(device.id);
-        updateBulkDeviceCount();
-      });
-      const name = document.createElement('span');
-      name.className = 'device-picker-item-name';
-      name.textContent = device.name;
-      const host = document.createElement('span');
-      host.className = 'device-picker-item-host';
-      host.textContent = `${device.host}:${device.port}`;
-      row.appendChild(cb);
-      row.appendChild(name);
-      row.appendChild(host);
-      list.appendChild(row);
-    }
-    updateBulkDeviceCount();
-  }
-
-  function updateBulkDeviceCount() {
-    const n = bulkDeviceIds.size;
-    const total = state.devices.length;
-    $('#bk-pick-count').textContent =
-      n === 0 ? 'keins ausgewählt' :
-      n === total ? 'alle ausgewählt' :
-      `${n} von ${total} ausgewählt`;
   }
 
   async function submitBulkImport() {
@@ -1554,18 +1542,11 @@
       errorBox.hidden = false;
       return;
     }
-    if (bulkDeviceIds.size === 0) {
-      errorBox.textContent = 'Mindestens ein Zielgerät auswählen.';
-      errorBox.hidden = false;
-      return;
-    }
 
-    const isRoutes = $('#bk-type-routes').checked;
-    const url = isRoutes ? '/api/imports/routes' : '/api/imports/aliases';
+    const fmt = $('#bk-fmt-csv').checked ? 'csv' : 'json';
     const form = new FormData();
     form.append('file', file);
-    for (const id of bulkDeviceIds) form.append('target_device_ids', id);
-    if (!isRoutes && $('#bk-append').checked) form.append('append_mode', 'true');
+    form.append('format', fmt);
 
     const btn = $('#bulk-submit-btn');
     btn.disabled = true;
@@ -1574,7 +1555,9 @@
       const headers = {};
       const token = getToken();
       if (token) headers.Authorization = `Bearer ${token}`;
-      const response = await fetch(url, { method: 'POST', body: form, headers });
+      const response = await fetch('/api/imports/devices', {
+        method: 'POST', body: form, headers,
+      });
       if (response.status === 401) { handleSessionLost(); return; }
       if (response.status === 400) {
         const body = await response.json().catch(() => ({}));
@@ -1595,21 +1578,20 @@
         errorBox.hidden = false;
         return;
       }
-      const plan = await response.json();
+      const result = await response.json();
       closeBulkModal();
-      // Plan-Modal in Preview-Phase oeffnen
-      currentPlan = plan;
-      planMode = isRoutes ? 'route' : 'alias';
-      $('#plan-modal-title').textContent = `Bulk-Import-Vorschau (${plan.target_count} Aktionen)`;
-      $('#plan-modal').hidden = false;
-      renderPreview(plan);
-      showPlanPhase('preview');
+      await loadInventory();
+      pollHeartbeat();
+      const skipText = result.skipped_existing.length
+        ? ` (${result.skipped_existing.length} bereits vorhanden, übersprungen)`
+        : '';
+      showToast(`${result.added.length} Firewall(s) importiert${skipText}.`);
     } catch (err) {
       errorBox.textContent = err.message;
       errorBox.hidden = false;
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Importieren & Vorschau';
+      btn.textContent = 'Importieren';
     }
   }
 
@@ -1812,6 +1794,11 @@
       renderGrid();
     });
 
+    // Main: Selektions-Toolbar
+    $('#sel-all').addEventListener('click', selectAllDevices);
+    $('#sel-none').addEventListener('click', selectNoDevices);
+    $('#sel-reachable').addEventListener('click', selectReachableDevices);
+
     // Sidebar actions
     $('#add-device-btn').addEventListener('click', openAddModal);
     $('#empty-add-btn').addEventListener('click', openAddModal);
@@ -1819,20 +1806,12 @@
     $('#add-alias-btn').addEventListener('click', () => openPlanModal('alias'));
     $('#bulk-import-btn').addEventListener('click', openBulkModal);
 
-    // Bulk-Modal
+    // Bulk-Modal (Firewall-Import)
     $('#bulk-modal-close').addEventListener('click', closeBulkModal);
     $('#bulk-modal-cancel').addEventListener('click', closeBulkModal);
     $('#bulk-submit-btn').addEventListener('click', submitBulkImport);
-    $('#bk-type-routes').addEventListener('change', updateBulkFormatHint);
-    $('#bk-type-aliases').addEventListener('change', updateBulkFormatHint);
-    $('#bk-pick-all').addEventListener('click', () => {
-      bulkDeviceIds = new Set(state.devices.map((d) => d.id));
-      renderBulkDevicePicker();
-    });
-    $('#bk-pick-none').addEventListener('click', () => {
-      bulkDeviceIds = new Set();
-      renderBulkDevicePicker();
-    });
+    $('#bk-fmt-csv').addEventListener('change', updateBulkFormatHint);
+    $('#bk-fmt-json').addEventListener('change', updateBulkFormatHint);
     $('#bulk-modal').addEventListener('click', (e) => {
       if (e.target.id === 'bulk-modal') closeBulkModal();
     });
@@ -1842,8 +1821,6 @@
     $('#plan-modal-cancel').addEventListener('click', closePlanModal);
     $('#plan-back-btn').addEventListener('click', planBack);
     $('#plan-next-btn').addEventListener('click', planNextOrApply);
-    $('#pl-pick-all').addEventListener('click', pickAllDevices);
-    $('#pl-pick-none').addEventListener('click', pickNoDevices);
     $('#pl-load-gateways').addEventListener('click', loadGatewaySuggestions);
     $('#pl-load-aliases').addEventListener('click', loadAliasSuggestions);
     $('#pl-profile-select').addEventListener('change', (e) => applyProfile(e.target.value));

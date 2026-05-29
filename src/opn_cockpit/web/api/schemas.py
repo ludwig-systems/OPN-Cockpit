@@ -93,6 +93,14 @@ class InventoryResponse(BaseModel):
     tags: list[TagSummary]
 
 
+class DeviceImportResponse(BaseModel):
+    """Ergebnis eines Bulk-Device-Imports."""
+
+    added: list[DeviceResponse]
+    skipped_existing: list[str]
+    parsed_count: int
+
+
 class DeviceCreateRequest(BaseModel):
     """Anlegen eines Geraets im Tresor.
 

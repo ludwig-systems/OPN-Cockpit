@@ -1,48 +1,41 @@
-"""Tests fuer die Bulk-Import-Routen (CSV-Routen / JSON-Aliase)."""
+"""Tests fuer Bulk-Import von Firewall-Geraeten (CSV + JSON)."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from opn_cockpit.core.objects.base import Diff, DiffKind
-from opn_cockpit.core.objects.routes import RouteSpec
-from opn_cockpit.inventory.model import Device
-from opn_cockpit.orchestration.planner import Plan, PlannedDeviceAction
 from opn_cockpit.vault.model import VaultData, VaultDevice
-from opn_cockpit.vault.store import create_vault
+from opn_cockpit.vault.store import create_vault, open_vault
 from opn_cockpit.web.server import create_app
 
 PASSWORD = "korrektes-pferd-batterie-heftklammer"
 
-ROUTE_CSV = """network,gateway,descr,disabled
-10.99.0.0/24,WAN_GW,HQ Berlin,0
-10.99.1.0/24,WAN_GW,Branch Munich,0
+DEVICES_CSV = """name,host,port,tls_verify,tags,descr,api_key,api_secret
+HQ Berlin,opn-berlin.lab,443,true,branches;germany,HQ,KEY-B,SECRET-B
+Branch Munich,opn-munich.lab,443,false,branches;germany,,KEY-M,SECRET-M
 """
 
-ROUTE_CSV_BROKEN = """network,gateway,descr,disabled
-nonsense,WAN_GW,broken,0
-10.99.1.0/24,,empty-gateway,0
+DEVICES_CSV_BROKEN = """name,host,port,tls_verify,tags,descr,api_key,api_secret
+,no-name,443,true,,,KEY,SECRET
+With Name,,443,true,,,KEY,SECRET
+HQ Stuttgart,opn-stuttgart.lab,99999,true,,,KEY,SECRET
 """
 
-ALIASES_JSON = """[
-  {"name": "branch_ips", "type": "host", "content": ["10.1.1.1", "10.1.1.2"]},
-  {"name": "lab_ports", "type": "port", "content": [22, 443]}
+DEVICES_JSON = """[
+  {"name": "HQ Berlin", "host": "opn-berlin.lab", "port": 443, "tls_verify": true,
+   "tags": ["branches", "germany"], "api_key": "KEY-B", "api_secret": "SECRET-B"},
+  {"name": "Branch Munich", "host": "opn-munich.lab", "tls_verify": false,
+   "tags": ["branches"], "api_key": "KEY-M", "api_secret": "SECRET-M"}
 ]
 """
 
 
-def _make_vault(tmp_path: Path) -> Path:
+def _make_vault(tmp_path: Path, existing: list[VaultDevice] | None = None) -> Path:
     path = tmp_path / "test.opnvault"
-    create_vault(path, PASSWORD, VaultData(devices=[
-        VaultDevice(
-            id="dev-001", name="Box 1", host="opn-1.lab", port=443,
-            tls_verify=True, tags=["test"], api_key="k", api_secret="s", descr="",
-        ),
-    ]))
+    create_vault(path, PASSWORD, VaultData(devices=existing or []))
     return path
 
 
@@ -59,29 +52,6 @@ def _bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _fake_bulk_plan() -> Plan:
-    spec = RouteSpec(network="10.99.0.0/24", gateway="WAN_GW", descr="", disabled=False)
-    actions = (
-        PlannedDeviceAction(
-            device=Device(
-                id="dev-001", name="Box 1", host="opn-1.lab", port=443,
-                tls_verify=True, tags=("test",), descr="",
-            ),
-            target_spec=spec,
-            current_state=None,
-            diff=Diff(kind=DiffKind.NEW, summary="NEW"),
-            payload_masked={"network": "10.99.0.0/24"},
-        ),
-    )
-    return Plan(
-        plan_id="pl-BULK1234",
-        action="bulk_add_route",
-        subsystem="routes",
-        created_at_utc="2026-05-29T13:00:00.000Z",
-        actions=actions,
-    )
-
-
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
@@ -93,49 +63,54 @@ def vault(tmp_path: Path) -> Path:
     return _make_vault(tmp_path)
 
 
-@pytest.fixture()
-def token(client: TestClient, vault: Path) -> str:
-    return _unlock(client, vault)
-
-
-class TestImportRoutes:
+class TestImportDevicesCsv:
     def test_requires_auth(self, client: TestClient) -> None:
         response = client.post(
-            "/api/imports/routes",
-            files={"file": ("a.csv", ROUTE_CSV, "text/csv")},
-            data={"target_device_ids": "dev-001"},
+            "/api/imports/devices",
+            files={"file": ("a.csv", DEVICES_CSV, "text/csv")},
+            data={"format": "csv"},
         )
         assert response.status_code == 401
 
-    def test_valid_csv_creates_plan(
+    def test_valid_csv_adds_devices(
         self,
         client: TestClient,
-        token: str,
+        vault: Path,
     ) -> None:
-        with patch(
-            "opn_cockpit.web.api.imports.Planner.create_bulk_plan",
-            return_value=_fake_bulk_plan(),
-        ):
-            response = client.post(
-                "/api/imports/routes",
-                files={"file": ("routes.csv", ROUTE_CSV, "text/csv")},
-                data={"target_device_ids": "dev-001"},
-                headers=_bearer(token),
-            )
+        token = _unlock(client, vault)
+        response = client.post(
+            "/api/imports/devices",
+            files={"file": ("devices.csv", DEVICES_CSV, "text/csv")},
+            data={"format": "csv"},
+            headers=_bearer(token),
+        )
         assert response.status_code == 201
         body = response.json()
-        assert body["plan_id"] == "pl-BULK1234"
-        assert body["action"] == "bulk_add_route"
+        assert body["parsed_count"] == 2
+        assert len(body["added"]) == 2
+        assert body["skipped_existing"] == []
+        names = {d["name"] for d in body["added"]}
+        assert names == {"HQ Berlin", "Branch Munich"}
+        # Auf Platte persistiert
+        opened = open_vault(vault, PASSWORD)
+        on_disk_names = {d.name for d in opened.data.devices}
+        assert on_disk_names == {"HQ Berlin", "Branch Munich"}
+        # Secrets sind drin
+        berlin = next(d for d in opened.data.devices if d.name == "HQ Berlin")
+        assert berlin.api_key == "KEY-B"
+        assert berlin.api_secret == "SECRET-B"
+        assert berlin.tags == ["branches", "germany"]
 
     def test_broken_csv_returns_400_with_errors(
         self,
         client: TestClient,
-        token: str,
+        vault: Path,
     ) -> None:
+        token = _unlock(client, vault)
         response = client.post(
-            "/api/imports/routes",
-            files={"file": ("bad.csv", ROUTE_CSV_BROKEN, "text/csv")},
-            data={"target_device_ids": "dev-001"},
+            "/api/imports/devices",
+            files={"file": ("bad.csv", DEVICES_CSV_BROKEN, "text/csv")},
+            data={"format": "csv"},
             headers=_bearer(token),
         )
         assert response.status_code == 400
@@ -143,81 +118,80 @@ class TestImportRoutes:
         assert "errors" in detail
         assert len(detail["errors"]) >= 1
 
-    def test_no_devices_400(
+    def test_skip_existing_by_name(
         self,
         client: TestClient,
-        token: str,
+        tmp_path: Path,
     ) -> None:
+        existing = [VaultDevice(
+            id="dev-001", name="HQ Berlin", host="other.host", port=443,
+            tls_verify=True, tags=["existing"],
+            api_key="OLD", api_secret="OLD", descr="",
+        )]
+        vault = _make_vault(tmp_path, existing=existing)
+        token = _unlock(client, vault)
         response = client.post(
-            "/api/imports/routes",
-            files={"file": ("routes.csv", ROUTE_CSV, "text/csv")},
-            data={},
+            "/api/imports/devices",
+            files={"file": ("d.csv", DEVICES_CSV, "text/csv")},
+            data={"format": "csv"},
             headers=_bearer(token),
         )
-        # FastAPI gibt 422 wenn Form-Field fehlt
-        assert response.status_code in (400, 422)
+        assert response.status_code == 201
+        body = response.json()
+        assert "HQ Berlin" in body["skipped_existing"]
+        added = {d["name"] for d in body["added"]}
+        assert added == {"Branch Munich"}
+        # Auf Platte: HQ Berlin unveraendert
+        opened = open_vault(vault, PASSWORD)
+        berlin = next(d for d in opened.data.devices if d.name == "HQ Berlin")
+        assert berlin.host == "other.host"
+        assert berlin.api_key == "OLD"
 
 
-class TestImportAliases:
-    def test_valid_json_creates_plan(
+class TestImportDevicesJson:
+    def test_valid_json_adds_devices(
         self,
         client: TestClient,
-        token: str,
+        vault: Path,
     ) -> None:
-        with patch(
-            "opn_cockpit.web.api.imports.Planner.create_bulk_plan",
-            return_value=_fake_bulk_plan(),
-        ):
-            response = client.post(
-                "/api/imports/aliases",
-                files={"file": ("aliases.json", ALIASES_JSON, "application/json")},
-                data={"target_device_ids": "dev-001"},
-                headers=_bearer(token),
-            )
+        token = _unlock(client, vault)
+        response = client.post(
+            "/api/imports/devices",
+            files={"file": ("d.json", DEVICES_JSON, "application/json")},
+            data={"format": "json"},
+            headers=_bearer(token),
+        )
         assert response.status_code == 201
+        body = response.json()
+        assert body["parsed_count"] == 2
+        assert len(body["added"]) == 2
 
     def test_broken_json_returns_400(
         self,
         client: TestClient,
-        token: str,
+        vault: Path,
     ) -> None:
+        token = _unlock(client, vault)
         response = client.post(
-            "/api/imports/aliases",
+            "/api/imports/devices",
             files={"file": ("bad.json", "not json", "application/json")},
-            data={"target_device_ids": "dev-001"},
+            data={"format": "json"},
             headers=_bearer(token),
         )
         assert response.status_code == 400
 
-    def test_append_mode_action_name(
+
+class TestImportDevicesValidation:
+    def test_unknown_format_400(
         self,
         client: TestClient,
-        token: str,
+        vault: Path,
     ) -> None:
-        with patch(
-            "opn_cockpit.web.api.imports.Planner.create_bulk_plan",
-            return_value=_fake_bulk_plan(),
-        ) as create:
-            client.post(
-                "/api/imports/aliases",
-                files={"file": ("a.json", ALIASES_JSON, "application/json")},
-                data={"target_device_ids": "dev-001", "append_mode": "true"},
-                headers=_bearer(token),
-            )
-        kwargs = create.call_args.kwargs
-        assert kwargs["action"] == "bulk_append_alias"
-
-
-class TestImportUnknownDevice:
-    def test_unknown_device_returns_404(
-        self,
-        client: TestClient,
-        token: str,
-    ) -> None:
+        token = _unlock(client, vault)
         response = client.post(
-            "/api/imports/routes",
-            files={"file": ("a.csv", ROUTE_CSV, "text/csv")},
-            data={"target_device_ids": "dev-999"},
+            "/api/imports/devices",
+            files={"file": ("a.txt", "hi", "text/plain")},
+            data={"format": "xml"},
             headers=_bearer(token),
         )
-        assert response.status_code == 404
+        assert response.status_code == 400
