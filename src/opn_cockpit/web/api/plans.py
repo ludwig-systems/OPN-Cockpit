@@ -14,15 +14,19 @@ from opn_cockpit.config import get_app_data_dir
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 from opn_cockpit.core.objects.aliases import AliasSpec
 from opn_cockpit.core.objects.routes import RouteSpec
+from opn_cockpit.core.result import RolloutReport, Status
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.orchestration.executor import Executor
 from opn_cockpit.orchestration.plan_store import PlanStore, PlanStoreError
-from opn_cockpit.orchestration.planner import Plan, Planner
+from opn_cockpit.orchestration.planner import Plan, PlannedDeviceAction, Planner
 from opn_cockpit.orchestration.registry import get_binding
 from opn_cockpit.security.session import Session
 from opn_cockpit.web.api.schemas import (
     AliasPlanRequest,
+    ApplyRequest,
     DeviceResultResponse,
+    OutstandingDeviceEntry,
+    OutstandingResponse,
     PlanListResponse,
     PlannedActionResponse,
     PlanResponse,
@@ -135,6 +139,59 @@ def list_plans(session: Session = Depends(require_session)) -> PlanListResponse:
 
 
 # ---------------------------------------------------------------------------
+# GET /api/plans/outstanding (MUSS vor /{plan_id} stehen — sonst frisst FastAPI das)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/outstanding", response_model=OutstandingResponse)
+def outstanding(session: Session = Depends(require_session)) -> OutstandingResponse:
+    """Aggregiert pro Geraet die Anzahl noch nicht erfolgreich abgeschlossener Plaene."""
+    session.touch()
+    store = _plan_store()
+    # device_id -> (count, [plan_ids in load-order], name)
+    counts: dict[str, int] = {}
+    plan_lists: dict[str, list[str]] = {}
+    name_lookup = {d.id: d.name for d in session.opened.data.devices}
+
+    for plan_id in store.list_ids():
+        try:
+            plan = store.load(plan_id)
+        except PlanStoreError:
+            continue
+        plan_devices = {a.device.id for a in plan.actions}
+        if not plan_devices:
+            continue
+        try:
+            report = store.load_report(plan_id)
+        except PlanStoreError:
+            report = None
+        if report is None:
+            success_ids: set[str] = set()
+        else:
+            success_ids = {
+                r.device_id for r in report.results
+                if r.status in {Status.VERIFIED, Status.SKIPPED}
+            }
+        for did in plan_devices:
+            if did in success_ids:
+                continue
+            counts[did] = counts.get(did, 0) + 1
+            plan_lists.setdefault(did, []).append(plan_id)
+
+    entries = [
+        OutstandingDeviceEntry(
+            device_id=did,
+            device_name=name_lookup.get(did, did),
+            outstanding_count=counts[did],
+            plans=list(reversed(plan_lists[did])),
+        )
+        for did in counts
+    ]
+    entries.sort(key=lambda e: (-e.outstanding_count, e.device_name.lower()))
+    return OutstandingResponse(devices=entries)
+
+
+# ---------------------------------------------------------------------------
 # GET /api/plans/{plan_id}
 # ---------------------------------------------------------------------------
 
@@ -186,16 +243,24 @@ def delete_plan(
 @router.post("/{plan_id}/apply", response_model=RolloutReportResponse)
 def apply_plan(
     plan_id: str,
+    payload: ApplyRequest | None = None,
     session: Session = Depends(require_session),
 ) -> RolloutReportResponse:
-    """Rollt einen vorher erzeugten Plan aus.
+    """Rollt einen Plan aus. Optional nur fuer eine Untermenge der Geraete.
 
-    Lädt den Plan aus dem Store, baut HttpClient + Executor, ruft die
-    bestehende Orchestration-Pipeline auf. Beim Apply NICHT den Plan
-    löschen — der User kann sich danach das Ergebnis ansehen oder den
-    Plan erneut anwenden.
+    ``payload.device_ids`` ist der Retry-Pfad: User hat den Plan vorhin
+    schon einmal angewandt, einige Geraete sind fehlgeschlagen, und er
+    will nur die fehlgeschlagenen nachziehen. Wenn ``device_ids`` leer
+    oder ``None`` ist, wird der Plan auf allen seinen Geraeten ausgerollt.
     """
     plan = _load_plan_or_404(plan_id)
+    if payload is not None and payload.device_ids:
+        plan = _filter_plan_by_devices(plan, payload.device_ids)
+        if not plan.actions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Keine der angegebenen Geraete-IDs ist im Plan.",
+            )
     binding = get_binding(plan.subsystem)
     devices_in_plan = [a.device for a in plan.actions]
     targets = [
@@ -216,6 +281,16 @@ def apply_plan(
             controller=binding.controller,
             client=client,
         )
+
+    # Apply-Report neben dem Plan persistieren, damit Outstanding-Aggregation
+    # spaeter weiss, welche Geraete erfolgreich waren.
+    store = _plan_store()
+    if payload is not None and payload.device_ids:
+        # Retry: bestehenden Report mit den neuen Resultaten zusammenmischen.
+        previous = store.load_report(plan_id)
+        if previous is not None:
+            report = _merge_reports(previous, report)
+    store.save_report(plan_id, report)
 
     device_names = {d.id: d.name for d in devices_in_plan}
     results = [
@@ -323,6 +398,33 @@ def _load_plan_or_404(plan_id: str) -> Plan:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+
+
+def _filter_plan_by_devices(plan: Plan, device_ids: list[str]) -> Plan:
+    """Liefert einen Plan, der nur Aktionen fuer die genannten Geraete enthaelt."""
+    wanted = set(device_ids)
+    filtered: list[PlannedDeviceAction] = [
+        a for a in plan.actions if a.device.id in wanted
+    ]
+    return Plan(
+        plan_id=plan.plan_id,
+        action=plan.action,
+        subsystem=plan.subsystem,
+        created_at_utc=plan.created_at_utc,
+        actions=tuple(filtered),
+    )
+
+
+def _merge_reports(previous: RolloutReport, current: RolloutReport) -> RolloutReport:
+    """Mischt vorigen Report mit dem aktuellen — current ueberschreibt previous.
+
+    Verwendet beim Retry: alte Erfolge bleiben drin, fuer die retryten
+    Geraete kommt das neue Resultat.
+    """
+    by_device = {r.device_id: r for r in previous.results}
+    for r in current.results:
+        by_device[r.device_id] = r
+    return RolloutReport(results=tuple(by_device.values()))
 
 
 def _plan_to_response(plan: Plan) -> PlanResponse:

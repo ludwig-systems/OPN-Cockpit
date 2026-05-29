@@ -32,6 +32,7 @@
     sessionInfo: null,
     heartbeatInFlight: false,
     selectedDeviceIds: new Set(),  // globale Multi-Auswahl fuer Plan/Apply
+    outstandingByDevice: {},       // device_id -> { count, plans[] }
   };
 
   let heartbeatHandle = null;
@@ -264,6 +265,22 @@
     pruneSelectionToExistingDevices();
     renderSidebar();
     renderGrid();
+    loadOutstanding().catch(() => {});
+  }
+
+  async function loadOutstanding() {
+    const response = await apiGet('/api/plans/outstanding');
+    if (response.status === 401) { handleSessionLost(); return; }
+    if (!response.ok) return;
+    const data = await response.json();
+    state.outstandingByDevice = {};
+    for (const entry of data.devices || []) {
+      state.outstandingByDevice[entry.device_id] = {
+        count: entry.outstanding_count,
+        plans: entry.plans,
+      };
+    }
+    renderGrid();
   }
 
   // -------------------- Sidebar --------------------
@@ -418,6 +435,25 @@
     name.className = 'card-name';
     name.textContent = device.name;
     article.appendChild(name);
+
+    // Outstanding-Badge: zeigt wie viele Plans noch offen sind
+    const outstanding = state.outstandingByDevice[device.id];
+    if (outstanding && outstanding.count > 0) {
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'card-outstanding-badge';
+      badge.title = 'Offene Aktionen — klicken zum Nachziehen';
+      badge.innerHTML = `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="6" cy="6" r="4.5"/>
+        <line x1="6" y1="4" x2="6" y2="6.5"/>
+        <circle cx="6" cy="8.3" r="0.5" fill="currentColor"/>
+      </svg><span>${outstanding.count} offen</span>`;
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openRetryForDevice(device.id, outstanding.plans[0]);
+      });
+      article.appendChild(badge);
+    }
 
     // Tags
     if (device.tags && device.tags.length) {
@@ -1003,6 +1039,7 @@
   let planMode = 'route';
   let planPhase = 'input';
   let currentPlan = null;       // PlanResponse vom Server
+  let retryDeviceIds = null;    // null = normales Apply; Array = nur diese
 
   function openPlanModal(mode) {
     if (state.selectedDeviceIds.size === 0) {
@@ -1033,6 +1070,38 @@
     planMode = 'route';
     planPhase = 'input';
     currentPlan = null;
+    retryDeviceIds = null;
+  }
+
+  async function openRetryForDevice(deviceId, planId) {
+    if (!planId) return;
+    try {
+      const response = await apiGet(`/api/plans/${encodeURIComponent(planId)}`);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        showToast('Plan nicht abrufbar — vielleicht wurde er gelöscht.', true);
+        return;
+      }
+      currentPlan = await response.json();
+      retryDeviceIds = [deviceId];
+      planMode = currentPlan.subsystem === 'routes' ? 'route' : 'alias';
+      $('#plan-modal-title').textContent = `Nachziehen für ${state.devices.find((d) => d.id === deviceId)?.name || deviceId}`;
+      $('#plan-modal-error').hidden = true;
+      $('#plan-preview-error').hidden = true;
+      // Vorschau auf die gefilterte Selection beschränken
+      const filtered = {
+        ...currentPlan,
+        actions: currentPlan.actions.filter((a) => a.device_id === deviceId),
+      };
+      filtered.to_apply_count = filtered.actions.filter((a) => a.diff_kind !== 'skip').length;
+      filtered.skip_count = filtered.actions.length - filtered.to_apply_count;
+      filtered.target_count = filtered.actions.length;
+      $('#plan-modal').hidden = false;
+      renderPreview(filtered);
+      showPlanPhase('preview');
+    } catch (err) {
+      showToast(err.message, true);
+    }
   }
 
   function renderPlanSelectionSummary() {
@@ -1227,12 +1296,16 @@
     back.disabled = true;
     next.textContent = 'Rolle aus…';
     try {
-      const response = await apiPost(`/api/plans/${encodeURIComponent(currentPlan.plan_id)}/apply`);
+      const body = retryDeviceIds ? { device_ids: retryDeviceIds } : null;
+      const response = await apiPost(
+        `/api/plans/${encodeURIComponent(currentPlan.plan_id)}/apply`,
+        body,
+      );
       if (response.status === 401) { handleSessionLost(); return; }
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
+        const respBody = await response.json().catch(() => ({}));
         const err = $('#plan-preview-error');
-        err.textContent = body.detail || `Fehler ${response.status}`;
+        err.textContent = respBody.detail || `Fehler ${response.status}`;
         err.hidden = false;
         return;
       }
@@ -1240,6 +1313,8 @@
       renderResult(report);
       showPlanPhase('result');
       pollHeartbeat();
+      // Outstanding-Indikator hat sich vermutlich geaendert.
+      loadOutstanding().catch(() => {});
     } catch (err) {
       const errBox = $('#plan-preview-error');
       errBox.textContent = err.message;
@@ -1252,11 +1327,24 @@
 
   function renderResult(report) {
     const summary = $('#pl-result-summary');
+    let retryAction = '';
+    if (report.failures > 0) {
+      retryAction = `
+        <button class="btn-secondary result-retry-btn" id="result-retry-btn">
+          ${report.failures} fehlgeschlagene erneut versuchen
+        </button>
+      `;
+    }
     summary.innerHTML = `
       <div class="result-summary-item ok"><strong>${report.successes}</strong><span>erfolgreich</span></div>
       <div class="result-summary-item fail"><strong>${report.failures}</strong><span>fehlgeschlagen</span></div>
       <div class="result-summary-item skip"><strong>${report.skipped}</strong><span>übersprungen</span></div>
+      ${retryAction}
     `;
+    const retryBtn = $('#result-retry-btn');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => doRetryFailed(report));
+    }
     const list = $('#pl-result-list');
     list.innerHTML = '';
     for (const r of report.results) {
@@ -1287,6 +1375,24 @@
 
   function planBack() {
     showPlanPhase('input');
+  }
+
+  async function doRetryFailed(report) {
+    const failedIds = report.results
+      .filter((r) => r.status === 'Fehlgeschlagen')
+      .map((r) => r.device_id);
+    if (!failedIds.length) return;
+    retryDeviceIds = failedIds;
+    // Vorschau auf die fehlgeschlagenen filtern
+    const filtered = {
+      ...currentPlan,
+      actions: currentPlan.actions.filter((a) => failedIds.includes(a.device_id)),
+    };
+    filtered.to_apply_count = filtered.actions.filter((a) => a.diff_kind !== 'skip').length;
+    filtered.skip_count = filtered.actions.length - filtered.to_apply_count;
+    filtered.target_count = filtered.actions.length;
+    renderPreview(filtered);
+    showPlanPhase('preview');
   }
 
   function showPlanError(msg) {

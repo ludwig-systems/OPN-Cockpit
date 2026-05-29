@@ -25,6 +25,12 @@ from pathlib import Path
 from typing import Any
 
 from opn_cockpit.core.objects.base import Diff, DiffKind
+from opn_cockpit.core.result import (
+    Phase,
+    Result,
+    RolloutReport,
+    Status,
+)
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.orchestration.planner import Plan, PlannedDeviceAction
 from opn_cockpit.orchestration.registry import get_binding
@@ -77,9 +83,40 @@ class PlanStore:
         ids: list[str] = []
         for p in self.base_dir.glob("pl-*.json"):
             stem = p.stem
-            if PLAN_ID_PATTERN.match(stem):
+            if PLAN_ID_PATTERN.match(stem) and not stem.endswith(".report"):
                 ids.append(stem)
         return sorted(ids)
+
+    # ----- Apply-Reports -----
+
+    def save_report(self, plan_id: str, report: RolloutReport) -> Path:
+        """Persistiert das Apply-Resultat neben dem Plan.
+
+        Dateiname: ``{plan_id}.report.json``. Ueberschreibt frueherere
+        Reports - bei mehreren Apply-Versuchen (Retry) gilt der letzte.
+        """
+        if not PLAN_ID_PATTERN.match(plan_id):
+            raise PlanStoreError(f"Ungueltige Plan-ID: {plan_id!r}")
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        path = self.base_dir / f"{plan_id}.report.json"
+        path.write_text(
+            json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return path
+
+    def load_report(self, plan_id: str) -> RolloutReport | None:
+        """Laedt den letzten Apply-Report fuer einen Plan, falls vorhanden."""
+        if not PLAN_ID_PATTERN.match(plan_id):
+            raise PlanStoreError(f"Ungueltige Plan-ID: {plan_id!r}")
+        path = self.base_dir / f"{plan_id}.report.json"
+        if not path.exists():
+            return None
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PlanStoreError(f"Report-Datei nicht lesbar: {path} ({exc})") from exc
+        return _report_from_dict(raw)
 
     def _resolve_path(self, plan_id_or_path: str) -> Path:
         candidate = Path(plan_id_or_path)
@@ -189,6 +226,65 @@ def _action_from_dict(raw: dict[str, Any], adapter: Any) -> PlannedDeviceAction:
         diff=diff,
         payload_masked=payload_dict,
     )
+
+
+# ---------------------------------------------------------------------------
+# Report-Serialisierung
+# ---------------------------------------------------------------------------
+
+
+def _report_to_dict(report: RolloutReport) -> dict[str, Any]:
+    return {
+        "results": [
+            {
+                "device_id": r.device_id,
+                "subsystem": r.subsystem,
+                "status": str(r.status),
+                "short_message": r.short_message,
+                "error_kind": r.error_kind,
+                "failed_phase": str(r.failed_phase) if r.failed_phase else None,
+                "duration_ms": r.duration_ms,
+            }
+            for r in report.results
+        ],
+    }
+
+
+def _report_from_dict(raw: dict[str, Any]) -> RolloutReport:
+    if not isinstance(raw, dict):
+        return RolloutReport(results=())
+    results_raw = raw.get("results") or []
+    if not isinstance(results_raw, list):
+        return RolloutReport(results=())
+    results: list[Result] = []
+    for r in results_raw:
+        if not isinstance(r, dict):
+            continue
+        try:
+            status_val = Status(str(r.get("status", "")))
+        except ValueError:
+            continue
+        failed_phase: Phase | None
+        phase_raw = r.get("failed_phase")
+        if isinstance(phase_raw, str) and phase_raw:
+            try:
+                failed_phase = Phase(phase_raw)
+            except ValueError:
+                failed_phase = None
+        else:
+            failed_phase = None
+        results.append(
+            Result(
+                device_id=str(r.get("device_id", "")),
+                subsystem=str(r.get("subsystem", "")),
+                status=status_val,
+                short_message=str(r.get("short_message", "")),
+                error_kind=r.get("error_kind") if isinstance(r.get("error_kind"), str) else None,
+                failed_phase=failed_phase,
+                duration_ms=int(r.get("duration_ms", 0) or 0),
+            )
+        )
+    return RolloutReport(results=tuple(results))
 
 
 def _device_from_dict(raw: dict[str, Any]) -> Device:

@@ -240,6 +240,29 @@ class RolloutReportResponse(BaseModel):
     results: list[DeviceResultResponse]
 
 
+class ApplyRequest(BaseModel):
+    """Optionaler Body fuer Apply: nur eine Untermenge der Geraete ausrollen.
+
+    Wird beim Retry-Pfad genutzt - User schickt die fehlgeschlagenen
+    device_ids und der Server wiederholt den Plan nur fuer die.
+    """
+
+    device_ids: list[str] | None = None
+
+
+class OutstandingDeviceEntry(BaseModel):
+    """Pro Geraet: Anzahl + Liste der Plaene mit ausstehenden Aktionen."""
+
+    device_id: str
+    device_name: str
+    outstanding_count: int
+    plans: list[str]  # Plan-IDs, neueste zuerst
+
+
+class OutstandingResponse(BaseModel):
+    devices: list[OutstandingDeviceEntry]
+
+
 # ---------------------------------------------------------------------------
 # Profile (Templates)
 # ---------------------------------------------------------------------------

@@ -941,6 +941,29 @@ body {
 .card-checkbox svg { opacity: 0; transition: opacity 0.12s; }
 .card.selected .card-checkbox svg { opacity: 1; }
 
+.card-outstanding-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 9px;
+  background: var(--checking);
+  color: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  align-self: flex-start;
+  cursor: pointer;
+  border: none;
+  transition: filter 0.12s;
+}
+
+.card-outstanding-badge:hover { filter: brightness(1.1); }
+
+.card-outstanding-badge svg { flex-shrink: 0; }
+
 .card-status-row {
   display: flex;
   align-items: center;
@@ -1553,6 +1576,12 @@ a.card-open-link { text-decoration: none; }
 .result-summary-item.ok strong { color: var(--online); }
 .result-summary-item.fail strong { color: var(--offline); }
 .result-summary-item.skip strong { color: var(--text-subtle); }
+
+.result-retry-btn {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 0 14px;
+}
 
 .result-list {
   display: flex;
