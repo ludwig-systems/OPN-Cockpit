@@ -102,6 +102,13 @@
         </div>
 
         <div class="topbar-actions">
+          <button class="icon-btn" id="audit-open-btn" title="Audit-Log öffnen">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3.5" y1="4.5" x2="12.5" y2="4.5"/>
+              <line x1="3.5" y1="8" x2="12.5" y2="8"/>
+              <line x1="3.5" y1="11.5" x2="9" y2="11.5"/>
+            </svg>
+          </button>
           <button class="icon-btn" id="theme-toggle-main" title="Theme wechseln">
             <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
               <circle cx="7.5" cy="7.5" r="2.5" />
@@ -346,6 +353,48 @@
         <div class="modal-footer">
           <button class="btn-link" id="device-modal-cancel">Schließen</button>
           <button class="btn-danger" id="device-modal-delete">Gerät löschen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Audit-Log ================ -->
+    <div class="modal-backdrop" id="audit-modal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="audit-modal-title">
+        <div class="modal-header">
+          <h2 id="audit-modal-title">Audit-Log</h2>
+          <button class="icon-btn modal-close" id="audit-modal-close" aria-label="Schließen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <div class="audit-filters">
+            <div class="audit-filter-col">
+              <label class="form-label" for="au-filter-event">Ereignis</label>
+              <select id="au-filter-event" class="form-select">
+                <option value="">(alle)</option>
+              </select>
+            </div>
+            <div class="audit-filter-col">
+              <label class="form-label" for="au-filter-action">Aktion</label>
+              <input id="au-filter-action" class="form-input" type="text" placeholder="z. B. add_route" />
+            </div>
+            <div class="audit-filter-col">
+              <label class="form-label" for="au-filter-device">Geräte-ID</label>
+              <input id="au-filter-device" class="form-input" type="text" placeholder="dev-001" />
+            </div>
+            <button class="btn-secondary audit-filter-reload" id="au-reload">Anwenden</button>
+          </div>
+
+          <div class="audit-summary" id="au-summary"></div>
+          <div class="audit-list" id="au-list"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="audit-modal-cancel">Schließen</button>
         </div>
       </div>
     </div>

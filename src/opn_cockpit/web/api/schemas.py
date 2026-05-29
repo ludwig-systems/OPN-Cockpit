@@ -233,6 +233,33 @@ class RolloutReportResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Audit
+# ---------------------------------------------------------------------------
+
+
+class AuditEntryResponse(BaseModel):
+    timestamp_utc: str
+    actor: str
+    event: str
+    summary: str
+    action: str | None = None
+    target_device_id: str | None = None
+    target_device_name: str | None = None
+    target_count: int | None = None
+    status: str | None = None
+    error_kind: str | None = None
+    failed_phase: str | None = None
+    duration_ms: int | None = None
+    vault_path: str | None = None
+
+
+class AuditListResponse(BaseModel):
+    entries: list[AuditEntryResponse]
+    total: int
+    truncated: bool
+
+
+# ---------------------------------------------------------------------------
 # Fehler
 # ---------------------------------------------------------------------------
 

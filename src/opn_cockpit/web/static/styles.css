@@ -1434,6 +1434,108 @@ a.card-open-link { text-decoration: none; }
   color: var(--text-subtle);
 }
 
+/* ============================================================ */
+/* AUDIT-MODAL                                                    */
+/* ============================================================ */
+
+.audit-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr max-content;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+
+.audit-filter-col { display: flex; flex-direction: column; }
+
+.audit-filter-reload {
+  height: 38px;
+  align-self: flex-end;
+}
+
+.audit-summary {
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.audit-summary strong { color: var(--text); }
+
+.audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 460px;
+  overflow-y: auto;
+}
+
+.audit-row {
+  display: grid;
+  grid-template-columns: 160px 130px 1fr max-content;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  font-size: 12px;
+  align-items: center;
+}
+
+.audit-row:hover { background: var(--bg-card-hover); }
+
+.audit-row-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+
+.audit-row-event {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.audit-row-summary {
+  color: var(--text);
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audit-row-status {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 8px;
+  border-radius: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.audit-row-status.verifiziert,
+.audit-row-status.uebersprungen { color: var(--online); background: rgba(134, 216, 164, 0.10); border: 1px solid var(--online); }
+.audit-row-status.fehlgeschlagen { color: var(--offline); background: rgba(229, 113, 100, 0.10); border: 1px solid var(--offline); }
+.audit-row-status.geschrieben,
+.audit-row-status.aktiviert { color: var(--checking); background: rgba(239, 194, 106, 0.08); border: 1px solid var(--checking); }
+
+.audit-empty {
+  padding: 40px 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-subtle);
+}
+
 /* Toast (in-app feedback) */
 
 .toast {

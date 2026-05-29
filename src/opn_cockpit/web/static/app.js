@@ -1252,6 +1252,115 @@
     errorBox.hidden = false;
   }
 
+  // -------------------- Audit-Modal --------------------
+
+  let auditEventKindsLoaded = false;
+
+  async function openAuditModal() {
+    if (!auditEventKindsLoaded) await loadAuditEventKinds();
+    $('#au-filter-event').value = '';
+    $('#au-filter-action').value = '';
+    $('#au-filter-device').value = '';
+    $('#audit-modal').hidden = false;
+    await reloadAudit();
+  }
+
+  function closeAuditModal() {
+    $('#audit-modal').hidden = true;
+  }
+
+  async function loadAuditEventKinds() {
+    try {
+      const response = await apiGet('/api/audit/events');
+      if (!response.ok) return;
+      const events = await response.json();
+      const select = $('#au-filter-event');
+      // Default option behalten
+      for (const ev of events) {
+        const opt = document.createElement('option');
+        opt.value = ev;
+        opt.textContent = ev;
+        select.appendChild(opt);
+      }
+      auditEventKindsLoaded = true;
+    } catch (_) {}
+  }
+
+  async function reloadAudit() {
+    const params = new URLSearchParams();
+    const event = $('#au-filter-event').value;
+    const action = $('#au-filter-action').value.trim();
+    const device = $('#au-filter-device').value.trim();
+    if (event) params.set('event', event);
+    if (action) params.set('action', action);
+    if (device) params.set('target_device_id', device);
+    params.set('limit', '200');
+
+    const list = $('#au-list');
+    list.innerHTML = '<div class="audit-empty">Lade…</div>';
+    try {
+      const response = await apiGet(`/api/audit?${params.toString()}`);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        list.innerHTML = `<div class="audit-empty">Fehler ${response.status}</div>`;
+        return;
+      }
+      const data = await response.json();
+      renderAudit(data);
+    } catch (err) {
+      list.innerHTML = `<div class="audit-empty">${err.message}</div>`;
+    }
+  }
+
+  function renderAudit(data) {
+    const summary = $('#au-summary');
+    summary.innerHTML = `
+      <span><strong>${data.entries.length}</strong> Einträge angezeigt</span>
+      <span>${data.total} gesamt im Log</span>
+      ${data.truncated ? '<span>(neueste zuerst, älteste abgeschnitten)</span>' : ''}
+    `;
+    const list = $('#au-list');
+    list.innerHTML = '';
+    if (!data.entries.length) {
+      list.innerHTML = '<div class="audit-empty">Keine Einträge passen zum Filter.</div>';
+      return;
+    }
+    for (const entry of data.entries) {
+      const row = document.createElement('div');
+      row.className = 'audit-row';
+
+      const time = document.createElement('span');
+      time.className = 'audit-row-time';
+      time.textContent = formatAuditTime(entry.timestamp_utc);
+      const event = document.createElement('span');
+      event.className = 'audit-row-event';
+      event.textContent = entry.event;
+      const summaryEl = document.createElement('span');
+      summaryEl.className = 'audit-row-summary';
+      summaryEl.textContent = entry.summary;
+      const status = document.createElement('span');
+      if (entry.status) {
+        status.className = `audit-row-status ${entry.status.toLowerCase().replace('ü','ue')}`;
+        status.textContent = entry.status;
+      } else {
+        status.textContent = '';
+      }
+
+      row.appendChild(time);
+      row.appendChild(event);
+      row.appendChild(summaryEl);
+      row.appendChild(status);
+      list.appendChild(row);
+    }
+  }
+
+  function formatAuditTime(iso) {
+    // 2026-05-29T12:34:56.789Z -> "29.05. 12:34:56"
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return iso;
+    return `${m[3]}.${m[2]}. ${m[4]}:${m[5]}:${m[6]}`;
+  }
+
   // -------------------- Toast --------------------
 
   let toastEl = null;
@@ -1326,6 +1435,15 @@
     // Main: top bar
     $('#theme-toggle-main').addEventListener('click', toggleTheme);
     $('#lock-btn').addEventListener('click', doLock);
+    $('#audit-open-btn').addEventListener('click', openAuditModal);
+
+    // Audit-Modal
+    $('#audit-modal-close').addEventListener('click', closeAuditModal);
+    $('#audit-modal-cancel').addEventListener('click', closeAuditModal);
+    $('#au-reload').addEventListener('click', reloadAudit);
+    $('#audit-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'audit-modal') closeAuditModal();
+    });
 
     // Main: search
     $('#search-input').addEventListener('input', (e) => {
