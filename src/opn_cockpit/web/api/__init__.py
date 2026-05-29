@@ -12,6 +12,7 @@ from fastapi import APIRouter, FastAPI
 from opn_cockpit import __version__
 from opn_cockpit.web.api import audit as audit_routes
 from opn_cockpit.web.api import auth as auth_routes
+from opn_cockpit.web.api import discover as discover_routes
 from opn_cockpit.web.api import inventory as inventory_routes
 from opn_cockpit.web.api import plans as plans_routes
 from opn_cockpit.web.api import vaults as vaults_routes
@@ -32,3 +33,4 @@ def register_api_routes(app: FastAPI) -> None:
     app.include_router(inventory_routes.router)
     app.include_router(plans_routes.router)
     app.include_router(audit_routes.router)
+    app.include_router(discover_routes.router)

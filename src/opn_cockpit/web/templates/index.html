@@ -425,7 +425,9 @@
                 </div>
                 <div class="form-col flex-grow">
                   <label class="form-label" for="pl-route-gateway">Gateway-Name</label>
-                  <input id="pl-route-gateway" class="form-input" type="text" placeholder="WAN_GW" />
+                  <input id="pl-route-gateway" class="form-input" type="text" placeholder="WAN_GW" list="pl-gateway-suggestions" autocomplete="off" />
+                  <datalist id="pl-gateway-suggestions"></datalist>
+                  <button class="btn-link suggest-btn" id="pl-load-gateways" type="button">Vorschläge laden</button>
                 </div>
               </div>
               <div class="form-row">
@@ -449,7 +451,9 @@
               <div class="form-row">
                 <div class="form-col flex-grow">
                   <label class="form-label" for="pl-alias-name">Alias-Name</label>
-                  <input id="pl-alias-name" class="form-input" type="text" placeholder="branch_ips" />
+                  <input id="pl-alias-name" class="form-input" type="text" placeholder="branch_ips" list="pl-alias-suggestions" autocomplete="off" />
+                  <datalist id="pl-alias-suggestions"></datalist>
+                  <button class="btn-link suggest-btn" id="pl-load-aliases" type="button">Vorschläge laden</button>
                 </div>
                 <div class="form-col" style="flex:0 0 140px">
                   <label class="form-label" for="pl-alias-type">Typ</label>

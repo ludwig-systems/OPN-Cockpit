@@ -1221,6 +1221,14 @@ a.card-open-link { text-decoration: none; }
 .plan-phase[hidden] { display: none !important; }
 .plan-field-set[hidden] { display: none !important; }
 
+.suggest-btn {
+  align-self: flex-end;
+  font-size: 11px;
+  color: var(--accent-strong);
+  padding: 4px 0;
+  margin-top: 4px;
+}
+
 .device-picker {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);

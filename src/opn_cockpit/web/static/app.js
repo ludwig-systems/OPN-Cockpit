@@ -1252,6 +1252,88 @@
     errorBox.hidden = false;
   }
 
+  // -------------------- Discovery (Auto-Suggest) --------------------
+
+  function _pickDiscoveryDevice() {
+    // Erstes ausgewaehltes Geraet — sonst null.
+    if (planDeviceIds.size === 0) return null;
+    for (const id of planDeviceIds) {
+      const d = state.devices.find((x) => x.id === id);
+      if (d) return d;
+    }
+    return null;
+  }
+
+  async function loadGatewaySuggestions() {
+    const device = _pickDiscoveryDevice();
+    if (!device) {
+      showToast('Mindestens ein Zielgerät auswählen.', true);
+      return;
+    }
+    const btn = $('#pl-load-gateways');
+    btn.disabled = true;
+    btn.textContent = 'Lade von ' + device.name + '…';
+    try {
+      const response = await apiGet(`/api/discover/devices/${encodeURIComponent(device.id)}/gateways`);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      const data = await response.json();
+      const dl = $('#pl-gateway-suggestions');
+      dl.innerHTML = '';
+      for (const g of data.gateways) {
+        const opt = document.createElement('option');
+        opt.value = g.name;
+        opt.label = g.address ? `${g.name} — ${g.address} (${g.status})` : g.name;
+        dl.appendChild(opt);
+      }
+      showToast(`${data.gateways.length} Gateway(s) gefunden auf ${device.name}.`);
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Vorschläge laden';
+    }
+  }
+
+  async function loadAliasSuggestions() {
+    const device = _pickDiscoveryDevice();
+    if (!device) {
+      showToast('Mindestens ein Zielgerät auswählen.', true);
+      return;
+    }
+    const btn = $('#pl-load-aliases');
+    btn.disabled = true;
+    btn.textContent = 'Lade von ' + device.name + '…';
+    try {
+      const response = await apiGet(`/api/discover/devices/${encodeURIComponent(device.id)}/aliases`);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      const data = await response.json();
+      const dl = $('#pl-alias-suggestions');
+      dl.innerHTML = '';
+      for (const a of data.aliases) {
+        const opt = document.createElement('option');
+        opt.value = a.name;
+        opt.label = a.type ? `${a.name} (${a.type})` : a.name;
+        dl.appendChild(opt);
+      }
+      showToast(`${data.aliases.length} Alias(e) gefunden auf ${device.name}.`);
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Vorschläge laden';
+    }
+  }
+
   // -------------------- Audit-Modal --------------------
 
   let auditEventKindsLoaded = false;
@@ -1464,6 +1546,8 @@
     $('#plan-next-btn').addEventListener('click', planNextOrApply);
     $('#pl-pick-all').addEventListener('click', pickAllDevices);
     $('#pl-pick-none').addEventListener('click', pickNoDevices);
+    $('#pl-load-gateways').addEventListener('click', loadGatewaySuggestions);
+    $('#pl-load-aliases').addEventListener('click', loadAliasSuggestions);
     $('#pl-confirm').addEventListener('change', (e) => {
       $('#plan-next-btn').disabled = !e.target.checked;
     });

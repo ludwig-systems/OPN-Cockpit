@@ -233,6 +233,33 @@ class RolloutReportResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Discovery
+# ---------------------------------------------------------------------------
+
+
+class GatewaySummaryResponse(BaseModel):
+    name: str
+    address: str
+    status: str
+
+
+class AliasSummaryResponse(BaseModel):
+    name: str
+    type: str
+    descr: str
+
+
+class GatewayDiscoveryResponse(BaseModel):
+    device_id: str
+    gateways: list[GatewaySummaryResponse]
+
+
+class AliasDiscoveryResponse(BaseModel):
+    device_id: str
+    aliases: list[AliasSummaryResponse]
+
+
+# ---------------------------------------------------------------------------
 # Audit
 # ---------------------------------------------------------------------------
 
