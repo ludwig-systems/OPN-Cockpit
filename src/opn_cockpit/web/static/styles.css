@@ -1245,6 +1245,28 @@ a.card-open-link { text-decoration: none; }
   align-items: center;
 }
 
+.bulk-type-row {
+  display: flex;
+  gap: 18px;
+  padding: 10px 0;
+}
+
+.bulk-parse-errors {
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.form-hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-elevated);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
 .device-picker {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);

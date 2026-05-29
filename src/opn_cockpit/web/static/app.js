@@ -1463,6 +1463,156 @@
     }
   }
 
+  // -------------------- Bulk-Import-Modal --------------------
+
+  let bulkDeviceIds = new Set();
+
+  function openBulkModal() {
+    bulkDeviceIds = new Set(state.devices.map((d) => d.id));
+    $('#bk-type-routes').checked = true;
+    $('#bk-type-aliases').checked = false;
+    $('#bk-file').value = '';
+    $('#bk-append').checked = false;
+    $('#bk-append-row').hidden = true;
+    $('#bulk-modal-error').hidden = true;
+    $('#bulk-parse-errors').hidden = true;
+    updateBulkFormatHint();
+    renderBulkDevicePicker();
+    $('#bulk-modal').hidden = false;
+  }
+
+  function closeBulkModal() {
+    $('#bulk-modal').hidden = true;
+  }
+
+  function updateBulkFormatHint() {
+    const isRoutes = $('#bk-type-routes').checked;
+    $('#bk-append-row').hidden = isRoutes;
+    if (isRoutes) {
+      $('#bk-format-hint').innerHTML =
+        'CSV-Spalten: <code>network, gateway, descr, disabled</code>. Header-Zeile zwingend.';
+      $('#bk-file').setAttribute('accept', '.csv,text/csv');
+    } else {
+      $('#bk-format-hint').innerHTML =
+        'JSON-Array von Objekten: <code>name, type, content[], descr?, merge_mode?</code>.';
+      $('#bk-file').setAttribute('accept', '.json,application/json');
+    }
+  }
+
+  function renderBulkDevicePicker() {
+    const list = $('#bk-device-list');
+    list.innerHTML = '';
+    if (!state.devices.length) {
+      list.innerHTML = '<div class="form-hint" style="padding:14px 12px">Keine Geräte im Tresor.</div>';
+      updateBulkDeviceCount();
+      return;
+    }
+    for (const device of state.devices) {
+      const row = document.createElement('label');
+      row.className = 'device-picker-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = device.id;
+      cb.checked = bulkDeviceIds.has(device.id);
+      cb.addEventListener('change', () => {
+        if (cb.checked) bulkDeviceIds.add(device.id);
+        else bulkDeviceIds.delete(device.id);
+        updateBulkDeviceCount();
+      });
+      const name = document.createElement('span');
+      name.className = 'device-picker-item-name';
+      name.textContent = device.name;
+      const host = document.createElement('span');
+      host.className = 'device-picker-item-host';
+      host.textContent = `${device.host}:${device.port}`;
+      row.appendChild(cb);
+      row.appendChild(name);
+      row.appendChild(host);
+      list.appendChild(row);
+    }
+    updateBulkDeviceCount();
+  }
+
+  function updateBulkDeviceCount() {
+    const n = bulkDeviceIds.size;
+    const total = state.devices.length;
+    $('#bk-pick-count').textContent =
+      n === 0 ? 'keins ausgewählt' :
+      n === total ? 'alle ausgewählt' :
+      `${n} von ${total} ausgewählt`;
+  }
+
+  async function submitBulkImport() {
+    const errorBox = $('#bulk-modal-error');
+    const parseErrBox = $('#bulk-parse-errors');
+    errorBox.hidden = true;
+    parseErrBox.hidden = true;
+
+    const file = $('#bk-file').files[0];
+    if (!file) {
+      errorBox.textContent = 'Bitte eine Datei auswählen.';
+      errorBox.hidden = false;
+      return;
+    }
+    if (bulkDeviceIds.size === 0) {
+      errorBox.textContent = 'Mindestens ein Zielgerät auswählen.';
+      errorBox.hidden = false;
+      return;
+    }
+
+    const isRoutes = $('#bk-type-routes').checked;
+    const url = isRoutes ? '/api/imports/routes' : '/api/imports/aliases';
+    const form = new FormData();
+    form.append('file', file);
+    for (const id of bulkDeviceIds) form.append('target_device_ids', id);
+    if (!isRoutes && $('#bk-append').checked) form.append('append_mode', 'true');
+
+    const btn = $('#bulk-submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Importiere…';
+    try {
+      const headers = {};
+      const token = getToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(url, { method: 'POST', body: form, headers });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (response.status === 400) {
+        const body = await response.json().catch(() => ({}));
+        const detail = body.detail || {};
+        const msg = detail.message || 'Parse-Fehler';
+        const errors = detail.errors || [];
+        errorBox.textContent = msg;
+        errorBox.hidden = false;
+        if (errors.length) {
+          parseErrBox.textContent = errors.join('\n');
+          parseErrBox.hidden = false;
+        }
+        return;
+      }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        errorBox.textContent = body.detail || `Fehler ${response.status}`;
+        errorBox.hidden = false;
+        return;
+      }
+      const plan = await response.json();
+      closeBulkModal();
+      // Plan-Modal in Preview-Phase oeffnen
+      currentPlan = plan;
+      planMode = isRoutes ? 'route' : 'alias';
+      $('#plan-modal-title').textContent = `Bulk-Import-Vorschau (${plan.target_count} Aktionen)`;
+      $('#plan-modal').hidden = false;
+      renderPreview(plan);
+      showPlanPhase('preview');
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Importieren & Vorschau';
+    }
+  }
+
   // -------------------- Audit-Modal --------------------
 
   let auditEventKindsLoaded = false;
@@ -1667,6 +1817,25 @@
     $('#empty-add-btn').addEventListener('click', openAddModal);
     $('#add-route-btn').addEventListener('click', () => openPlanModal('route'));
     $('#add-alias-btn').addEventListener('click', () => openPlanModal('alias'));
+    $('#bulk-import-btn').addEventListener('click', openBulkModal);
+
+    // Bulk-Modal
+    $('#bulk-modal-close').addEventListener('click', closeBulkModal);
+    $('#bulk-modal-cancel').addEventListener('click', closeBulkModal);
+    $('#bulk-submit-btn').addEventListener('click', submitBulkImport);
+    $('#bk-type-routes').addEventListener('change', updateBulkFormatHint);
+    $('#bk-type-aliases').addEventListener('change', updateBulkFormatHint);
+    $('#bk-pick-all').addEventListener('click', () => {
+      bulkDeviceIds = new Set(state.devices.map((d) => d.id));
+      renderBulkDevicePicker();
+    });
+    $('#bk-pick-none').addEventListener('click', () => {
+      bulkDeviceIds = new Set();
+      renderBulkDevicePicker();
+    });
+    $('#bulk-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'bulk-modal') closeBulkModal();
+    });
 
     // Plan-Modal
     $('#plan-modal-close').addEventListener('click', closePlanModal);
