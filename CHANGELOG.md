@@ -2,6 +2,69 @@
 
 Alle nennenswerten Änderungen pro Release.
 
+## v2.0.0 (in Arbeit) — Web-Pivot
+
+Komplette Umstellung der Präsentations-Schicht von PySide6-Desktop-GUI auf
+lokale **FastAPI + Web-Frontend**. Core, Orchestrierung, Vault, Audit
+bleiben unverändert. User-Entscheidung nach Mockup-Vergleich zugunsten
+einer publikations-tauglichen Optik („Calm Precision"-Aesthetik, siehe
+[mockups/web-mockup.html](mockups/web-mockup.html)).
+
+### Iterations-Plan
+
+- ✅ **Iter 1** (`d0743d2`): FastAPI-Backend-Skeleton, uvicorn-Boot,
+  Browser-Auto-Open auf 127.0.0.1:9876, `/health` + `/api/version`,
+  Boot-Splash.
+- ✅ **Iter 2** (`582df22`): Auth-Flow (`POST /api/auth/unlock|lock`,
+  `GET /api/auth/me`), Vault-Discovery + Inline-Create
+  (`GET/POST /api/vaults`), Login-UI mit Tresor-Picker, Bearer-Token-
+  Session in `sessionStorage`, 30 s-Expiry-Ticker mit Auto-Lock-UI.
+- 🔧 **Iter 3** (in Arbeit): Inventar-Kachelansicht mit TCP-Heartbeat,
+  Add/Remove-Device, Tag-Sidebar.
+- ⏸ **Iter 4**: Plan/Apply für Routen + Aliase via Web-API + Modal-UI.
+- ⏸ **Iter 5**: Discovery, Audit-View, Profile-CRUD, Bulk-Import-Wizard.
+- ⏸ **Iter 6**: PySide6 + alle GUI-Tests entfernen, README + QUICKSTART
+  auf GUI-First umstellen, Inno-Setup-/MSIX-Installer mit Desktop-
+  Verknüpfung, optionale Vorbereitung für Windows-Dienst-Modus.
+
+### Architektur-Entscheidungen
+
+- **Multi-User-fähig vorbereitet**: SessionManager mappt Token →
+  Session-Objekt; spätere User-DB hängt sich ohne Schema-Bruch ein.
+  TLS-Felder in `WebSettings` für späteren Server-Modus vorhanden.
+- **Vanilla HTML/CSS/JS** ohne Build-Pipeline. Frontend ist eine
+  Single-Page-State-Machine (boot/login/main) in `web/static/app.js`.
+- **API-Schemas** zentral in `web/api/schemas.py` (Pydantic).
+- **Token in sessionStorage** (per-Tab), nicht localStorage, kein
+  Cookie → CSRF nicht relevant.
+
+### Dependencies
+
+Hinzugefügt: `fastapi >= 0.115`, `uvicorn[standard] >= 0.32`,
+`jinja2 >= 3.1`, `python-multipart >= 0.0.12`. `PySide6` bleibt
+vorerst installiert, wird in Iter 6 entfernt.
+
+### Tests-Stand v2.0-Iter-2-Ende
+
+494 Tests grün (35 neu im `tests/unit/web/`-Tree), ruff + mypy strict
+clean.
+
+---
+
+## v1.2.0 — 2026-05-28 — GUI-first Boot-Flow
+
+Letzte PySide6-Iteration. Boot-Flow ohne Shell:
+- `vault/discovery.py` scannt `%APPDATA%/OPN-Cockpit/*.opnvault` +
+  Recent-Vault-Liste der App-Settings.
+- Neuer `CreateVaultDialog` für den Erst-Setup.
+- `LoginDialog`-Rewrite mit ComboBox je nach Treffer-Anzahl
+  (0 Tresore → Hinweis, 1 → vorausgewählt, >1 → Auswahl).
+- `start.bat` + `start.ps1` als Doppelklick-Launcher.
+
+12 neue Tests, 459 Tests gesamt.
+
+---
+
 ## v1.1.0 — 2026-05-28 — Heartbeat + API-Discovery
 
 ### Hinzugefügt

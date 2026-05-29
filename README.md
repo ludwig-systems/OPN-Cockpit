@@ -1,6 +1,8 @@
 # OPN-Cockpit
 
-Lokales Windows-Desktop-Tool zur zentralen, ferngesteuerten Konfiguration mehrerer OPNsense-Firewalls (bis ca. 25 Standorte) über deren REST-API. Aktionen werden mit Vorschau (Plan/Apply-Muster) ausgewählt, ausgerollt und anschließend per Read-back gegen die API verifiziert.
+Lokales Windows-Tool zur zentralen, ferngesteuerten Konfiguration mehrerer OPNsense-Firewalls (bis ca. 25 Standorte) über deren REST-API. Aktionen werden mit Vorschau (Plan/Apply-Muster) ausgewählt, ausgerollt und anschließend per Read-back gegen die API verifiziert.
+
+> **v2.0 in Arbeit (Web-Pivot):** Die GUI wechselt von PySide6 auf eine lokale FastAPI-App mit moderner Web-UI im Browser („Calm Precision"-Design, siehe [mockups/web-mockup.html](mockups/web-mockup.html)). Aktueller Iterations-Stand: siehe [CHANGELOG.md](CHANGELOG.md). v1.x-PySide6-GUI ist auf `main` weiterhin lauffähig, wird in Iter 6 entfernt.
 
 > **Scope v1:** Statische Routen und Aliase auf 1..n Geräten gleichzeitig anlegen — einzeln oder im Bulk via CSV/JSON, mit Best-Effort-Fehlerstrategie, Audit-Log und wiederverwendbaren Templates.
 
