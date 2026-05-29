@@ -26,12 +26,29 @@ class TestAppDataDir:
             result = get_app_data_dir()
         assert result == tmp_path / APP_NAME
 
-    def test_falls_back_to_home_dir(self, tmp_path: Path) -> None:
+    def test_falls_back_to_xdg_or_home_dir(self, tmp_path: Path) -> None:
         env = dict(os.environ)
         env.pop("APPDATA", None)
+        env.pop("XDG_DATA_HOME", None)
+        env.pop("OPNCOCKPIT_DATA_DIR", None)
         with patch.dict(os.environ, env, clear=True):
             result = get_app_data_dir()
-        assert result.name.lower() == f".{APP_NAME.lower()}"
+        # Auf einem System mit ~/.local existiert: XDG-Pfad.
+        # Sonst: Dotfile-Fallback ~/.opn-cockpit.
+        assert result.name.lower() in {APP_NAME.lower(), f".{APP_NAME.lower()}"}
+
+    def test_explicit_override_via_env(self, tmp_path: Path) -> None:
+        with patch.dict(os.environ, {"OPNCOCKPIT_DATA_DIR": str(tmp_path / "custom")}):
+            assert get_app_data_dir() == tmp_path / "custom"
+
+    def test_xdg_data_home_used_when_set(self, tmp_path: Path) -> None:
+        env = dict(os.environ)
+        env.pop("APPDATA", None)
+        env.pop("OPNCOCKPIT_DATA_DIR", None)
+        env["XDG_DATA_HOME"] = str(tmp_path / "xdg")
+        with patch.dict(os.environ, env, clear=True):
+            result = get_app_data_dir()
+        assert result == tmp_path / "xdg" / APP_NAME.lower()
 
     def test_settings_path_inside_app_data_dir(self, tmp_path: Path) -> None:
         with patch.dict(os.environ, {"APPDATA": str(tmp_path)}):

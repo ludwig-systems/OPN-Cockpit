@@ -24,18 +24,42 @@ APP_NAME = "OPN-Cockpit"
 SETTINGS_FILENAME = "settings.json"
 DEFAULT_RECENT_LIMIT = 5
 
+# Deployment-Modes — heute ist nur 'single-local' implementiert. Die anderen
+# sind Roadmap-Slots (siehe docs/ROADMAP.md), damit Config-Schema und
+# Server-Bind sich spaeter ohne Breaking Changes erweitern lassen.
+DEPLOYMENT_MODES = ("single-local", "single-network", "multi-server")
+AUTH_BACKENDS = ("vault", "user-db")
+STORAGE_BACKENDS = ("filesystem", "sqlite")
+
 
 def get_app_data_dir() -> Path:
-    """Ermittelt das App-Daten-Verzeichnis.
+    """Ermittelt das App-Daten-Verzeichnis plattformabhaengig.
 
-    Bevorzugt ``%APPDATA%``; fällt auf ``~/.opn-cockpit`` zurück, wenn die
-    Umgebungsvariable nicht gesetzt ist (z. B. Headless-CLI in einem
-    Service-Account).
+    Priorität:
+    1. ``OPNCOCKPIT_DATA_DIR`` — explizite Override (Container, Service,
+       Tests). Erlaubt es, alle Daten in ein einzelnes Volume zu legen.
+    2. Windows: ``%APPDATA%\\OPN-Cockpit\\``.
+    3. Linux/Mac XDG: ``$XDG_DATA_HOME/opn-cockpit`` falls gesetzt,
+       sonst ``~/.local/share/opn-cockpit``.
+    4. Letzter Fallback: ``~/.opn-cockpit`` (Headless ohne XDG).
+
+    Die XDG-Variante macht den Linux-Container-Modus moeglich (Roadmap
+    v3.0) ohne dass wir das Pfadschema spaeter aendern muessen.
     """
+    explicit = os.environ.get("OPNCOCKPIT_DATA_DIR")
+    if explicit:
+        return Path(explicit)
     appdata = os.environ.get("APPDATA")
     if appdata:
         return Path(appdata) / APP_NAME
-    return Path.home() / f".{APP_NAME.lower()}"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg) / APP_NAME.lower()
+    home = Path.home()
+    xdg_default = home / ".local" / "share" / APP_NAME.lower()
+    if (home / ".local").exists():
+        return xdg_default
+    return home / f".{APP_NAME.lower()}"
 
 
 def get_settings_path() -> Path:
@@ -54,6 +78,13 @@ class AppSettings:
     recent_vaults: list[str] = field(default_factory=list)
     default_vault: str | None = None
     recent_limit: int = DEFAULT_RECENT_LIMIT
+
+    # Roadmap-Slots fuer v3.x (Multi-User / Linux-Container). Heute auf
+    # 'single-local' / 'vault' / 'filesystem' fixiert - der Server prueft
+    # diese Werte noch nicht. Aber Schema bleibt forward-kompatibel.
+    deployment_mode: str = "single-local"
+    auth_backend: str = "vault"
+    storage_backend: str = "filesystem"
 
     # ----- Persistenz -----
 
@@ -116,8 +147,20 @@ class AppSettings:
             limit = int(limit_raw)
         except (TypeError, ValueError):
             limit = DEFAULT_RECENT_LIMIT
+        deployment_mode = str(raw.get("deployment_mode", "single-local"))
+        if deployment_mode not in DEPLOYMENT_MODES:
+            deployment_mode = "single-local"
+        auth_backend = str(raw.get("auth_backend", "vault"))
+        if auth_backend not in AUTH_BACKENDS:
+            auth_backend = "vault"
+        storage_backend = str(raw.get("storage_backend", "filesystem"))
+        if storage_backend not in STORAGE_BACKENDS:
+            storage_backend = "filesystem"
         return cls(
             recent_vaults=recent[:limit],
             default_vault=default_str,
             recent_limit=limit,
+            deployment_mode=deployment_mode,
+            auth_backend=auth_backend,
+            storage_backend=storage_backend,
         )
