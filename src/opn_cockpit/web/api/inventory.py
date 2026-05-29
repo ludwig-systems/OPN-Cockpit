@@ -7,26 +7,17 @@ nur waehrend der Session und wird beim Lock/Auto-Lock geloescht.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from opn_cockpit.core.health import check_device, tcp_probe
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.security.session import Session
-from opn_cockpit.vault.errors import (
-    CorruptVaultError,
-    SessionLockedError,
-    VaultError,
-    VaultIOError,
-    VaultVersionError,
-)
 from opn_cockpit.vault.model import VaultDevice
-from opn_cockpit.vault.store import save_vault
 from opn_cockpit.web.api.schemas import (
     ConnectionTestResponse,
     DeviceCreateRequest,
@@ -39,6 +30,7 @@ from opn_cockpit.web.api.schemas import (
     TagSummary,
 )
 from opn_cockpit.web.auth.dependencies import require_session
+from opn_cockpit.web.vault_writes import persist_session_vault
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
@@ -73,6 +65,7 @@ def list_inventory(session: Session = Depends(require_session)) -> InventoryResp
 )
 def add_device(
     payload: DeviceCreateRequest,
+    request: Request,
     session: Session = Depends(require_session),
 ) -> DeviceResponse:
     """Legt ein Geraet im Tresor an und persistiert."""
@@ -100,7 +93,7 @@ def add_device(
     def _rollback_add() -> None:
         devices.pop()
 
-    _save_or_rollback(session, vault_path, rollback=_rollback_add)
+    persist_session_vault(request, session, vault_path, rollback=_rollback_add)
     return _to_device_response(Device.from_vault_device(new_device))
 
 
@@ -113,6 +106,7 @@ def add_device(
 def update_device(
     device_id: str,
     payload: DeviceUpdateRequest,
+    request: Request,
     session: Session = Depends(require_session),
 ) -> DeviceResponse:
     """Aktualisiert ausgewaehlte Felder eines Geraets und persistiert."""
@@ -171,7 +165,7 @@ def update_device(
     def _rollback_update() -> None:
         devices[index] = snapshot
 
-    _save_or_rollback(session, vault_path, rollback=_rollback_update)
+    persist_session_vault(request, session, vault_path, rollback=_rollback_update)
     return _to_device_response(Device.from_vault_device(current))
 
 
@@ -183,6 +177,7 @@ def update_device(
 @router.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_device(
     device_id: str,
+    request: Request,
     session: Session = Depends(require_session),
 ) -> None:
     """Entfernt ein Geraet aus dem Tresor."""
@@ -199,7 +194,7 @@ def remove_device(
     def _rollback_remove() -> None:
         devices.insert(index, backup)
 
-    _save_or_rollback(session, vault_path, rollback=_rollback_remove)
+    persist_session_vault(request, session, vault_path, rollback=_rollback_remove)
 
 
 # ---------------------------------------------------------------------------
@@ -299,36 +294,6 @@ def _require_vault_path(session: Session) -> Path:
     return vault_path
 
 
-def _save_or_rollback(
-    session: Session,
-    vault_path: Path,
-    *,
-    rollback: Callable[[], None],
-) -> None:
-    """Persistiert die aktuelle Session und rollt bei Fehlern zurueck."""
-    try:
-        password = session.master_password
-    except SessionLockedError as exc:
-        rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Session ohne Master-Passwort — bitte neu entsperren.",
-        ) from exc
-    try:
-        new_opened = save_vault(vault_path, session.opened, password)
-    except (CorruptVaultError, VaultVersionError, VaultIOError) as exc:
-        rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except VaultError as exc:
-        rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    session.replace_opened(new_opened)
 
 
 def _to_device_response(device: Device) -> DeviceResponse:

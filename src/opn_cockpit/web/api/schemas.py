@@ -18,6 +18,17 @@ class UnlockRequest(BaseModel):
     password: str = Field(..., min_length=1)
 
 
+class LoginRequest(BaseModel):
+    """Multi-User-Login (POST /api/auth/login).
+
+    Im Single-User-Mode unbenutzt. Pflicht: Username + Passwort gegen
+    die zentrale User-DB.
+    """
+
+    username: str = Field(..., min_length=1, max_length=120)
+    password: str = Field(..., min_length=1)
+
+
 class UnlockResponse(BaseModel):
     token: str
     vault_path: str

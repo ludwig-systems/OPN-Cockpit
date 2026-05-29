@@ -125,9 +125,14 @@ class UserDbAuthBackend:
 
 
 def make_session(result: AuthResult) -> Session:
-    """Helper: AuthResult -> Session. Wird vom SessionManager.create aufgerufen."""
+    """Helper: AuthResult -> Session. Wird vom SessionManager.create_from aufgerufen."""
     session = Session()
-    session.unlock(result.opened_vault, result.vault_path, result.master_password)
+    session.unlock(
+        result.opened_vault,
+        result.vault_path,
+        result.master_password,
+        user=result.user,
+    )
     return session
 
 

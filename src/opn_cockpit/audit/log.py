@@ -59,6 +59,9 @@ class AuditEventKind(StrEnum):
     TEMPLATE_EXPORTED = "template_exported"
     SESSION_AUTO_LOCKED = "session_auto_locked"
     LOGIN_FAILED = "login_failed"
+    USER_CREATED = "user_created"
+    USER_UPDATED = "user_updated"
+    USER_DELETED = "user_deleted"
 
 
 # ---------------------------------------------------------------------------

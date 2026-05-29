@@ -16,26 +16,28 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 
 from opn_cockpit.importers.csv_devices import parse_devices_csv
 from opn_cockpit.importers.json_devices import parse_devices_json
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.security.session import Session
-from opn_cockpit.vault.errors import (
-    CorruptVaultError,
-    SessionLockedError,
-    VaultError,
-    VaultIOError,
-    VaultVersionError,
-)
 from opn_cockpit.vault.model import VaultDevice
-from opn_cockpit.vault.store import save_vault
 from opn_cockpit.web.api.schemas import (
     DeviceImportResponse,
     DeviceResponse,
 )
 from opn_cockpit.web.auth.dependencies import require_session
+from opn_cockpit.web.vault_writes import persist_session_vault
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
@@ -48,6 +50,7 @@ MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MiB
     status_code=status.HTTP_201_CREATED,
 )
 async def import_devices(
+    request: Request,
     file: Annotated[UploadFile, File(description="CSV oder JSON mit Geraeten")],
     format: Annotated[str, Form(description="csv oder json")] = "csv",
     session: Session = Depends(require_session),
@@ -77,7 +80,7 @@ async def import_devices(
             parsed_count=len(parsed_devices),
         )
 
-    _persist_or_500(session, vault_path, to_add)
+    _persist_or_500(request, session, vault_path, to_add)
     return DeviceImportResponse(
         added=[_to_device_response(d) for d in to_add],
         skipped_existing=skipped,
@@ -137,7 +140,10 @@ def _filter_new(
 
 
 def _persist_or_500(
-    session: Session, vault_path: Path, to_add: list[VaultDevice],
+    request: Request,
+    session: Session,
+    vault_path: Path,
+    to_add: list[VaultDevice],
 ) -> None:
     devices_list = session.opened.data.devices
     snapshot_len = len(devices_list)
@@ -146,29 +152,7 @@ def _persist_or_500(
     def _rollback() -> None:
         del devices_list[snapshot_len:]
 
-    try:
-        password = session.master_password
-    except SessionLockedError as exc:
-        _rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Session ohne Master-Passwort - bitte neu entsperren.",
-        ) from exc
-    try:
-        new_opened = save_vault(vault_path, session.opened, password)
-    except (CorruptVaultError, VaultVersionError, VaultIOError) as exc:
-        _rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except VaultError as exc:
-        _rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    session.replace_opened(new_opened)
+    persist_session_vault(request, session, vault_path, rollback=_rollback)
 
 
 async def _stage_upload(file: UploadFile, *, suffix: str) -> Path:

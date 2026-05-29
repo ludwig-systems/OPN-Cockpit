@@ -17,8 +17,10 @@ from opn_cockpit.vault.errors import (
     VaultVersionError,
 )
 from opn_cockpit.vault.store import open_vault
+from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     CurrentSessionResponse,
+    LoginRequest,
     UnlockRequest,
     UnlockResponse,
 )
@@ -28,6 +30,7 @@ from opn_cockpit.web.auth.dependencies import (
     require_session_with_token,
 )
 from opn_cockpit.web.auth.manager import SessionManager
+from opn_cockpit.web.server_state import ServerState, ServerStateError
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -76,6 +79,63 @@ def unlock(
         token=token,
         vault_path=str(path),
         vault_filename=path.name,
+        inactivity_timeout_s=int(session.inactivity_timeout_s),
+        seconds_until_expiry=int(session.seconds_until_expiry()),
+    )
+
+
+@router.post(
+    "/login",
+    response_model=UnlockResponse,
+    status_code=status.HTTP_200_OK,
+)
+def login(
+    payload: LoginRequest,
+    manager: SessionManager = Depends(get_session_manager),
+    server: ServerState = Depends(get_server_state),
+) -> UnlockResponse:
+    """Multi-User-Login per Username + Passwort.
+
+    Nur im Multi-User-Mode aktiv und nur wenn der Server bereits
+    ``ready`` ist (Admin angelegt + zentraler Vault entsperrt). Liefert
+    sonst 409.
+    """
+    if not server.is_multi_user_mode:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Login per Username ist im Single-User-Mode nicht verfuegbar.",
+        )
+    if server.bootstrap_status != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Server noch nicht ready — Bootstrap-Status: "
+                f"{server.bootstrap_status}."
+            ),
+        )
+    try:
+        backend = server.auth_backend()
+    except ServerStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    result = backend.authenticate({
+        "username": payload.username,
+        "password": payload.password,
+    })
+    if result is None:
+        _audit_login_failed_user(payload.username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Benutzername oder Passwort falsch.",
+        )
+    token, session = manager.create_from(result)
+    _audit_user_logged_in(payload.username)
+    return UnlockResponse(
+        token=token,
+        vault_path=str(result.vault_path),
+        vault_filename=result.vault_path.name,
         inactivity_timeout_s=int(session.inactivity_timeout_s),
         seconds_until_expiry=int(session.seconds_until_expiry()),
     )
@@ -154,4 +214,18 @@ def _audit_login_failed(path: Path, reason: str) -> None:
         AuditEventKind.LOGIN_FAILED,
         vault_path=str(path),
         summary=f"Web-Login fehlgeschlagen ({reason}) fuer {path}.",
+    )
+
+
+def _audit_login_failed_user(username: str) -> None:
+    _audit_log().append(
+        AuditEventKind.LOGIN_FAILED,
+        summary=f"Multi-User-Login fehlgeschlagen fuer '{username}'.",
+    )
+
+
+def _audit_user_logged_in(username: str) -> None:
+    _audit_log().append(
+        AuditEventKind.VAULT_OPENED,
+        summary=f"Multi-User-Login erfolgreich: '{username}'.",
     )

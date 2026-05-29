@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
 
+from opn_cockpit.security.auth_backend import AuthResult, make_session
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.store import OpenedVault
 
@@ -47,16 +48,31 @@ class SessionManager:
     ) -> tuple[str, Session]:
         """Erzeugt ein neues Token + Session-Eintrag fuer einen entsperrten Tresor.
 
-        ``password`` wird in der Session gecached, damit Schreibvorgaenge
-        (Add/Remove/Duplicate Device) ohne erneuten Prompt funktionieren.
-        Der Cache lebt nur waehrend der Session und wird beim ``revoke``
-        oder Auto-Lock geloescht.
+        Heutiger Single-User-Pfad (kein User-Konzept). Im Multi-User-Mode
+        rufen die Auth-Endpunkte stattdessen :meth:`create_from` mit
+        einem ``AuthResult`` auf — dort steht auch der ``User``-Eintrag.
         """
         with self._lock:
             token = secrets.token_urlsafe(TOKEN_BYTES)
             session = Session()
             session.unlock(opened, vault_path, password)
             self._sessions[token] = _SessionEntry(session=session, vault_path=vault_path)
+            return token, session
+
+    def create_from(self, result: AuthResult) -> tuple[str, Session]:
+        """Erzeugt Token + Session aus einem ``AuthResult``.
+
+        Wird sowohl vom Multi-User-Login (UserDbAuthBackend) als auch vom
+        Single-User-Unlock-Pfad aufgerufen, sobald letzterer auf das
+        AuthBackend-Pattern umgezogen ist. Der eingeloggte User (falls
+        vorhanden) landet automatisch in der Session.
+        """
+        with self._lock:
+            token = secrets.token_urlsafe(TOKEN_BYTES)
+            session = make_session(result)
+            self._sessions[token] = _SessionEntry(
+                session=session, vault_path=result.vault_path,
+            )
             return token, session
 
     def get(self, token: str) -> Session | None:
@@ -105,3 +121,26 @@ class SessionManager:
     def active_count(self) -> int:
         with self._lock:
             return len(self._sessions)
+
+    def replace_opened_everywhere(
+        self,
+        new_opened: OpenedVault,
+        vault_path: Path,
+    ) -> int:
+        """Aktualisiert die OpenedVault-Referenz in allen Sessions desselben Vaults.
+
+        Notwendig im Multi-User-Mode: nachdem eine Session den zentralen
+        Vault geschrieben hat (Header-Nonce ist frisch), muessen die
+        anderen Sessions diesen neuen Header sehen — sonst scheitert ihr
+        naechster Save mit Nonce-Reuse-Error oder schreibt mit
+        veraltetem Header.
+
+        Liefert die Anzahl der aktualisierten Sessions.
+        """
+        n = 0
+        with self._lock:
+            for entry in self._sessions.values():
+                if entry.vault_path == vault_path and entry.session.is_unlocked:
+                    entry.session.replace_opened(new_opened)
+                    n += 1
+        return n

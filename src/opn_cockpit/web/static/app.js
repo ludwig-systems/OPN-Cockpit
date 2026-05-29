@@ -33,6 +33,8 @@
     heartbeatInFlight: false,
     selectedDeviceIds: new Set(),  // globale Multi-Auswahl fuer Plan/Apply
     outstandingByDevice: {},       // device_id -> { count, plans[] }
+    serverMode: 'vault',           // 'vault' (single) | 'user-db' (multi)
+    bootstrapStatus: 'single-user', // single-user | needs-admin | needs-vault-unlock | ready
   };
 
   let heartbeatHandle = null;
@@ -123,8 +125,150 @@
 
   function showLoginView(name) {
     $$('.login-view').forEach((v) => { v.hidden = v.dataset.view !== name; });
-    $('#login-error').hidden = true;
-    $('#create-error').hidden = true;
+    const loginErr = $('#login-error'); if (loginErr) loginErr.hidden = true;
+    const createErr = $('#create-error'); if (createErr) createErr.hidden = true;
+    const muErr = $('#mu-error'); if (muErr) muErr.hidden = true;
+    const adminErr = $('#setup-admin-error'); if (adminErr) adminErr.hidden = true;
+    const vaultErr = $('#setup-vault-error'); if (vaultErr) vaultErr.hidden = true;
+  }
+
+  // -------------------- Bootstrap-Mode-Detection --------------------
+
+  async function fetchBootstrapStatus() {
+    const response = await fetch('/api/bootstrap/status', {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error('Bootstrap-Status nicht abrufbar.');
+    const data = await response.json();
+    state.serverMode = data.mode;
+    state.bootstrapStatus = data.status;
+    return data;
+  }
+
+  // -------------------- Multi-User-Login --------------------
+
+  async function doMultiUserLogin() {
+    const username = $('#mu-username').value.trim();
+    const password = $('#mu-password').value;
+    if (!username || !password) return;
+    const errorBox = $('#mu-error');
+    errorBox.hidden = true;
+    const btn = $('#mu-login-btn');
+    btn.disabled = true;
+    btn.textContent = 'Anmelden…';
+    try {
+      const response = await apiPost('/api/auth/login', {
+        username,
+        password,
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Fehler ${response.status}`);
+      }
+      const data = await response.json();
+      setToken(data.token);
+      $('#mu-password').value = '';
+      await enterMain(data);
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.hidden = false;
+      btn.disabled = false;
+      btn.textContent = 'Anmelden';
+    }
+  }
+
+  // -------------------- Setup-Wizard (Multi-User-First-Run) --------------------
+
+  async function doSetupAdmin() {
+    const username = $('#su-username').value.trim();
+    const pw1 = $('#su-pw1').value;
+    const pw2 = $('#su-pw2').value;
+    const errorBox = $('#setup-admin-error');
+    errorBox.hidden = true;
+    if (!username) return showSetupError(errorBox, 'Benutzername fehlt.');
+    if (pw1.length < 12) return showSetupError(errorBox, 'Passwort muss mindestens 12 Zeichen haben.');
+    if (pw1 !== pw2) return showSetupError(errorBox, 'Die beiden Passwoerter stimmen nicht ueberein.');
+    const btn = $('#setup-admin-btn');
+    btn.disabled = true;
+    btn.textContent = 'Lege an…';
+    try {
+      const response = await fetch('/api/bootstrap/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ username, password: pw1 }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Fehler ${response.status}`);
+      }
+      // Admin angelegt — naechster Schritt: Vault entsperren.
+      await fetchBootstrapStatus();
+      enterBootstrapPhase();
+    } catch (err) {
+      showSetupError(errorBox, err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Admin anlegen';
+    }
+  }
+
+  async function doSetupUnlockVault() {
+    const path = $('#su-vault-path').value.trim();
+    const password = $('#su-vault-pw').value;
+    const errorBox = $('#setup-vault-error');
+    errorBox.hidden = true;
+    if (!path) return showSetupError(errorBox, 'Pfad zur Tresor-Datei fehlt.');
+    if (!password) return showSetupError(errorBox, 'Master-Passwort fehlt.');
+    const btn = $('#setup-vault-btn');
+    btn.disabled = true;
+    btn.textContent = 'Entsperre…';
+    try {
+      const response = await fetch('/api/bootstrap/vault', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ vault_path: path, password }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Fehler ${response.status}`);
+      }
+      // Server ist ready — auf Multi-User-Login schwenken.
+      await fetchBootstrapStatus();
+      enterBootstrapPhase();
+    } catch (err) {
+      showSetupError(errorBox, err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Tresor entsperren';
+    }
+  }
+
+  function showSetupError(box, msg) {
+    box.textContent = msg;
+    box.hidden = false;
+  }
+
+  function enterBootstrapPhase() {
+    // Nach jedem Status-Wechsel: passenden Screen zeigen.
+    const s = state.bootstrapStatus;
+    if (s === 'needs-admin') {
+      showScreen('setup');
+      showLoginView('setup-admin');
+      setTimeout(() => $('#su-username').focus(), 0);
+    } else if (s === 'needs-vault-unlock') {
+      showScreen('setup');
+      showLoginView('setup-vault');
+      setTimeout(() => $('#su-vault-pw').focus(), 0);
+    } else if (s === 'ready') {
+      showScreen('login');
+      showLoginView('multi-user');
+      setTimeout(() => $('#mu-username').focus(), 0);
+    } else {
+      // single-user (sollte beim Multi-User-Pfad nicht erscheinen).
+      showScreen('login');
+      showLoginView('picker');
+      fetchVaultsAndPopulate().catch(() => {});
+    }
   }
 
   // -------------------- Login (unchanged from Iter 2) --------------------
@@ -1938,6 +2082,22 @@
       return;
     }
 
+    // Mode-Detection: erst Auth-Backend ermitteln, dann passenden Screen.
+    let bootData;
+    try {
+      bootData = await fetchBootstrapStatus();
+    } catch (_) {
+      status.textContent = 'Server-Status nicht abrufbar.';
+      return;
+    }
+
+    // Vorschlag fuer Vault-Pfad einsetzen (falls Server einen kennt).
+    if (bootData.suggested_vault_path) {
+      const vaultInput = $('#su-vault-path');
+      if (vaultInput && !vaultInput.value) vaultInput.value = bootData.suggested_vault_path;
+    }
+
+    // Vorhandener Token? -> direkt in main, sonst weiter unten.
     if (getToken()) {
       try {
         const response = await apiGet('/api/auth/me');
@@ -1950,6 +2110,13 @@
       } catch (_) { /* fallthrough auf Login */ }
     }
 
+    // Multi-User-Pfad: Setup-Wizard oder Multi-User-Login.
+    if (state.serverMode === 'user-db') {
+      enterBootstrapPhase();
+      return;
+    }
+
+    // Single-User-Pfad (Default, v2-Verhalten).
     showScreen('login');
     showLoginView('picker');
     try {
@@ -1974,6 +2141,36 @@
     $('#create-back-btn').addEventListener('click', () => showLoginView('picker'));
     $('#create-confirm-btn').addEventListener('click', doCreateVault);
     $('#theme-toggle-login').addEventListener('click', toggleTheme);
+
+    // Multi-User-Login
+    const muLoginBtn = $('#mu-login-btn');
+    if (muLoginBtn) {
+      muLoginBtn.addEventListener('click', doMultiUserLogin);
+      $('#mu-password').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doMultiUserLogin();
+      });
+      $('#mu-username').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') $('#mu-password').focus();
+      });
+    }
+    const themeMulti = $('#theme-toggle-multi');
+    if (themeMulti) themeMulti.addEventListener('click', toggleTheme);
+
+    // Setup-Wizard
+    const setupAdminBtn = $('#setup-admin-btn');
+    if (setupAdminBtn) {
+      setupAdminBtn.addEventListener('click', doSetupAdmin);
+      $('#su-pw2').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doSetupAdmin();
+      });
+    }
+    const setupVaultBtn = $('#setup-vault-btn');
+    if (setupVaultBtn) {
+      setupVaultBtn.addEventListener('click', doSetupUnlockVault);
+      $('#su-vault-pw').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doSetupUnlockVault();
+      });
+    }
 
     // Main: top bar
     $('#theme-toggle-main').addEventListener('click', toggleTheme);

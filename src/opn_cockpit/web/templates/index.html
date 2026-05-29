@@ -19,12 +19,89 @@
       <div class="boot-status" id="boot-status">Initialisiere…</div>
     </section>
 
+    <!-- ================ SETUP-WIZARD (Multi-User-First-Run) ================ -->
+    <section class="screen screen-setup" data-screen="setup" hidden>
+      <div class="login-card">
+        <div class="login-header">
+          <h1>OPN-Cockpit</h1>
+          <span class="brand-version">v{{ version }}</span>
+        </div>
+
+        <!-- Step 1: Admin anlegen (needs-admin) -->
+        <div class="login-view" data-view="setup-admin" hidden>
+          <p class="login-hint">
+            <strong>Erste Einrichtung — Multi-User-Server.</strong><br />
+            Lege das erste Admin-Konto an. Mit diesem User loggst du dich
+            danach ein und kannst weitere Accounts vergeben.
+          </p>
+
+          <label class="form-label" for="su-username">Admin-Benutzername</label>
+          <input id="su-username" class="form-input" type="text" autocomplete="username" placeholder="admin" />
+
+          <label class="form-label" for="su-pw1">Passwort (min. 12 Zeichen)</label>
+          <input id="su-pw1" class="form-input" type="password" autocomplete="new-password" />
+
+          <label class="form-label" for="su-pw2">Passwort wiederholen</label>
+          <input id="su-pw2" class="form-input" type="password" autocomplete="new-password" />
+
+          <div class="form-error" id="setup-admin-error" hidden></div>
+
+          <button class="btn-primary" id="setup-admin-btn">Admin anlegen</button>
+        </div>
+
+        <!-- Step 2: Vault entsperren (needs-vault-unlock) -->
+        <div class="login-view" data-view="setup-vault" hidden>
+          <p class="login-hint">
+            <strong>Zentralen Tresor entsperren.</strong><br />
+            Der Server benoetigt einmalig Zugriff auf den Tresor mit den
+            OPNsense-Credentials. Nach dem Entsperren teilen sich alle
+            angemeldeten User diese Daten.
+          </p>
+
+          <label class="form-label" for="su-vault-path">Pfad zur Tresor-Datei</label>
+          <input id="su-vault-path" class="form-input" type="text" placeholder="/data/firewalls.opnvault" />
+
+          <label class="form-label" for="su-vault-pw">Master-Passwort</label>
+          <input id="su-vault-pw" class="form-input" type="password" autocomplete="current-password" />
+
+          <div class="form-error" id="setup-vault-error" hidden></div>
+
+          <button class="btn-primary" id="setup-vault-btn">Tresor entsperren</button>
+        </div>
+      </div>
+
+      <footer class="login-footer">
+        <span>OPN-Cockpit · Multi-Site-Management fuer OPNsense</span>
+      </footer>
+    </section>
+
     <!-- ================ LOGIN ================ -->
     <section class="screen screen-login" data-screen="login" hidden>
       <div class="login-card">
         <div class="login-header">
           <h1>OPN-Cockpit</h1>
           <span class="brand-version">v{{ version }}</span>
+        </div>
+
+        <!-- Multi-User-Login (auth_backend=user-db, ready) -->
+        <div class="login-view" data-view="multi-user" hidden>
+          <p class="login-hint">
+            Melde dich mit deinem Benutzernamen am Multi-User-Server an.
+          </p>
+
+          <label class="form-label" for="mu-username">Benutzername</label>
+          <input id="mu-username" class="form-input" type="text" autocomplete="username" />
+
+          <label class="form-label" for="mu-password">Passwort</label>
+          <input id="mu-password" class="form-input" type="password" autocomplete="current-password" />
+
+          <div class="form-error" id="mu-error" hidden></div>
+
+          <button class="btn-primary" id="mu-login-btn">Anmelden</button>
+
+          <div class="login-secondary-row">
+            <button class="btn-link" id="theme-toggle-multi">Theme</button>
+          </div>
         </div>
 
         <div class="login-view" data-view="picker">

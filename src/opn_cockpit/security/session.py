@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from opn_cockpit.security.users import User
 from opn_cockpit.vault.errors import SessionLockedError, UnknownDeviceError
 from opn_cockpit.vault.store import OpenedVault
 
@@ -45,6 +46,7 @@ class Session:
     _opened: OpenedVault | None = None
     _vault_path: Path | None = None
     _password: str | None = None
+    _user: User | None = None
     _last_activity_at: float = 0.0
     _clock: Callable[[], float] = field(default=time.monotonic)
 
@@ -100,16 +102,22 @@ class Session:
         opened: OpenedVault,
         path: Path,
         password: str | None = None,
+        *,
+        user: User | None = None,
     ) -> None:
         """Aktiviert die Session mit einem frisch geöffneten Tresor.
 
         Wenn ``password`` übergeben wird, lebt es als Cache in der Session,
         damit Schreibvorgänge ohne erneuten Prompt funktionieren. Web
         nutzt das; CLI/GUI lassen es weg.
+
+        ``user`` ist nur im Multi-User-Mode gesetzt — Single-User-Sessions
+        haben ``None`` und nutzen den OS-User als Audit-Actor.
         """
         self._opened = opened
         self._vault_path = path
         self._password = password
+        self._user = user
         self._last_activity_at = self._clock()
 
     def replace_opened(self, opened: OpenedVault) -> None:
@@ -141,7 +149,13 @@ class Session:
         self._opened = None
         self._vault_path = None
         self._password = None
+        self._user = None
         self._last_activity_at = 0.0
+
+    @property
+    def user(self) -> User | None:
+        """Eingeloggter Multi-User (None im Single-Mode)."""
+        return self._user
 
     # ----- Inaktivitäts-Verwaltung -----
 
