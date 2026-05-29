@@ -8,6 +8,7 @@ Render- und Interaktions-Tests bleiben dem Live-Test vorbehalten.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -21,6 +22,7 @@ from opn_cockpit.core.result import RolloutReport
 from opn_cockpit.gui.action_dialogs.add_route import AddRouteDialog
 from opn_cockpit.gui.action_dialogs.device_form import DeviceFormDialog
 from opn_cockpit.gui.app import install_masking_excepthook, restore_excepthook
+from opn_cockpit.gui.create_vault_dialog import CreateVaultDialog
 from opn_cockpit.gui.login_dialog import LoginDialog
 from opn_cockpit.gui.preview_dialog import PreviewDialog
 from opn_cockpit.gui.result_dialog import ResultDialog
@@ -39,9 +41,35 @@ def test_gui_modules_importable(qapp: QApplication) -> None:
 
 
 class TestLoginDialog:
-    def test_constructs_without_error(self, qapp: QApplication) -> None:
-        dlg = LoginDialog(default_path="C:\\test.opnvault")
+    def test_empty_state_disables_inputs(self, qapp: QApplication) -> None:
+        dlg = LoginDialog(available_vaults=[])
         assert dlg.windowTitle().startswith("OPN-Cockpit")
+        # Ohne Tresore: Combo disabled, kein Entsperren moeglich
+        assert not dlg._vault_combo.isEnabled()
+
+    def test_single_vault_enables_password(self, qapp: QApplication) -> None:
+        dlg = LoginDialog(available_vaults=[Path("/tmp/x.opnvault")])
+        assert dlg._vault_combo.isEnabled()
+        assert dlg._pw_edit.isEnabled()
+        # Eintrag ist vorausgewaehlt
+        assert dlg._vault_combo.count() == 1
+
+    def test_multiple_vaults_listed(self, qapp: QApplication) -> None:
+        dlg = LoginDialog(
+            available_vaults=[
+                Path("/tmp/a.opnvault"),
+                Path("/tmp/b.opnvault"),
+                Path("/tmp/c.opnvault"),
+            ]
+        )
+        assert dlg._vault_combo.count() == 3
+
+
+class TestCreateVaultDialog:
+    def test_constructs_with_default_path(self, qapp: QApplication) -> None:
+        dlg = CreateVaultDialog()
+        assert "anlegen" in dlg.windowTitle().lower()
+        assert dlg.result_data is None
 
 
 class TestPreviewDialog:

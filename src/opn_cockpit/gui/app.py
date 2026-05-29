@@ -28,7 +28,9 @@ from opn_cockpit.gui.login_dialog import LoginDialog, LoginResult
 from opn_cockpit.gui.main_window import MainWindow
 from opn_cockpit.security.masking import mask_dict
 from opn_cockpit.security.session import Session
-from opn_cockpit.vault.store import open_vault
+from opn_cockpit.vault.discovery import discover_vaults
+from opn_cockpit.vault.errors import VaultError
+from opn_cockpit.vault.store import create_vault, open_vault
 
 # ---------------------------------------------------------------------------
 # Masking-Excepthook
@@ -116,12 +118,27 @@ def run() -> int:
     settings = AppSettings.load()
 
     while True:
-        login = LoginDialog(default_path=settings.default_vault)
+        available = discover_vaults(settings)
+        login = LoginDialog(available_vaults=available)
         if login.exec() != LoginDialog.DialogCode.Accepted:
             return 0
         result: LoginResult | None = login.result_data
         if result is None:
             return 0
+
+        # Wenn der User in dem Dialog "Neuen Tresor anlegen" geklickt hat,
+        # legen wir die Datei jetzt physisch an. Der LoginResult enthaelt
+        # bereits Pfad + Passwort des frischen Tresors.
+        if login.created_vault is not None:
+            try:
+                create_vault(result.path, result.password)
+            except VaultError as exc:
+                QMessageBox.critical(
+                    None,
+                    "Tresor anlegen fehlgeschlagen",
+                    f"Tresor konnte nicht angelegt werden:\n{exc}",
+                )
+                continue
 
         try:
             opened = open_vault(result.path, result.password)
