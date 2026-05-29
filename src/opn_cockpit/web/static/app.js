@@ -925,6 +925,333 @@
     }
   }
 
+  // -------------------- Plan-Modal --------------------
+
+  // Modus: 'route' oder 'alias'
+  // Phasen: 'input' -> 'preview' -> 'result'
+  let planMode = 'route';
+  let planPhase = 'input';
+  let currentPlan = null;       // PlanResponse vom Server
+  let planDeviceIds = new Set(); // ausgewaehlte Geraete
+
+  function openPlanModal(mode) {
+    planMode = mode;
+    planPhase = 'input';
+    currentPlan = null;
+    planDeviceIds = new Set(state.devices.map((d) => d.id));  // default: alle
+    resetPlanInputs();
+    showPlanFieldSet(mode);
+    renderDevicePicker();
+    showPlanPhase('input');
+    $('#plan-modal-title').textContent =
+      mode === 'route' ? 'Neue Route über mehrere Geräte' : 'Neuer Alias über mehrere Geräte';
+    $('#plan-modal-error').hidden = true;
+    $('#plan-preview-error').hidden = true;
+    $('#plan-modal').hidden = false;
+    setTimeout(() => {
+      const focusEl = mode === 'route' ? $('#pl-route-network') : $('#pl-alias-name');
+      if (focusEl) focusEl.focus();
+    }, 0);
+  }
+
+  function closePlanModal() {
+    $('#plan-modal').hidden = true;
+    planMode = 'route';
+    planPhase = 'input';
+    currentPlan = null;
+    planDeviceIds = new Set();
+  }
+
+  function resetPlanInputs() {
+    $('#pl-route-network').value = '';
+    $('#pl-route-gateway').value = '';
+    $('#pl-route-descr').value = '';
+    $('#pl-route-disabled').checked = false;
+    $('#pl-alias-name').value = '';
+    $('#pl-alias-type').value = 'host';
+    $('#pl-alias-content').value = '';
+    $('#pl-alias-descr').value = '';
+    $('#pl-alias-merge').checked = false;
+    $('#pl-confirm').checked = false;
+  }
+
+  function showPlanFieldSet(mode) {
+    $$('.plan-field-set').forEach((set) => {
+      set.hidden = set.dataset.kind !== mode;
+    });
+  }
+
+  function showPlanPhase(phase) {
+    planPhase = phase;
+    $$('.plan-phase').forEach((p) => {
+      p.hidden = p.dataset.phase !== phase;
+    });
+    // Footer-Buttons anpassen
+    const cancel = $('#plan-modal-cancel');
+    const back = $('#plan-back-btn');
+    const next = $('#plan-next-btn');
+    if (phase === 'input') {
+      cancel.textContent = 'Abbrechen';
+      back.hidden = true;
+      next.hidden = false;
+      next.textContent = 'Vorschau anzeigen';
+      next.disabled = false;
+    } else if (phase === 'preview') {
+      cancel.textContent = 'Abbrechen';
+      back.hidden = false;
+      next.hidden = false;
+      next.textContent = 'Aktivieren';
+      next.disabled = !$('#pl-confirm').checked;
+    } else if (phase === 'result') {
+      cancel.textContent = 'Schließen';
+      back.hidden = true;
+      next.hidden = true;
+    }
+  }
+
+  function renderDevicePicker() {
+    const list = $('#pl-device-list');
+    list.innerHTML = '';
+    if (!state.devices.length) {
+      list.innerHTML = '<div class="form-hint" style="padding:14px 12px">Keine Geräte im Tresor.</div>';
+      updateDevicePickerCount();
+      return;
+    }
+    for (const device of state.devices) {
+      const row = document.createElement('label');
+      row.className = 'device-picker-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = device.id;
+      cb.checked = planDeviceIds.has(device.id);
+      cb.addEventListener('change', () => {
+        if (cb.checked) planDeviceIds.add(device.id);
+        else planDeviceIds.delete(device.id);
+        updateDevicePickerCount();
+      });
+      const name = document.createElement('span');
+      name.className = 'device-picker-item-name';
+      name.textContent = device.name;
+      const host = document.createElement('span');
+      host.className = 'device-picker-item-host';
+      host.textContent = `${device.host}:${device.port}`;
+      row.appendChild(cb);
+      row.appendChild(name);
+      row.appendChild(host);
+      list.appendChild(row);
+    }
+    updateDevicePickerCount();
+  }
+
+  function updateDevicePickerCount() {
+    const n = planDeviceIds.size;
+    const total = state.devices.length;
+    $('#pl-pick-count').textContent =
+      n === 0 ? 'keins ausgewählt' :
+      n === total ? 'alle ausgewählt' :
+      `${n} von ${total} ausgewählt`;
+  }
+
+  function pickAllDevices() {
+    planDeviceIds = new Set(state.devices.map((d) => d.id));
+    renderDevicePicker();
+  }
+
+  function pickNoDevices() {
+    planDeviceIds = new Set();
+    renderDevicePicker();
+  }
+
+  async function planNextOrApply() {
+    if (planPhase === 'input') {
+      await submitPlanInput();
+    } else if (planPhase === 'preview') {
+      await submitApply();
+    }
+  }
+
+  async function submitPlanInput() {
+    const errorBox = $('#plan-modal-error');
+    errorBox.hidden = true;
+    if (planDeviceIds.size === 0) {
+      return showPlanError('Mindestens ein Zielgerät auswählen.');
+    }
+    let body = null;
+    let url = null;
+    if (planMode === 'route') {
+      const network = $('#pl-route-network').value.trim();
+      const gateway = $('#pl-route-gateway').value.trim();
+      if (!network || !gateway) {
+        return showPlanError('Netzwerk (CIDR) und Gateway sind Pflichtfelder.');
+      }
+      body = {
+        network,
+        gateway,
+        descr: $('#pl-route-descr').value.trim(),
+        disabled: $('#pl-route-disabled').checked,
+        target_device_ids: Array.from(planDeviceIds),
+      };
+      url = '/api/plans/route';
+    } else {
+      const name = $('#pl-alias-name').value.trim();
+      const type = $('#pl-alias-type').value;
+      const contentRaw = $('#pl-alias-content').value.trim();
+      if (!name || !contentRaw) {
+        return showPlanError('Alias-Name und Inhalte sind Pflichtfelder.');
+      }
+      const content = contentRaw
+        .split(',')
+        .map((c) => c.trim())
+        .filter((c) => c.length > 0);
+      if (!content.length) {
+        return showPlanError('Mindestens ein Alias-Inhalt erforderlich.');
+      }
+      body = {
+        name,
+        type,
+        content,
+        descr: $('#pl-alias-descr').value.trim(),
+        merge_mode: $('#pl-alias-merge').checked ? 'append' : 'create',
+        target_device_ids: Array.from(planDeviceIds),
+      };
+      url = '/api/plans/alias';
+    }
+
+    const next = $('#plan-next-btn');
+    next.disabled = true;
+    next.textContent = 'Erzeuge Plan…';
+    try {
+      const response = await apiPost(url, body);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const respBody = await response.json().catch(() => ({}));
+        showPlanError(respBody.detail || `Fehler ${response.status}`);
+        return;
+      }
+      currentPlan = await response.json();
+      renderPreview(currentPlan);
+      showPlanPhase('preview');
+    } catch (err) {
+      showPlanError(err.message);
+    } finally {
+      next.disabled = false;
+      next.textContent = 'Aktivieren';
+    }
+  }
+
+  function renderPreview(plan) {
+    const summary = $('#pl-preview-summary');
+    summary.innerHTML = `
+      <span>Plan <strong>${plan.plan_id}</strong></span>
+      <span class="pill new">${plan.to_apply_count} schreiben</span>
+      <span class="pill skip">${plan.skip_count} überspringen</span>
+    `;
+    const list = $('#pl-preview-list');
+    list.innerHTML = '';
+    for (const action of plan.actions) {
+      const row = document.createElement('div');
+      row.className = 'preview-row';
+      const device = document.createElement('span');
+      device.className = 'preview-row-device';
+      device.textContent = action.device_name;
+      const diff = document.createElement('span');
+      diff.className = 'preview-row-diff';
+      diff.textContent = action.diff_summary || '—';
+      const kind = document.createElement('span');
+      const k = action.diff_kind.toLowerCase();
+      kind.className = `preview-row-kind ${k}`;
+      kind.textContent = k;
+      row.appendChild(device);
+      row.appendChild(diff);
+      row.appendChild(kind);
+      list.appendChild(row);
+    }
+    $('#pl-confirm').checked = false;
+    $('#plan-preview-error').hidden = true;
+  }
+
+  async function submitApply() {
+    if (!currentPlan) return;
+    if (!$('#pl-confirm').checked) {
+      const err = $('#plan-preview-error');
+      err.textContent = 'Bitte die Vorschau bestätigen.';
+      err.hidden = false;
+      return;
+    }
+    const next = $('#plan-next-btn');
+    const back = $('#plan-back-btn');
+    next.disabled = true;
+    back.disabled = true;
+    next.textContent = 'Rolle aus…';
+    try {
+      const response = await apiPost(`/api/plans/${encodeURIComponent(currentPlan.plan_id)}/apply`);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const err = $('#plan-preview-error');
+        err.textContent = body.detail || `Fehler ${response.status}`;
+        err.hidden = false;
+        return;
+      }
+      const report = await response.json();
+      renderResult(report);
+      showPlanPhase('result');
+      pollHeartbeat();
+    } catch (err) {
+      const errBox = $('#plan-preview-error');
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+    } finally {
+      next.disabled = false;
+      back.disabled = false;
+    }
+  }
+
+  function renderResult(report) {
+    const summary = $('#pl-result-summary');
+    summary.innerHTML = `
+      <div class="result-summary-item ok"><strong>${report.successes}</strong><span>erfolgreich</span></div>
+      <div class="result-summary-item fail"><strong>${report.failures}</strong><span>fehlgeschlagen</span></div>
+      <div class="result-summary-item skip"><strong>${report.skipped}</strong><span>übersprungen</span></div>
+    `;
+    const list = $('#pl-result-list');
+    list.innerHTML = '';
+    for (const r of report.results) {
+      const row = document.createElement('div');
+      row.className = 'result-row';
+      const device = document.createElement('span');
+      device.className = 'result-row-device';
+      device.textContent = r.device_name;
+      const msg = document.createElement('span');
+      msg.className = 'result-row-msg';
+      msg.textContent = r.short_message || '—';
+      const statusEl = document.createElement('span');
+      const kind = r.status === 'Verifiziert' || r.status === 'Übersprungen'
+        ? (r.status === 'Übersprungen' ? 'skip' : 'ok')
+        : 'fail';
+      statusEl.className = `result-row-status ${kind}`;
+      statusEl.textContent = r.status;
+      const duration = document.createElement('span');
+      duration.className = 'result-row-duration';
+      duration.textContent = r.duration_ms ? `${r.duration_ms} ms` : '';
+      row.appendChild(device);
+      row.appendChild(msg);
+      row.appendChild(statusEl);
+      row.appendChild(duration);
+      list.appendChild(row);
+    }
+  }
+
+  function planBack() {
+    showPlanPhase('input');
+  }
+
+  function showPlanError(msg) {
+    const errorBox = $('#plan-modal-error');
+    errorBox.textContent = msg;
+    errorBox.hidden = false;
+  }
+
   // -------------------- Toast --------------------
 
   let toastEl = null;
@@ -1009,6 +1336,22 @@
     // Sidebar actions
     $('#add-device-btn').addEventListener('click', openAddModal);
     $('#empty-add-btn').addEventListener('click', openAddModal);
+    $('#add-route-btn').addEventListener('click', () => openPlanModal('route'));
+    $('#add-alias-btn').addEventListener('click', () => openPlanModal('alias'));
+
+    // Plan-Modal
+    $('#plan-modal-close').addEventListener('click', closePlanModal);
+    $('#plan-modal-cancel').addEventListener('click', closePlanModal);
+    $('#plan-back-btn').addEventListener('click', planBack);
+    $('#plan-next-btn').addEventListener('click', planNextOrApply);
+    $('#pl-pick-all').addEventListener('click', pickAllDevices);
+    $('#pl-pick-none').addEventListener('click', pickNoDevices);
+    $('#pl-confirm').addEventListener('change', (e) => {
+      $('#plan-next-btn').disabled = !e.target.checked;
+    });
+    $('#plan-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'plan-modal') closePlanModal();
+    });
 
     // Add-Modal
     $('#add-modal-close').addEventListener('click', closeAddModal);

@@ -154,6 +154,85 @@ class ConnectionTestResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Plan / Apply
+# ---------------------------------------------------------------------------
+
+
+class RoutePlanRequest(BaseModel):
+    """Plan-Erzeugung fuer eine neue statische Route ueber 1..N Geraete."""
+
+    network: str = Field(..., min_length=1, max_length=100)
+    gateway: str = Field(..., min_length=1, max_length=120)
+    descr: str = Field("", max_length=200)
+    disabled: bool = False
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class AliasPlanRequest(BaseModel):
+    """Plan-Erzeugung fuer einen Alias (create oder append)."""
+
+    name: str = Field(..., min_length=1, max_length=120)
+    type: str = Field(..., min_length=1, max_length=40)
+    content: list[str] = Field(..., min_length=1)
+    descr: str = Field("", max_length=200)
+    merge_mode: str = Field("create", pattern="^(create|append)$")
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class PlannedActionResponse(BaseModel):
+    device_id: str
+    device_name: str
+    device_host: str
+    diff_kind: str
+    diff_summary: str
+    payload_masked: dict[str, object]
+
+
+class PlanResponse(BaseModel):
+    plan_id: str
+    action: str
+    subsystem: str
+    created_at_utc: str
+    target_count: int
+    to_apply_count: int
+    skip_count: int
+    actions: list[PlannedActionResponse]
+
+
+class PlanSummary(BaseModel):
+    plan_id: str
+    action: str
+    subsystem: str
+    created_at_utc: str
+    target_count: int
+
+
+class PlanListResponse(BaseModel):
+    plans: list[PlanSummary]
+
+
+class DeviceResultResponse(BaseModel):
+    device_id: str
+    device_name: str
+    status: str
+    short_message: str
+    error_kind: str | None = None
+    failed_phase: str | None = None
+    duration_ms: int
+
+
+class RolloutReportResponse(BaseModel):
+    plan_id: str
+    action: str
+    subsystem: str
+    total: int
+    successes: int
+    failures: int
+    skipped: int
+    results: list[DeviceResultResponse]
+
+
+# ---------------------------------------------------------------------------
 # Fehler
 # ---------------------------------------------------------------------------
 
