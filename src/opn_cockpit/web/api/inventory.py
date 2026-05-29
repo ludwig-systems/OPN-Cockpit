@@ -31,6 +31,7 @@ from opn_cockpit.web.api.schemas import (
     ConnectionTestResponse,
     DeviceCreateRequest,
     DeviceResponse,
+    DeviceUpdateRequest,
     HeartbeatEntry,
     HeartbeatRequest,
     HeartbeatResponse,
@@ -101,6 +102,77 @@ def add_device(
 
     _save_or_rollback(session, vault_path, rollback=_rollback_add)
     return _to_device_response(Device.from_vault_device(new_device))
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/inventory/devices/{device_id}
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/devices/{device_id}", response_model=DeviceResponse)
+def update_device(
+    device_id: str,
+    payload: DeviceUpdateRequest,
+    session: Session = Depends(require_session),
+) -> DeviceResponse:
+    """Aktualisiert ausgewaehlte Felder eines Geraets und persistiert."""
+    vault_path = _require_vault_path(session)
+    devices = session.opened.data.devices
+    index = next((i for i, d in enumerate(devices) if d.id == device_id), -1)
+    if index < 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+
+    current = devices[index]
+
+    # Namens-Eindeutigkeit pruefen, falls geaendert.
+    if payload.name is not None and payload.name != current.name:
+        new_name_lower = payload.name.strip().lower()
+        for i, d in enumerate(devices):
+            if i != index and d.name.strip().lower() == new_name_lower:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Ein anderes Geraet heisst bereits '{payload.name}'.",
+                )
+
+    # Snapshot fuer Rollback.
+    snapshot = VaultDevice(
+        id=current.id,
+        name=current.name,
+        host=current.host,
+        port=current.port,
+        tls_verify=current.tls_verify,
+        tags=list(current.tags),
+        api_key=current.api_key,
+        api_secret=current.api_secret,
+        descr=current.descr,
+    )
+
+    # In-place mutate. api_key/api_secret nur wenn explizit gesetzt + nicht leer.
+    if payload.name is not None:
+        current.name = payload.name
+    if payload.host is not None:
+        current.host = payload.host
+    if payload.port is not None:
+        current.port = payload.port
+    if payload.tls_verify is not None:
+        current.tls_verify = payload.tls_verify
+    if payload.tags is not None:
+        current.tags = list(payload.tags)
+    if payload.descr is not None:
+        current.descr = payload.descr
+    if payload.api_key:
+        current.api_key = payload.api_key
+    if payload.api_secret:
+        current.api_secret = payload.api_secret
+
+    def _rollback_update() -> None:
+        devices[index] = snapshot
+
+    _save_or_rollback(session, vault_path, rollback=_rollback_update)
+    return _to_device_response(Device.from_vault_device(current))
 
 
 # ---------------------------------------------------------------------------

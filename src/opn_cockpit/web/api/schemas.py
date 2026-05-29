@@ -110,6 +110,25 @@ class DeviceCreateRequest(BaseModel):
     api_secret: str = Field(..., min_length=1, max_length=500)
 
 
+class DeviceUpdateRequest(BaseModel):
+    """Aenderung eines Geraets im Tresor.
+
+    Felder sind optional — nur was uebergeben wird, wird aktualisiert.
+    ``api_key`` und ``api_secret`` bleiben unveraendert, wenn leer/weg —
+    so kann der User Host/Port/Tags aendern ohne die Credentials erneut
+    tippen zu muessen.
+    """
+
+    name: str | None = Field(None, min_length=1, max_length=120)
+    host: str | None = Field(None, min_length=1, max_length=255)
+    port: int | None = Field(None, ge=1, le=65535)
+    tls_verify: bool | None = None
+    tags: list[str] | None = None
+    descr: str | None = Field(None, max_length=500)
+    api_key: str | None = Field(None, max_length=255)
+    api_secret: str | None = Field(None, max_length=500)
+
+
 class HeartbeatRequest(BaseModel):
     """Optional: Subset von Geraete-IDs probieren. Leer = alle."""
 

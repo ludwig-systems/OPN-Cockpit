@@ -101,6 +101,17 @@
     });
   }
 
+  async function apiPatch(path, body) {
+    const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+    const t = getToken();
+    if (t) headers.Authorization = `Bearer ${t}`;
+    return await fetch(path, {
+      method: 'PATCH',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
   // -------------------- Screen Switching --------------------
 
   function showScreen(name) {
@@ -560,21 +571,55 @@
     handleSessionLost();
   }
 
-  // -------------------- Add-Modal --------------------
+  // -------------------- Add/Edit-Modal --------------------
+  //
+  // Das Add-Modal dient auch als Edit-Modal. Der Modus steckt im state:
+  //   modalMode === 'add'  -> POST /api/inventory/devices, alles required
+  //   modalMode === 'edit' -> PATCH /api/inventory/devices/{id}, Keys optional
+
+  let modalMode = 'add';
+  let editingDeviceId = null;
 
   function openAddModal(prefill) {
     const data = prefill || {};
+    modalMode = 'add';
+    editingDeviceId = null;
     $('#ad-name').value = data.name || '';
     $('#ad-host').value = data.host || '';
     $('#ad-port').value = String(data.port || 443);
     $('#ad-tags').value = (data.tags || []).join(', ');
     $('#ad-descr').value = data.descr || '';
     $('#ad-tls').checked = data.tls_verify !== undefined ? data.tls_verify : true;
-    $('#ad-apikey').value = '';     // bewusst leer (auch beim Duplizieren)
+    $('#ad-apikey').value = '';
     $('#ad-apisecret').value = '';
+    $('#ad-apikey').placeholder = '';
+    $('#ad-apisecret').placeholder = '';
+    $('#ad-credentials-hint').hidden = true;
     $('#add-modal-title').textContent = data.duplicateOf
       ? `„${data.duplicateOf}" duplizieren`
       : 'Gerät hinzufügen';
+    $('#add-modal-confirm').textContent = 'Hinzufügen';
+    $('#add-modal-error').hidden = true;
+    $('#add-modal').hidden = false;
+    setTimeout(() => $('#ad-name').focus(), 0);
+  }
+
+  function openEditModal(device) {
+    modalMode = 'edit';
+    editingDeviceId = device.id;
+    $('#ad-name').value = device.name;
+    $('#ad-host').value = device.host;
+    $('#ad-port').value = String(device.port);
+    $('#ad-tags').value = (device.tags || []).join(', ');
+    $('#ad-descr').value = device.descr || '';
+    $('#ad-tls').checked = device.tls_verify;
+    $('#ad-apikey').value = '';
+    $('#ad-apisecret').value = '';
+    $('#ad-apikey').placeholder = '(unverändert)';
+    $('#ad-apisecret').placeholder = '(unverändert)';
+    $('#ad-credentials-hint').hidden = false;
+    $('#add-modal-title').textContent = `„${device.name}" bearbeiten`;
+    $('#add-modal-confirm').textContent = 'Speichern';
     $('#add-modal-error').hidden = true;
     $('#add-modal').hidden = false;
     setTimeout(() => $('#ad-name').focus(), 0);
@@ -582,9 +627,11 @@
 
   function closeAddModal() {
     $('#add-modal').hidden = true;
+    modalMode = 'add';
+    editingDeviceId = null;
   }
 
-  async function doAddDevice() {
+  async function doAddOrEditDevice() {
     const errorBox = $('#add-modal-error');
     errorBox.hidden = true;
 
@@ -597,8 +644,15 @@
     const apiKey = $('#ad-apikey').value.trim();
     const apiSecret = $('#ad-apisecret').value;
 
-    if (!name || !host || !apiKey || !apiSecret) {
-      return showAddError('Bitte Name, Hostname, API-Key und API-Secret ausfüllen.');
+    if (modalMode === 'add') {
+      if (!name || !host || !apiKey || !apiSecret) {
+        return showAddError('Bitte Name, Hostname, API-Key und API-Secret ausfüllen.');
+      }
+    } else {
+      // Edit: Name + Host bleiben Pflicht, Keys optional
+      if (!name || !host) {
+        return showAddError('Name und Hostname sind Pflichtfelder.');
+      }
     }
     const port = parseInt(portRaw, 10);
     if (!port || port < 1 || port > 65535) {
@@ -609,34 +663,48 @@
       : [];
 
     const btn = $('#add-modal-confirm');
+    const originalLabel = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Speichere…';
     try {
-      const response = await apiPost('/api/inventory/devices', {
-        name, host, port,
-        tls_verify: tlsVerify,
-        tags, descr,
-        api_key: apiKey,
-        api_secret: apiSecret,
-      });
-      if (response.status === 401) {
-        handleSessionLost();
-        return;
+      let response;
+      if (modalMode === 'add') {
+        response = await apiPost('/api/inventory/devices', {
+          name, host, port,
+          tls_verify: tlsVerify,
+          tags, descr,
+          api_key: apiKey,
+          api_secret: apiSecret,
+        });
+      } else {
+        const body = {
+          name, host, port,
+          tls_verify: tlsVerify,
+          tags, descr,
+        };
+        if (apiKey) body.api_key = apiKey;
+        if (apiSecret) body.api_secret = apiSecret;
+        response = await apiPatch(
+          `/api/inventory/devices/${encodeURIComponent(editingDeviceId)}`,
+          body,
+        );
       }
+      if (response.status === 401) { handleSessionLost(); return; }
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         showAddError(body.detail || `Fehler ${response.status}`);
         return;
       }
+      const wasEdit = modalMode === 'edit';
       closeAddModal();
       await loadInventory();
       pollHeartbeat();
-      showToast(`Gerät „${name}" angelegt.`);
+      showToast(wasEdit ? `Gerät „${name}" aktualisiert.` : `Gerät „${name}" angelegt.`);
     } catch (err) {
       showAddError(err.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Hinzufügen';
+      btn.textContent = originalLabel;
     }
   }
 
@@ -692,9 +760,14 @@
     $('#device-test-btn').disabled = false;
     $('#device-modal-error').hidden = true;
 
-    // OPNsense-Web-Link: echter Anchor mit konkreter href.
+    // OPNsense-Web-Link: echter Anchor mit konkreter href + sichtbarer
+    // Mono-Text. Falls Chromium den target=_blank-Tab leer rendert (etwa
+    // bei nicht aufloesbaren Hosts), kann der User die URL trotzdem
+    // kopieren oder direkt in eine Adressleiste ziehen.
+    const url = `https://${device.host}:${device.port}/`;
     const webLink = $('#device-open-web-btn');
-    webLink.href = `https://${device.host}:${device.port}/`;
+    webLink.href = url;
+    $('#device-url-text').textContent = url;
 
     resetDeleteButton();
     $('#device-modal').hidden = false;
@@ -757,6 +830,32 @@
       descr: device.descr,
       duplicateOf: device.name,
     });
+  }
+
+  function doEditFromDetail() {
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    if (!device) return;
+    closeDeviceModal();
+    openEditModal(device);
+  }
+
+  async function doCopyUrl() {
+    const text = $('#device-url-text').textContent || '';
+    if (!text || text === '—') return;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('URL kopiert.');
+    } catch (_) {
+      // Clipboard-API kann je nach Browser/Kontext blockiert sein.
+      // Fallback: alten exec-Command versuchen.
+      const tmp = document.createElement('textarea');
+      tmp.value = text;
+      document.body.appendChild(tmp);
+      tmp.select();
+      try { document.execCommand('copy'); showToast('URL kopiert.'); }
+      catch (_) { showToast('Kopieren fehlgeschlagen.', true); }
+      document.body.removeChild(tmp);
+    }
   }
 
   function resetDeleteButton() {
@@ -899,7 +998,7 @@
     // Add-Modal
     $('#add-modal-close').addEventListener('click', closeAddModal);
     $('#add-modal-cancel').addEventListener('click', closeAddModal);
-    $('#add-modal-confirm').addEventListener('click', doAddDevice);
+    $('#add-modal-confirm').addEventListener('click', doAddOrEditDevice);
     $('#add-modal').addEventListener('click', (e) => {
       if (e.target.id === 'add-modal') closeAddModal();
     });
@@ -911,7 +1010,9 @@
     $('#device-test-btn').addEventListener('click', doTestConnection);
     // #device-open-web-btn ist ein echter <a target="_blank">,
     // braucht keinen JS-Handler — Browser navigiert nativ.
+    $('#device-edit-btn').addEventListener('click', doEditFromDetail);
     $('#device-duplicate-btn').addEventListener('click', doDuplicate);
+    $('#device-url-copy').addEventListener('click', doCopyUrl);
     $('#device-modal').addEventListener('click', (e) => {
       if (e.target.id === 'device-modal') closeDeviceModal();
     });

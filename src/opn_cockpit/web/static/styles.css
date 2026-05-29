@@ -1128,7 +1128,7 @@ body {
   margin-top: 10px;
 }
 
-/* Action row (device modal) */
+/* Action row + URL row (device modal) */
 
 .action-row {
   display: flex;
@@ -1136,6 +1136,37 @@ body {
   gap: 8px;
   margin: 10px 0 14px;
 }
+
+.url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.url-label {
+  color: var(--text-subtle);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+
+.url-value {
+  flex: 1;
+  font-family: var(--font-mono);
+  color: var(--text);
+  word-break: break-all;
+  user-select: all;
+}
+
+.url-copy { font-size: 11px; }
 
 .action-row-btn {
   display: inline-flex;

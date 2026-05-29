@@ -193,6 +193,114 @@ class TestAddDevice:
 
 
 # ---------------------------------------------------------------------------
+# PATCH /api/inventory/devices/{id}
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDevice:
+    def test_requires_auth(self, client: TestClient) -> None:
+        response = client.patch(
+            "/api/inventory/devices/dev-001",
+            json={"name": "Neu"},
+        )
+        assert response.status_code == 401
+
+    def test_updates_fields_and_persists(
+        self,
+        client: TestClient,
+        vault_with_devices: Path,
+    ) -> None:
+        token = _unlock(client, vault_with_devices)
+        response = client.patch(
+            "/api/inventory/devices/dev-001",
+            json={
+                "name": "HQ Berlin 2",
+                "host": "berlin-2.lab",
+                "port": 8443,
+                "tls_verify": False,
+                "tags": ["branches", "germany", "primary"],
+                "descr": "Updated",
+            },
+            headers=_bearer(token),
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["name"] == "HQ Berlin 2"
+        assert body["host"] == "berlin-2.lab"
+        assert body["port"] == 8443
+        assert body["tls_verify"] is False
+        # Auf Platte
+        opened = open_vault(vault_with_devices, PASSWORD)
+        on_disk = next(d for d in opened.data.devices if d.id == "dev-001")
+        assert on_disk.name == "HQ Berlin 2"
+        assert on_disk.host == "berlin-2.lab"
+        assert on_disk.port == 8443
+        # Secrets unveraendert (kein api_key/api_secret im Patch)
+        assert on_disk.api_key == "key-001"
+        assert on_disk.api_secret == "secret-001"
+
+    def test_empty_api_key_does_not_overwrite_secret(
+        self,
+        client: TestClient,
+        vault_with_devices: Path,
+    ) -> None:
+        token = _unlock(client, vault_with_devices)
+        response = client.patch(
+            "/api/inventory/devices/dev-001",
+            json={"name": "Berlin", "api_key": "", "api_secret": ""},
+            headers=_bearer(token),
+        )
+        assert response.status_code == 200
+        opened = open_vault(vault_with_devices, PASSWORD)
+        on_disk = next(d for d in opened.data.devices if d.id == "dev-001")
+        assert on_disk.api_key == "key-001"
+        assert on_disk.api_secret == "secret-001"
+
+    def test_api_key_rotation(
+        self,
+        client: TestClient,
+        vault_with_devices: Path,
+    ) -> None:
+        token = _unlock(client, vault_with_devices)
+        response = client.patch(
+            "/api/inventory/devices/dev-001",
+            json={"api_key": "new-key", "api_secret": "new-secret"},
+            headers=_bearer(token),
+        )
+        assert response.status_code == 200
+        opened = open_vault(vault_with_devices, PASSWORD)
+        on_disk = next(d for d in opened.data.devices if d.id == "dev-001")
+        assert on_disk.api_key == "new-key"
+        assert on_disk.api_secret == "new-secret"
+
+    def test_unknown_id_returns_404(
+        self,
+        client: TestClient,
+        vault_with_devices: Path,
+    ) -> None:
+        token = _unlock(client, vault_with_devices)
+        response = client.patch(
+            "/api/inventory/devices/does-not-exist",
+            json={"name": "X"},
+            headers=_bearer(token),
+        )
+        assert response.status_code == 404
+
+    def test_name_conflict_returns_409(
+        self,
+        client: TestClient,
+        vault_with_devices: Path,
+    ) -> None:
+        token = _unlock(client, vault_with_devices)
+        response = client.patch(
+            "/api/inventory/devices/dev-001",
+            json={"name": "Lab Box"},
+            headers=_bearer(token),
+        )
+        assert response.status_code == 409
+
+
+# ---------------------------------------------------------------------------
 # DELETE /api/inventory/devices/{id}
 # ---------------------------------------------------------------------------
 
