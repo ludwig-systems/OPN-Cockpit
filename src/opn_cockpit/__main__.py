@@ -1,8 +1,8 @@
-"""Entry-Point für ``python -m opn_cockpit`` — startet die PySide6-GUI."""
+"""Entry-Point für ``python -m opn_cockpit`` — startet den Web-Server."""
 
 from __future__ import annotations
 
-from opn_cockpit.gui.app import run
+from opn_cockpit.web.runner import run
 
 
 def main() -> int:

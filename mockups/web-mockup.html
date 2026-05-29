@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OPN-Cockpit · Inventar</title>
+  <style>
+    :root {
+      --font-display: 'Iowan Old Style', 'Sitka Text', 'Hoefler Text', 'Cambria', Georgia, ui-serif, serif;
+      --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', 'Segoe UI', sans-serif;
+      --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+    }
+
+    [data-theme="dark"] {
+      --bg: #0a0b0e;
+      --bg-grain: rgba(255, 255, 255, 0.012);
+      --bg-elevated: #131419;
+      --bg-card: #16171c;
+      --bg-card-hover: #1c1d23;
+      --bg-input: #101117;
+      --border: rgba(255, 255, 255, 0.06);
+      --border-strong: rgba(255, 255, 255, 0.14);
+      --text: #ecedef;
+      --text-muted: #8c8e96;
+      --text-subtle: #585a62;
+      --text-faint: #3a3b42;
+      --accent: #84d4b3;
+      --accent-soft: rgba(132, 212, 179, 0.12);
+      --accent-line: rgba(132, 212, 179, 0.5);
+      --online: #6fc995;
+      --online-glow: rgba(111, 201, 149, 0.4);
+      --offline: #db5a4a;
+      --offline-glow: rgba(219, 90, 74, 0.32);
+      --checking: #e9b85b;
+      --checking-glow: rgba(233, 184, 91, 0.55);
+      --tls-bad: #db5a4a;
+      --tls-bad-bg: rgba(219, 90, 74, 0.06);
+      --tls-bad-border: rgba(219, 90, 74, 0.22);
+    }
+
+    [data-theme="light"] {
+      --bg: #f6f5f0;
+      --bg-grain: rgba(0, 0, 0, 0.012);
+      --bg-elevated: #ffffff;
+      --bg-card: #ffffff;
+      --bg-card-hover: #fbfaf5;
+      --bg-input: #ffffff;
+      --border: rgba(0, 0, 0, 0.08);
+      --border-strong: rgba(0, 0, 0, 0.22);
+      --text: #1c1d20;
+      --text-muted: #6b6d75;
+      --text-subtle: #9c9ea5;
+      --text-faint: #c8c9ce;
+      --accent: #2c8867;
+      --accent-soft: rgba(44, 136, 103, 0.10);
+      --accent-line: rgba(44, 136, 103, 0.45);
+      --online: #2c8867;
+      --online-glow: rgba(44, 136, 103, 0.35);
+      --offline: #b03a2e;
+      --offline-glow: rgba(176, 58, 46, 0.28);
+      --checking: #b07418;
+      --checking-glow: rgba(176, 116, 24, 0.4);
+      --tls-bad: #b03a2e;
+      --tls-bad-bg: rgba(176, 58, 46, 0.05);
+      --tls-bad-border: rgba(176, 58, 46, 0.22);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: 'ss01', 'cv11';
+      letter-spacing: -0.005em;
+      position: relative;
+    }
+
+    /* Subtle noise/grain overlay for atmosphere */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='220' height='220' filter='url(%23n)' opacity='0.5'/></svg>");
+      opacity: 0.4;
+      mix-blend-mode: overlay;
+      z-index: 9999;
+    }
+
+    /* === Layout === */
+
+    .app {
+      display: grid;
+      grid-template-columns: 274px 1fr;
+      grid-template-rows: 64px 1fr;
+      grid-template-areas:
+        "topbar topbar"
+        "sidebar content";
+      height: 100vh;
+    }
+
+    /* === Top Bar === */
+
+    .topbar {
+      grid-area: topbar;
+      display: flex;
+      align-items: center;
+      padding: 0 22px 0 24px;
+      gap: 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      position: relative;
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 228px;
+    }
+
+    .brand h1 {
+      font-family: var(--font-display);
+      font-size: 23px;
+      font-weight: 400;
+      font-style: italic;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .brand h1 .ampersand-like {
+      color: var(--accent);
+    }
+
+    .vault-name {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--text-subtle);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .vault-name::before {
+      content: '';
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 1.5px var(--accent-soft);
+    }
+
+    .search {
+      flex: 1;
+      max-width: 460px;
+      margin: 0 auto;
+      position: relative;
+    }
+
+    .search input {
+      width: 100%;
+      height: 36px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 0 56px 0 38px;
+      font-size: 13px;
+      font-family: var(--font-sans);
+      color: var(--text);
+      transition: border-color 0.15s, background-color 0.15s;
+    }
+
+    .search input::placeholder {
+      color: var(--text-subtle);
+    }
+
+    .search input:focus {
+      outline: none;
+      border-color: var(--border-strong);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 13px;
+      top: 50%;
+      transform: translateY(-50%);
+      pointer-events: none;
+      color: var(--text-subtle);
+    }
+
+    .search kbd {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      letter-spacing: 0.04em;
+      line-height: 1;
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      position: relative;
+    }
+
+    .icon-btn:hover {
+      background: var(--bg-elevated);
+      color: var(--text);
+      border-color: var(--border);
+    }
+
+    .lock-btn {
+      padding: 0 12px 0 10px;
+      width: auto;
+      gap: 6px;
+      font-size: 12.5px;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      color: var(--text-muted);
+      margin-left: 6px;
+    }
+
+    .lock-btn:hover {
+      color: var(--text);
+    }
+
+    .topbar-divider {
+      width: 1px;
+      height: 22px;
+      background: var(--border);
+      margin: 0 4px;
+    }
+
+    /* === Sidebar === */
+
+    .sidebar {
+      grid-area: sidebar;
+      border-right: 1px solid var(--border);
+      padding: 26px 14px 20px;
+      background: var(--bg);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar-section {
+      margin-bottom: 28px;
+    }
+
+    .sidebar-section h3 {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--text-subtle);
+      padding: 0 12px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sidebar-section h3::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .group-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .group-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 13.5px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.12s;
+      position: relative;
+      letter-spacing: -0.005em;
+    }
+
+    .group-item:hover {
+      background: var(--bg-elevated);
+      color: var(--text);
+    }
+
+    .group-item.active {
+      background: var(--bg-elevated);
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    .group-item.active::before {
+      content: '';
+      position: absolute;
+      left: -1px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 2px;
+      height: 16px;
+      background: var(--accent);
+      border-radius: 0 2px 2px 0;
+    }
+
+    .group-count {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-subtle);
+      background: var(--bg-card);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-feature-settings: 'tnum';
+      min-width: 26px;
+      text-align: center;
+      border: 1px solid var(--border);
+    }
+
+    .group-item.active .group-count {
+      color: var(--accent);
+      background: var(--accent-soft);
+      border-color: transparent;
+    }
+
+    .action-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .action-btn {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 9px 12px;
+      font-size: 13.5px;
+      color: var(--text-muted);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      text-align: left;
+      width: 100%;
+      transition: all 0.12s;
+      font-family: inherit;
+      letter-spacing: -0.005em;
+    }
+
+    .action-btn:hover {
+      background: var(--bg-elevated);
+      color: var(--text);
+    }
+
+    .action-btn .action-icon {
+      flex-shrink: 0;
+      color: var(--text-subtle);
+      transition: color 0.12s;
+    }
+
+    .action-btn:hover .action-icon {
+      color: var(--accent);
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      padding: 16px 14px 0;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .shortcut {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      color: var(--text-subtle);
+    }
+
+    .shortcut-keys {
+      display: flex;
+      gap: 3px;
+    }
+
+    .shortcut-keys kbd {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      color: var(--text-muted);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1px 5px;
+      letter-spacing: 0.04em;
+      line-height: 1;
+    }
+
+    /* === Main Content === */
+
+    .content {
+      grid-area: content;
+      padding: 36px 44px 44px;
+      overflow-y: auto;
+    }
+
+    .content-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 36px;
+      padding-bottom: 26px;
+      border-bottom: 1px solid var(--border);
+      gap: 32px;
+      flex-wrap: wrap;
+    }
+
+    .content-title-block {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .content-eyebrow {
+      font-size: 10.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--text-subtle);
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .content-eyebrow::before {
+      content: '';
+      width: 12px;
+      height: 1px;
+      background: var(--accent);
+    }
+
+    .content-header h2 {
+      font-family: var(--font-display);
+      font-size: 42px;
+      font-weight: 400;
+      font-style: italic;
+      color: var(--text);
+      letter-spacing: -0.025em;
+      line-height: 1;
+    }
+
+    .status-summary {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      font-size: 13px;
+      color: var(--text-muted);
+      padding-bottom: 4px;
+    }
+
+    .status-summary-item {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      letter-spacing: -0.005em;
+    }
+
+    .status-summary-item strong {
+      font-family: var(--font-mono);
+      color: var(--text);
+      font-weight: 500;
+      font-size: 15px;
+      font-feature-settings: 'tnum';
+    }
+
+    .status-summary-item.online strong { color: var(--online); }
+    .status-summary-item.offline strong { color: var(--offline); }
+    .status-summary-item.checking strong { color: var(--checking); }
+
+    .status-summary-separator {
+      width: 1px;
+      height: 14px;
+      background: var(--border);
+    }
+
+    /* === Card Grid === */
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(282px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 18px 16px;
+      cursor: pointer;
+      transition: transform 0.2s ease, background-color 0.18s ease, border-color 0.18s ease;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      will-change: transform;
+      animation: card-fade-in 0.5s cubic-bezier(.2,.7,.3,1) backwards;
+    }
+
+    .card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-strong);
+      transform: translateY(-2px);
+    }
+
+    .card-status-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .card-hostname {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--text-muted);
+      letter-spacing: 0.005em;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .card-warning-badge {
+      flex-shrink: 0;
+      color: var(--tls-bad);
+      opacity: 0.85;
+    }
+
+    .card-name {
+      font-size: 18px;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: -0.018em;
+      line-height: 1.18;
+    }
+
+    .card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .tag {
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      padding: 2px 7px;
+      border-radius: 3px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      letter-spacing: 0.015em;
+      line-height: 1.5;
+    }
+
+    .card-stats {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 13px;
+      border-top: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-subtle);
+      letter-spacing: 0.02em;
+      font-feature-settings: 'tnum';
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .stat-label {
+      color: var(--text-faint);
+    }
+
+    .stat-value {
+      color: var(--text-muted);
+    }
+
+    .stat-value.tls-on {
+      color: var(--online);
+    }
+
+    .stat-value.tls-off {
+      color: var(--tls-bad);
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    /* Card state variants */
+
+    .card.offline .card-name {
+      color: var(--text-muted);
+    }
+
+    .card.offline .card-hostname {
+      color: var(--text-subtle);
+    }
+
+    .card.tls-warning {
+      border-color: var(--tls-bad-border);
+    }
+
+    .card.tls-warning::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: var(--radius-lg);
+      background: linear-gradient(180deg, transparent 65%, var(--tls-bad-bg));
+      pointer-events: none;
+    }
+
+    .card.tls-warning:hover {
+      border-color: var(--tls-bad);
+    }
+
+    /* Status dots */
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .status-dot.online {
+      background: var(--online);
+      box-shadow: 0 0 0 2.5px var(--online-glow);
+    }
+
+    .status-dot.offline {
+      background: var(--offline);
+      box-shadow: 0 0 0 2.5px var(--offline-glow);
+    }
+
+    .status-dot.checking {
+      background: var(--checking);
+    }
+
+    .status-dot.checking::before,
+    .status-dot.checking::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 1.5px solid var(--checking);
+      opacity: 0;
+      animation: pulse-checking 2s cubic-bezier(.2,.7,.5,1) infinite;
+    }
+
+    .status-dot.checking::after {
+      animation-delay: 1s;
+    }
+
+    @keyframes pulse-checking {
+      0% {
+        transform: scale(1);
+        opacity: 0.85;
+      }
+      100% {
+        transform: scale(3.5);
+        opacity: 0;
+      }
+    }
+
+    /* Card entrance stagger */
+
+    @keyframes card-fade-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .card-grid .card:nth-child(1)  { animation-delay: 0.04s; }
+    .card-grid .card:nth-child(2)  { animation-delay: 0.07s; }
+    .card-grid .card:nth-child(3)  { animation-delay: 0.10s; }
+    .card-grid .card:nth-child(4)  { animation-delay: 0.13s; }
+    .card-grid .card:nth-child(5)  { animation-delay: 0.16s; }
+    .card-grid .card:nth-child(6)  { animation-delay: 0.19s; }
+    .card-grid .card:nth-child(7)  { animation-delay: 0.22s; }
+    .card-grid .card:nth-child(8)  { animation-delay: 0.25s; }
+    .card-grid .card:nth-child(9)  { animation-delay: 0.28s; }
+    .card-grid .card:nth-child(10) { animation-delay: 0.31s; }
+
+    /* Header entrance */
+
+    @keyframes fade-down {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .content-header { animation: fade-down 0.5s cubic-bezier(.2,.7,.3,1) backwards; }
+
+    /* Subtle scrollbar */
+
+    .sidebar::-webkit-scrollbar,
+    .content::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .sidebar::-webkit-scrollbar-track,
+    .content::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb,
+    .content::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb:hover,
+    .content::-webkit-scrollbar-thumb:hover {
+      background: var(--border-strong);
+    }
+
+    /* Theme transition */
+
+    [data-theme] *, [data-theme] *::before, [data-theme] *::after {
+      transition-property: background-color, border-color, color;
+      transition-duration: 0.18s;
+      transition-timing-function: ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- ============================================================ -->
+    <!-- TOP BAR                                                       -->
+    <!-- ============================================================ -->
+    <header class="topbar">
+      <div class="brand">
+        <h1>OPN-Cockpit</h1>
+        <span class="vault-name">produktion.opnvault &nbsp;·&nbsp; entsperrt</span>
+      </div>
+
+      <div class="search">
+        <span class="search-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <circle cx="6.2" cy="6.2" r="4.3" stroke="currentColor" stroke-width="1.4"/>
+            <line x1="9.5" y1="9.5" x2="12.3" y2="12.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <input type="search" placeholder="Geräte, Tags, IPs durchsuchen…" />
+        <kbd>Strg K</kbd>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="icon-btn" id="theme-toggle" title="Theme wechseln">
+          <svg class="icon-sun" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <circle cx="7.5" cy="7.5" r="2.5"/>
+            <line x1="7.5" y1="1.5" x2="7.5" y2="3"/>
+            <line x1="7.5" y1="12" x2="7.5" y2="13.5"/>
+            <line x1="1.5" y1="7.5" x2="3" y2="7.5"/>
+            <line x1="12" y1="7.5" x2="13.5" y2="7.5"/>
+            <line x1="3.1" y1="3.1" x2="4.2" y2="4.2"/>
+            <line x1="10.8" y1="10.8" x2="11.9" y2="11.9"/>
+            <line x1="3.1" y1="11.9" x2="4.2" y2="10.8"/>
+            <line x1="10.8" y1="4.2" x2="11.9" y2="3.1"/>
+          </svg>
+        </button>
+        <button class="icon-btn" title="Audit-Log">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <line x1="3.5" y1="4.5" x2="12.5" y2="4.5"/>
+            <line x1="3.5" y1="8" x2="12.5" y2="8"/>
+            <line x1="3.5" y1="11.5" x2="9" y2="11.5"/>
+          </svg>
+        </button>
+        <button class="icon-btn" title="Einstellungen">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="8" cy="8" r="2.3"/>
+            <path d="M11.6 4.4l1.3-.4-.7-1.2-1.2.5c-.4-.3-.8-.5-1.3-.7L9.4 1.4H6.6L6.3 2.6c-.5.2-.9.4-1.3.7l-1.2-.5-.7 1.2 1.3.4c-.1.4-.2.9-.2 1.4s.1 1 .2 1.4l-1.3.4.7 1.2 1.2-.5c.4.3.8.5 1.3.7l.3 1.2h2.8l.3-1.2c.5-.2.9-.4 1.3-.7l1.2.5.7-1.2-1.3-.4c.1-.4.2-.9.2-1.4s-.1-1-.2-1.4z"/>
+          </svg>
+        </button>
+        <div class="topbar-divider"></div>
+        <button class="icon-btn lock-btn" title="Tresor sperren">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2.5" y="6" width="8" height="5.5" rx="1"/>
+            <path d="M4 6V4a2.5 2.5 0 015 0v2"/>
+          </svg>
+          <span>Sperren</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ============================================================ -->
+    <!-- SIDEBAR                                                       -->
+    <!-- ============================================================ -->
+    <aside class="sidebar">
+      <section class="sidebar-section">
+        <h3>Gruppen</h3>
+        <ul class="group-list">
+          <li class="group-item active">
+            <span>Alle Geräte</span>
+            <span class="group-count">10</span>
+          </li>
+          <li class="group-item">
+            <span>branches</span>
+            <span class="group-count">7</span>
+          </li>
+          <li class="group-item">
+            <span>germany</span>
+            <span class="group-count">6</span>
+          </li>
+          <li class="group-item">
+            <span>austria</span>
+            <span class="group-count">1</span>
+          </li>
+          <li class="group-item">
+            <span>core</span>
+            <span class="group-count">2</span>
+          </li>
+          <li class="group-item">
+            <span>lab</span>
+            <span class="group-count">2</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="sidebar-section">
+        <h3>Aktionen</h3>
+        <div class="action-list">
+          <button class="action-btn">
+            <span class="action-icon">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1.5 7h7M8.5 4l3 3-3 3"/>
+                <circle cx="11.5" cy="7" r="0.7" fill="currentColor" stroke="none"/>
+              </svg>
+            </span>
+            <span>Route hinzufügen</span>
+          </button>
+          <button class="action-btn">
+            <span class="action-icon">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M11.5 7.5L7.5 11.5 1.5 5.5V1.5h4l6 6z"/>
+                <circle cx="4" cy="4" r="0.7" fill="currentColor" stroke="none"/>
+              </svg>
+            </span>
+            <span>Alias hinzufügen</span>
+          </button>
+          <button class="action-btn">
+            <span class="action-icon">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="7" cy="7" r="5.3"/>
+                <path d="M7 4v3l2 1.5"/>
+              </svg>
+            </span>
+            <span>Plan-Verlauf</span>
+          </button>
+          <button class="action-btn">
+            <span class="action-icon">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 1.5h6l2 2v9h-10v-9z"/>
+                <path d="M4 1.5v2h6v-2"/>
+                <line x1="4.5" y1="7" x2="9.5" y2="7"/>
+                <line x1="4.5" y1="9.5" x2="9.5" y2="9.5"/>
+              </svg>
+            </span>
+            <span>Bulk-Import</span>
+          </button>
+        </div>
+      </section>
+
+      <div class="sidebar-footer">
+        <div class="shortcut">
+          <span>Neues Gerät</span>
+          <span class="shortcut-keys">
+            <kbd>Strg</kbd><kbd>N</kbd>
+          </span>
+        </div>
+        <div class="shortcut">
+          <span>Suchen</span>
+          <span class="shortcut-keys">
+            <kbd>Strg</kbd><kbd>K</kbd>
+          </span>
+        </div>
+        <div class="shortcut">
+          <span>Tresor sperren</span>
+          <span class="shortcut-keys">
+            <kbd>Strg</kbd><kbd>L</kbd>
+          </span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============================================================ -->
+    <!-- CONTENT                                                       -->
+    <!-- ============================================================ -->
+    <main class="content">
+      <header class="content-header">
+        <div class="content-title-block">
+          <div class="content-eyebrow">Tresor · produktion</div>
+          <h2>Inventar</h2>
+        </div>
+
+        <div class="status-summary">
+          <div class="status-summary-item online">
+            <span class="status-dot online" style="width:6px;height:6px"></span>
+            <strong>6</strong>
+            <span>erreichbar</span>
+          </div>
+          <div class="status-summary-separator"></div>
+          <div class="status-summary-item offline">
+            <span class="status-dot offline" style="width:6px;height:6px"></span>
+            <strong>3</strong>
+            <span>offline</span>
+          </div>
+          <div class="status-summary-separator"></div>
+          <div class="status-summary-item checking">
+            <span class="status-dot checking" style="width:6px;height:6px"></span>
+            <strong>1</strong>
+            <span>Prüfung läuft</span>
+          </div>
+          <div class="status-summary-separator"></div>
+          <div class="status-summary-item">
+            <strong>2</strong>
+            <span>TLS-Risiko</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="card-grid">
+
+        <!-- 1. HQ Berlin · online -->
+        <article class="card">
+          <div class="card-status-row">
+            <span class="status-dot online"></span>
+            <span class="card-hostname">opn-berlin.lab</span>
+          </div>
+          <div class="card-name">HQ Berlin</div>
+          <div class="card-tags">
+            <span class="tag">branches</span>
+            <span class="tag">germany</span>
+            <span class="tag">core</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">443</span></span>
+            <span class="stat"><span class="stat-value tls-on">TLS ✓</span></span>
+            <span class="stat"><span class="stat-value">vor 4 s</span></span>
+          </div>
+        </article>
+
+        <!-- 2. HQ München · online -->
+        <article class="card">
+          <div class="card-status-row">
+            <span class="status-dot online"></span>
+            <span class="card-hostname">opn-muenchen.lab</span>
+          </div>
+          <div class="card-name">HQ München</div>
+          <div class="card-tags">
+            <span class="tag">branches</span>
+            <span class="tag">germany</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">443</span></span>
+            <span class="stat"><span class="stat-value tls-on">TLS ✓</span></span>
+            <span class="stat"><span class="stat-value">vor 4 s</span></span>
+          </div>
+        </article>
+
+        <!-- 3. Frankfurt · online -->
+        <article class="card">
+          <div class="card-status-row">
+            <span class="status-dot online"></span>
+            <span class="card-hostname">opn-frankfurt.lab</span>
+          </div>
+          <div class="card-name">Frankfurt RZ</div>
+          <div class="card-tags">
+            <span class="tag">core</span>
+            <span class="tag">germany</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">8443</span></span>
+            <span class="stat"><span class="stat-value tls-on">TLS ✓</span></span>
+            <span class="stat"><span class="stat-value">vor 5 s</span></span>
+          </div>
+        </article>
+
+        <!-- 4. Hamburg · online -->
+        <article class="card">
+          <div class="card-status-row">
+            <span class="status-dot online"></span>
+            <span class="card-hostname">opn-hamburg.lab</span>
+          </div>
+          <div class="card-name">Hamburg Nord</div>
+          <div class="card-tags">
+            <span class="tag">branches</span>
+            <span class="tag">germany</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">443</span></span>
+            <span class="stat"><span class="stat-value tls-on">TLS ✓</span></span>
+            <span class="stat"><span class="stat-value">vor 6 s</span></span>
+          </div>
+        </article>
+
+        <!-- 5. Stuttgart · online -->
+        <article class="card">
+          <div class="card-status-row">
+            <span class="status-dot online"></span>
+            <span class="card-hostname">opn-stuttgart.lab</span>
+          </div>
+          <div class="card-name">Stuttgart Süd</div>
+          <div class="card-tags">
+            <span class="tag">branches</span>
+            <span class="tag">germany</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">443</span></span>
+            <span class="stat"><span class="stat-value tls-on">TLS ✓</span></span>
+            <span class="stat"><span class="stat-value">vor 7 s</span></span>
+          </div>
+        </article>
+
+        <!-- 6. Wien · checking -->
+        <article class="card">
+          <div class="card-status-row">
+            <span class="status-dot checking"></span>
+            <span class="card-hostname">opn-wien.lab</span>
+          </div>
+          <div class="card-name">Wien Zentrum</div>
+          <div class="card-tags">
+            <span class="tag">branches</span>
+            <span class="tag">austria</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">443</span></span>
+            <span class="stat"><span class="stat-value tls-on">TLS ✓</span></span>
+            <span class="stat"><span class="stat-value">prüfe…</span></span>
+          </div>
+        </article>
+
+        <!-- 7. Hannover · online + TLS WARNING -->
+        <article class="card tls-warning">
+          <div class="card-status-row">
+            <span class="status-dot online"></span>
+            <span class="card-hostname">opn-lab01.intern</span>
+            <span class="card-warning-badge" title="TLS-Zertifikat wird nicht geprüft">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 1.4L2 3.2v3.5c0 3 2 5.8 5 6.7 3-.9 5-3.7 5-6.7V3.2L7 1.4z"/>
+                <line x1="7" y1="5" x2="7" y2="7.5"/>
+                <circle cx="7" cy="9.4" r="0.55" fill="currentColor"/>
+              </svg>
+            </span>
+          </div>
+          <div class="card-name">Hannover Lab</div>
+          <div class="card-tags">
+            <span class="tag">lab</span>
+            <span class="tag">germany</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">443</span></span>
+            <span class="stat"><span class="stat-value tls-off">TLS AUS</span></span>
+            <span class="stat"><span class="stat-value">vor 12 s</span></span>
+          </div>
+        </article>
+
+        <!-- 8. Demo-Box · online + TLS WARNING -->
+        <article class="card tls-warning">
+          <div class="card-status-row">
+            <span class="status-dot online"></span>
+            <span class="card-hostname">opn-lab-test.intern</span>
+            <span class="card-warning-badge" title="TLS-Zertifikat wird nicht geprüft">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 1.4L2 3.2v3.5c0 3 2 5.8 5 6.7 3-.9 5-3.7 5-6.7V3.2L7 1.4z"/>
+                <line x1="7" y1="5" x2="7" y2="7.5"/>
+                <circle cx="7" cy="9.4" r="0.55" fill="currentColor"/>
+              </svg>
+            </span>
+          </div>
+          <div class="card-name">Demo-Box Test</div>
+          <div class="card-tags">
+            <span class="tag">lab</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">8443</span></span>
+            <span class="stat"><span class="stat-value tls-off">TLS AUS</span></span>
+            <span class="stat"><span class="stat-value">vor 18 s</span></span>
+          </div>
+        </article>
+
+        <!-- 9. Köln · offline -->
+        <article class="card offline">
+          <div class="card-status-row">
+            <span class="status-dot offline"></span>
+            <span class="card-hostname">opn-koeln.lab</span>
+          </div>
+          <div class="card-name">Köln West</div>
+          <div class="card-tags">
+            <span class="tag">branches</span>
+            <span class="tag">germany</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">443</span></span>
+            <span class="stat"><span class="stat-value">TLS —</span></span>
+            <span class="stat"><span class="stat-value">vor 6 min</span></span>
+          </div>
+        </article>
+
+        <!-- 10. Dresden · offline -->
+        <article class="card offline">
+          <div class="card-status-row">
+            <span class="status-dot offline"></span>
+            <span class="card-hostname">opn-dresden.lab</span>
+          </div>
+          <div class="card-name">Dresden Ost</div>
+          <div class="card-tags">
+            <span class="tag">branches</span>
+            <span class="tag">germany</span>
+          </div>
+          <div class="card-stats">
+            <span class="stat"><span class="stat-label">Port</span><span class="stat-value">443</span></span>
+            <span class="stat"><span class="stat-value">TLS —</span></span>
+            <span class="stat"><span class="stat-value">vor 14 min</span></span>
+          </div>
+        </article>
+
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // ----- Theme toggle with system-preference auto-detect -----
+    (function() {
+      const html = document.documentElement;
+      const toggle = document.getElementById('theme-toggle');
+      const STORAGE_KEY = 'opn-cockpit-theme';
+
+      // Try saved preference, else fall back to OS
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved === 'light' || saved === 'dark') {
+        html.setAttribute('data-theme', saved);
+      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        html.setAttribute('data-theme', 'light');
+      }
+
+      toggle.addEventListener('click', () => {
+        const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        try { localStorage.setItem(STORAGE_KEY, next); } catch (e) {}
+      });
+    })();
+  </script>
+</body>
+</html>
