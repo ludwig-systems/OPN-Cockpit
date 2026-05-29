@@ -141,3 +141,51 @@ class TestForgetVault:
         s = AppSettings(recent_vaults=["a"])
         s.forget_vault("b")
         assert s.recent_vaults == ["a"]
+
+
+# ---------------------------------------------------------------------------
+# Env-Overrides (Docker/systemd-friendly)
+# ---------------------------------------------------------------------------
+
+
+class TestEnvOverrides:
+    def test_auth_backend_env_overrides_json(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        AppSettings(auth_backend="vault").save(path)
+        with patch.dict(os.environ, {"OPNCOCKPIT_AUTH_BACKEND": "user-db"}):
+            loaded = AppSettings.load(path)
+        assert loaded.auth_backend == "user-db"
+
+    def test_deployment_mode_env_overrides_json(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        AppSettings(deployment_mode="single-local").save(path)
+        with patch.dict(os.environ, {"OPNCOCKPIT_DEPLOYMENT_MODE": "multi-server"}):
+            loaded = AppSettings.load(path)
+        assert loaded.deployment_mode == "multi-server"
+
+    def test_storage_backend_env_overrides_json(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        AppSettings(storage_backend="filesystem").save(path)
+        with patch.dict(os.environ, {"OPNCOCKPIT_STORAGE_BACKEND": "sqlite"}):
+            loaded = AppSettings.load(path)
+        assert loaded.storage_backend == "sqlite"
+
+    def test_unknown_env_value_ignored(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        AppSettings(auth_backend="vault").save(path)
+        with patch.dict(os.environ, {"OPNCOCKPIT_AUTH_BACKEND": "garbage"}):
+            loaded = AppSettings.load(path)
+        assert loaded.auth_backend == "vault"  # JSON-Wert bleibt
+
+    def test_env_works_without_settings_json(self, tmp_path: Path) -> None:
+        path = tmp_path / "missing.json"
+        with patch.dict(os.environ, {"OPNCOCKPIT_AUTH_BACKEND": "user-db"}):
+            loaded = AppSettings.load(path)
+        assert loaded.auth_backend == "user-db"
+
+    def test_empty_env_keeps_json(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        AppSettings(auth_backend="user-db").save(path)
+        with patch.dict(os.environ, {"OPNCOCKPIT_AUTH_BACKEND": ""}):
+            loaded = AppSettings.load(path)
+        assert loaded.auth_backend == "user-db"

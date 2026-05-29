@@ -67,7 +67,48 @@ docker run --rm -v opncockpit-data:/data -v $(pwd):/backup debian:12-slim \
 | `OPNCOCKPIT_PORT` | `9876` | Port |
 | `OPNCOCKPIT_NO_BROWSER` | `1` | Browser-Auto-Open aus (kein Browser im Container) |
 | `OPNCOCKPIT_DATA_DIR` | `/data` | Daten-Root (= Mountpoint) |
+| `OPNCOCKPIT_AUTH_BACKEND` | `vault` | `vault` (Single-User) oder `user-db` (Multi-User) |
+| `OPNCOCKPIT_DEPLOYMENT_MODE` | `single-local` | `single-local` / `single-network` / `multi-server` |
+| `OPNCOCKPIT_VAULT_PATH` | _(leer)_ | Default-Pfad zum zentralen Vault im Setup-Wizard |
 | `TZ` | `Europe/Berlin` | Zeitzone für Audit-Timestamps |
+
+## Multi-User-Modus aktivieren
+
+Der Container startet per Default im **Single-User-Modus**. So aktivierst
+du Multi-User:
+
+**Schritt 1 — Vault anlegen** (einmalig, im Single-Modus):
+1. `docker compose up -d`
+2. Browser auf `http://localhost:9876`
+3. „Neuen Tresor anlegen…" → Pfad `/data/firewalls.opnvault`, starkes
+   Master-PW vergeben
+4. Optional: ein paar Test-Firewalls anlegen
+5. Im Browser sperren, dann `docker compose down`
+
+**Schritt 2 — Multi-User aktivieren**: in `docker-compose.yml` die
+Env-Variablen einkommentieren:
+```yaml
+    environment:
+      TZ: Europe/Berlin
+      OPNCOCKPIT_AUTH_BACKEND: "user-db"
+      OPNCOCKPIT_DEPLOYMENT_MODE: "multi-server"
+      OPNCOCKPIT_VAULT_PATH: "/data/firewalls.opnvault"
+```
+
+**Schritt 3 — Neustart + Setup-Wizard**:
+```powershell
+docker compose up -d
+```
+Auf `http://localhost:9876` erscheint jetzt der Setup-Wizard:
+1. Admin-Konto anlegen (mind. 12 Zeichen)
+2. Zentralen Vault entsperren (Pfad ist vorausgefüllt)
+
+Danach erscheint der Multi-User-Login. Weitere User legt der Admin in
+der User-Verwaltungs-UI an (kommt mit v3.0 Iter 3).
+
+**Zurück zu Single-User**: Env-Variablen wieder rausnehmen, neustarten.
+Vault-Daten + User-DB bleiben im Volume erhalten, sind aber im
+Single-Modus inaktiv.
 
 ## Reverse-Proxy mit TLS
 
@@ -134,12 +175,11 @@ docker compose up -d
 
 Vault + Audit + Plans bleiben erhalten (Volume).
 
-## Grenzen v2.2
+## Stand v3.0 Iter 2
 
-- Im Container läuft heute der **Single-User-Modus** mit File-basiertem
-  Vault. User muss sich an der UI mit dem Master-Passwort einloggen.
-- Multi-User-Login (User-DB + Roles) kommt mit v3.0.
-- Auto-Retry-Watcher funktioniert genauso wie unter Windows, hängt aber
-  ebenfalls an der entsperrten Session.
+- Single-User-Modus (Default) und Multi-User-Modus (Setup-Wizard +
+  Login per Username/PW) sind beide nutzbar.
+- User-Verwaltungs-UI (Admin legt weitere User an) kommt mit Iter 3.
+- Inventory-ACL (allowed_tags pro User) kommt mit Iter 4.
 
 Siehe [ROADMAP.md](ROADMAP.md) für den Vollausbau.

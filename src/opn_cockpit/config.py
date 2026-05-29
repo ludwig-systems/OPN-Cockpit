@@ -31,6 +31,13 @@ DEPLOYMENT_MODES = ("single-local", "single-network", "multi-server")
 AUTH_BACKENDS = ("vault", "user-db")
 STORAGE_BACKENDS = ("filesystem", "sqlite")
 
+# Env-Variablen, die settings.json ueberschreiben. Nuetzlich fuer
+# Docker/systemd, wo settings.json im persistenten Volume liegt, aber
+# der Betreiber den Mode ohne JSON-Edit umstellen will.
+AUTH_BACKEND_ENV = "OPNCOCKPIT_AUTH_BACKEND"
+DEPLOYMENT_MODE_ENV = "OPNCOCKPIT_DEPLOYMENT_MODE"
+STORAGE_BACKEND_ENV = "OPNCOCKPIT_STORAGE_BACKEND"
+
 
 def get_app_data_dir() -> Path:
     """Ermittelt das App-Daten-Verzeichnis plattformabhaengig.
@@ -90,19 +97,39 @@ class AppSettings:
 
     @classmethod
     def load(cls, path: Path | None = None) -> AppSettings:
-        """Lädt Settings aus ``path`` oder Default-Pfad; tolerant bei Fehlern."""
+        """Lädt Settings aus ``path`` oder Default-Pfad; tolerant bei Fehlern.
+
+        Env-Variablen ``OPNCOCKPIT_AUTH_BACKEND``,
+        ``OPNCOCKPIT_DEPLOYMENT_MODE``, ``OPNCOCKPIT_STORAGE_BACKEND``
+        ueberschreiben die JSON-Werte, falls gesetzt. So kann Docker
+        oder systemd den Mode ohne JSON-Edit umstellen.
+        """
         resolved = path or get_settings_path()
         if not resolved.exists():
-            return cls()
-        try:
-            raw = json.loads(resolved.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            # Bewusst tolerant: kaputte settings.json soll das Tool nicht
-            # blockieren, wir starten mit Defaults.
-            return cls()
-        if not isinstance(raw, dict):
-            return cls()
-        return cls._from_dict(raw)
+            settings = cls()
+        else:
+            try:
+                raw = json.loads(resolved.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                # Bewusst tolerant: kaputte settings.json soll das Tool nicht
+                # blockieren, wir starten mit Defaults.
+                settings = cls()
+            else:
+                settings = cls() if not isinstance(raw, dict) else cls._from_dict(raw)
+        settings._apply_env_overrides()
+        return settings
+
+    def _apply_env_overrides(self) -> None:
+        """Wendet Env-Variablen-Overrides an. Unbekannte Werte werden ignoriert."""
+        auth = os.environ.get(AUTH_BACKEND_ENV, "").strip()
+        if auth and auth in AUTH_BACKENDS:
+            self.auth_backend = auth
+        mode = os.environ.get(DEPLOYMENT_MODE_ENV, "").strip()
+        if mode and mode in DEPLOYMENT_MODES:
+            self.deployment_mode = mode
+        storage = os.environ.get(STORAGE_BACKEND_ENV, "").strip()
+        if storage and storage in STORAGE_BACKENDS:
+            self.storage_backend = storage
 
     def save(self, path: Path | None = None) -> None:
         """Schreibt Settings nach ``path`` oder Default-Pfad (atomar)."""
