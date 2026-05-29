@@ -39,12 +39,23 @@ class SessionManager:
     _sessions: dict[str, _SessionEntry] = field(default_factory=dict)
     _lock: RLock = field(default_factory=RLock)
 
-    def create(self, opened: OpenedVault, vault_path: Path) -> tuple[str, Session]:
-        """Erzeugt ein neues Token + Session-Eintrag fuer einen entsperrten Tresor."""
+    def create(
+        self,
+        opened: OpenedVault,
+        vault_path: Path,
+        password: str,
+    ) -> tuple[str, Session]:
+        """Erzeugt ein neues Token + Session-Eintrag fuer einen entsperrten Tresor.
+
+        ``password`` wird in der Session gecached, damit Schreibvorgaenge
+        (Add/Remove/Duplicate Device) ohne erneuten Prompt funktionieren.
+        Der Cache lebt nur waehrend der Session und wird beim ``revoke``
+        oder Auto-Lock geloescht.
+        """
         with self._lock:
             token = secrets.token_urlsafe(TOKEN_BYTES)
             session = Session()
-            session.unlock(opened, vault_path)
+            session.unlock(opened, vault_path, password)
             self._sessions[token] = _SessionEntry(session=session, vault_path=vault_path)
             return token, session
 

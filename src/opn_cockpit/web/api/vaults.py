@@ -83,7 +83,7 @@ def create_new_vault(
 
     # Sofort entsperren — der User hat das Passwort gerade getippt.
     opened = open_vault(path, payload.password)
-    token, session = manager.create(opened, path)
+    token, session = manager.create(opened, path, payload.password)
 
     # App-Settings: erster Tresor wird Default + Recent-Eintrag.
     settings = AppSettings.load()

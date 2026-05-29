@@ -129,7 +129,6 @@ class TestAddDevice:
             "descr": "Datacenter",
             "api_key": "fra-key",
             "api_secret": "fra-secret",
-            "master_password": PASSWORD,
         }
         base.update(overrides)
         return base
@@ -164,26 +163,6 @@ class TestAddDevice:
         # Token bleibt nach save_vault gueltig
         me = client.get("/api/auth/me", headers=_bearer(token))
         assert me.status_code == 200
-
-    def test_wrong_master_password_returns_401_and_no_change(
-        self,
-        client: TestClient,
-        tmp_path: Path,
-    ) -> None:
-        vault = _make_vault(tmp_path)
-        token = _unlock(client, vault)
-        response = client.post(
-            "/api/inventory/devices",
-            json=self._payload(master_password="falsch-aber-12-zeichen"),
-            headers=_bearer(token),
-        )
-        assert response.status_code == 401
-        # Vault auf Platte unveraendert
-        opened = open_vault(vault, PASSWORD)
-        assert opened.data.devices == []
-        # Auch in der Session ist der Geist verschwunden
-        inv = client.get("/api/inventory", headers=_bearer(token)).json()
-        assert inv["devices"] == []
 
     def test_duplicate_name_returns_409(
         self,
@@ -220,11 +199,7 @@ class TestAddDevice:
 
 class TestRemoveDevice:
     def test_requires_auth(self, client: TestClient) -> None:
-        response = client.request(
-            "DELETE",
-            "/api/inventory/devices/dev-001",
-            json={"master_password": PASSWORD},
-        )
+        response = client.delete("/api/inventory/devices/dev-001")
         assert response.status_code == 401
 
     def test_removes_existing_device(
@@ -233,10 +208,8 @@ class TestRemoveDevice:
         vault_with_devices: Path,
     ) -> None:
         token = _unlock(client, vault_with_devices)
-        response = client.request(
-            "DELETE",
+        response = client.delete(
             "/api/inventory/devices/dev-001",
-            json={"master_password": PASSWORD},
             headers=_bearer(token),
         )
         assert response.status_code == 204
@@ -252,32 +225,11 @@ class TestRemoveDevice:
         vault_with_devices: Path,
     ) -> None:
         token = _unlock(client, vault_with_devices)
-        response = client.request(
-            "DELETE",
+        response = client.delete(
             "/api/inventory/devices/does-not-exist",
-            json={"master_password": PASSWORD},
             headers=_bearer(token),
         )
         assert response.status_code == 404
-
-    def test_wrong_master_password_rolls_back(
-        self,
-        client: TestClient,
-        vault_with_devices: Path,
-    ) -> None:
-        token = _unlock(client, vault_with_devices)
-        response = client.request(
-            "DELETE",
-            "/api/inventory/devices/dev-001",
-            json={"master_password": "falsch-aber-12-zeichen"},
-            headers=_bearer(token),
-        )
-        assert response.status_code == 401
-        # Beide Geraete noch da, sowohl Session als auch Platte
-        body = client.get("/api/inventory", headers=_bearer(token)).json()
-        assert {d["id"] for d in body["devices"]} == {"dev-001", "dev-002"}
-        opened = open_vault(vault_with_devices, PASSWORD)
-        assert {d.id for d in opened.data.devices} == {"dev-001", "dev-002"}
 
 
 # ---------------------------------------------------------------------------

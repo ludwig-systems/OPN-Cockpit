@@ -270,15 +270,6 @@
             </div>
           </div>
 
-          <div class="form-divider"></div>
-
-          <div class="form-row">
-            <div class="form-col">
-              <label class="form-label" for="ad-mpw">Master-Passwort (zum Speichern)</label>
-              <input id="ad-mpw" class="form-input" type="password" autocomplete="current-password" />
-            </div>
-          </div>
-
           <div class="form-error" id="add-modal-error" hidden></div>
         </div>
 
@@ -289,7 +280,7 @@
       </div>
     </div>
 
-    <!-- ================ MODAL: Geräte-Detail / Löschen ================ -->
+    <!-- ================ MODAL: Geräte-Detail ================ -->
     <div class="modal-backdrop" id="device-modal" hidden>
       <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="device-modal-title">
         <div class="modal-header">
@@ -305,27 +296,37 @@
         <div class="modal-body">
           <dl class="detail-list" id="device-detail-list"></dl>
 
-          <div class="form-row" id="device-test-row">
-            <div class="form-col">
-              <button class="btn-secondary" id="device-test-btn">Verbindung testen (HTTPS + Auth)</button>
-              <div class="form-hint" id="device-test-result"></div>
-            </div>
+          <div class="action-row">
+            <button class="btn-secondary action-row-btn" id="device-test-btn">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 6.5l2 2 6.5-6.5"/>
+              </svg>
+              <span>Verbindung testen</span>
+            </button>
+            <button class="btn-secondary action-row-btn" id="device-open-web-btn">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6.5 2H3a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V6.5"/>
+                <path d="M8 1.5h3.5V5"/>
+                <line x1="6" y1="7" x2="11.5" y2="1.5"/>
+              </svg>
+              <span>OPNsense öffnen</span>
+            </button>
+            <button class="btn-secondary action-row-btn" id="device-duplicate-btn">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3.5" y="3.5" width="7" height="7" rx="1"/>
+                <path d="M2 8.5V2.5a1 1 0 011-1H9"/>
+              </svg>
+              <span>Duplizieren</span>
+            </button>
           </div>
 
-          <div class="form-divider"></div>
-
-          <div class="form-row">
-            <div class="form-col">
-              <label class="form-label" for="del-mpw">Master-Passwort zum Löschen</label>
-              <input id="del-mpw" class="form-input" type="password" autocomplete="current-password" />
-            </div>
-          </div>
+          <div class="form-hint" id="device-test-result"></div>
 
           <div class="form-error" id="device-modal-error" hidden></div>
         </div>
 
         <div class="modal-footer">
-          <button class="btn-link" id="device-modal-cancel">Abbrechen</button>
+          <button class="btn-link" id="device-modal-cancel">Schließen</button>
           <button class="btn-danger" id="device-modal-delete">Gerät löschen</button>
         </div>
       </div>

@@ -1,14 +1,16 @@
 """Inventar-Routen: Geraete listen, anlegen, loeschen, Heartbeat, Test-Connection.
 
-Schreibvorgaenge verlangen das Master-Passwort im Body — gleicher
-Sicherheits-Pakt wie CLI/GUI: der Server haelt das Passwort nicht
-laenger als die Dauer eines einzelnen Aufrufs.
+Das Master-Passwort wird beim Unlock einmalig erfragt und in der Session
+gecached — Schreibvorgaenge laufen ohne erneuten Prompt. Der Cache lebt
+nur waehrend der Session und wird beim Lock/Auto-Lock geloescht.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -18,18 +20,16 @@ from opn_cockpit.inventory.model import Device
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.errors import (
     CorruptVaultError,
-    InvalidPasswordError,
+    SessionLockedError,
     VaultError,
     VaultIOError,
     VaultVersionError,
-    WeakPasswordError,
 )
 from opn_cockpit.vault.model import VaultDevice
-from opn_cockpit.vault.store import open_vault, save_vault
+from opn_cockpit.vault.store import save_vault
 from opn_cockpit.web.api.schemas import (
     ConnectionTestResponse,
     DeviceCreateRequest,
-    DeviceDeleteRequest,
     DeviceResponse,
     HeartbeatEntry,
     HeartbeatRequest,
@@ -75,28 +75,12 @@ def add_device(
     session: Session = Depends(require_session),
 ) -> DeviceResponse:
     """Legt ein Geraet im Tresor an und persistiert."""
-    vault_path = session.vault_path
-    if vault_path is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Tresor-Pfad fehlt in der Session.",
-        )
+    vault_path = _require_vault_path(session)
     if _name_exists(session, payload.name):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Ein Geraet mit dem Namen '{payload.name}' existiert bereits.",
         )
-
-    # Passwort vor dem Schreiben validieren — sonst koennte ein Tippfehler
-    # den Tresor mit einem neuen Key ueberschreiben und den Original-Owner
-    # aussperren. save_vault selbst prueft das nicht.
-    try:
-        open_vault(vault_path, payload.master_password)
-    except InvalidPasswordError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Master-Passwort falsch — Aenderung nicht gespeichert.",
-        ) from exc
 
     new_device = VaultDevice(
         id=VaultDevice.new_id(),
@@ -109,35 +93,13 @@ def add_device(
         api_secret=payload.api_secret,
         descr=payload.descr,
     )
-    session.opened.data.devices.append(new_device)
-    try:
-        new_opened = save_vault(vault_path, session.opened, payload.master_password)
-    except InvalidPasswordError as exc:
-        session.opened.data.devices.pop()
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Master-Passwort falsch — Aenderung nicht gespeichert.",
-        ) from exc
-    except WeakPasswordError as exc:
-        session.opened.data.devices.pop()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    except (CorruptVaultError, VaultVersionError, VaultIOError) as exc:
-        session.opened.data.devices.pop()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except VaultError as exc:
-        session.opened.data.devices.pop()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
+    devices = session.opened.data.devices
+    devices.append(new_device)
 
-    session.replace_opened(new_opened)
+    def _rollback_add() -> None:
+        devices.pop()
+
+    _save_or_rollback(session, vault_path, rollback=_rollback_add)
     return _to_device_response(Device.from_vault_device(new_device))
 
 
@@ -149,16 +111,10 @@ def add_device(
 @router.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_device(
     device_id: str,
-    payload: DeviceDeleteRequest,
     session: Session = Depends(require_session),
 ) -> None:
     """Entfernt ein Geraet aus dem Tresor."""
-    vault_path = session.vault_path
-    if vault_path is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Tresor-Pfad fehlt in der Session.",
-        )
+    vault_path = _require_vault_path(session)
     devices = session.opened.data.devices
     index = next((i for i, d in enumerate(devices) if d.id == device_id), -1)
     if index < 0:
@@ -166,39 +122,12 @@ def remove_device(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
         )
-
-    # Passwort vor dem Schreiben verifizieren, gleiche Begruendung wie in add_device.
-    try:
-        open_vault(vault_path, payload.master_password)
-    except InvalidPasswordError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Master-Passwort falsch — Aenderung nicht gespeichert.",
-        ) from exc
-
     backup = devices.pop(index)
-    try:
-        new_opened = save_vault(vault_path, session.opened, payload.master_password)
-    except InvalidPasswordError as exc:
-        devices.insert(index, backup)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Master-Passwort falsch — Aenderung nicht gespeichert.",
-        ) from exc
-    except (CorruptVaultError, VaultVersionError, VaultIOError) as exc:
-        devices.insert(index, backup)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except VaultError as exc:
-        devices.insert(index, backup)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
 
-    session.replace_opened(new_opened)
+    def _rollback_remove() -> None:
+        devices.insert(index, backup)
+
+    _save_or_rollback(session, vault_path, rollback=_rollback_remove)
 
 
 # ---------------------------------------------------------------------------
@@ -251,11 +180,7 @@ def test_connection(
     device_id: str,
     session: Session = Depends(require_session),
 ) -> ConnectionTestResponse:
-    """Vollwertiger HTTP-Auth-Probe gegen ein einzelnes Geraet.
-
-    Anders als der Heartbeat schickt das einen echten API-Call und
-    verifiziert Auth.
-    """
+    """Vollwertiger HTTP-Auth-Probe gegen ein einzelnes Geraet."""
     vault_device = next(
         (d for d in session.opened.data.devices if d.id == device_id), None
     )
@@ -290,6 +215,48 @@ def test_connection(
 # ---------------------------------------------------------------------------
 # Helfer
 # ---------------------------------------------------------------------------
+
+
+def _require_vault_path(session: Session) -> Path:
+    vault_path = session.vault_path
+    if vault_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tresor-Pfad fehlt in der Session.",
+        )
+    return vault_path
+
+
+def _save_or_rollback(
+    session: Session,
+    vault_path: Path,
+    *,
+    rollback: Callable[[], None],
+) -> None:
+    """Persistiert die aktuelle Session und rollt bei Fehlern zurueck."""
+    try:
+        password = session.master_password
+    except SessionLockedError as exc:
+        rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Session ohne Master-Passwort — bitte neu entsperren.",
+        ) from exc
+    try:
+        new_opened = save_vault(vault_path, session.opened, password)
+    except (CorruptVaultError, VaultVersionError, VaultIOError) as exc:
+        rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except VaultError as exc:
+        rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    session.replace_opened(new_opened)
 
 
 def _to_device_response(device: Device) -> DeviceResponse:

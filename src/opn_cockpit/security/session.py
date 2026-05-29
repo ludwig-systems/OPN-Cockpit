@@ -33,10 +33,18 @@ class Session:
 
     Default-Clock ist ``time.monotonic`` — monoton steigend und unbeeinflusst
     von Systemzeit-Sprüngen. Für Tests injizierbar.
+
+    Optionaler Master-Passwort-Cache: Die Web-Variante reicht das Passwort
+    beim Entsperren rein, damit Schreibvorgänge (``save_vault``) ohne
+    erneuten Prompt funktionieren. Der Cache lebt nur, solange die
+    Session entsperrt ist, und wird beim ``lock()`` mit überschrieben.
+    CLI/GUI dürfen ``password=None`` lassen — dann ist die Property
+    nicht abrufbar.
     """
 
     _opened: OpenedVault | None = None
     _vault_path: Path | None = None
+    _password: str | None = None
     _last_activity_at: float = 0.0
     _clock: Callable[[], float] = field(default=time.monotonic)
 
@@ -72,12 +80,36 @@ class Session:
             raise SessionLockedError("Session ist gesperrt — bitte Tresor entsperren.")
         return self._opened
 
+    @property
+    def master_password(self) -> str:
+        """Liefert das gecachte Master-Passwort.
+
+        Wirft ``SessionLockedError``, wenn die Session gesperrt ist oder
+        ohne Passwort entsperrt wurde (CLI/GUI-Default).
+        """
+        if self._opened is None or self._password is None:
+            raise SessionLockedError(
+                "Session hat kein gecachtes Master-Passwort."
+            )
+        return self._password
+
     # ----- Lifecycle -----
 
-    def unlock(self, opened: OpenedVault, path: Path) -> None:
-        """Aktiviert die Session mit einem frisch geöffneten Tresor."""
+    def unlock(
+        self,
+        opened: OpenedVault,
+        path: Path,
+        password: str | None = None,
+    ) -> None:
+        """Aktiviert die Session mit einem frisch geöffneten Tresor.
+
+        Wenn ``password`` übergeben wird, lebt es als Cache in der Session,
+        damit Schreibvorgänge ohne erneuten Prompt funktionieren. Web
+        nutzt das; CLI/GUI lassen es weg.
+        """
         self._opened = opened
         self._vault_path = path
+        self._password = password
         self._last_activity_at = self._clock()
 
     def replace_opened(self, opened: OpenedVault) -> None:
@@ -108,6 +140,7 @@ class Session:
         """
         self._opened = None
         self._vault_path = None
+        self._password = None
         self._last_activity_at = 0.0
 
     # ----- Inaktivitäts-Verwaltung -----

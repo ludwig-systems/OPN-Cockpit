@@ -21,14 +21,27 @@ einer publikations-tauglichen Optik („Calm Precision"-Aesthetik, siehe
   Session in `sessionStorage`, 30 s-Expiry-Ticker mit Auto-Lock-UI.
 - ✅ **Iter 3**: Inventar-Kachelansicht aus dem Mockup geliftet:
   Sidebar mit Tag-Filter + Aktionen, Karten-Grid mit Status-Dot, TLS-
-  Badge und Heartbeat-Label, Topbar-Suche (Strg K), Add-/Detail-Modal
-  mit Master-Passwort-Re-Auth. Backend: `GET /api/inventory`,
-  `POST /api/inventory/devices`, `DELETE /api/inventory/devices/{id}`,
-  `POST /api/inventory/heartbeat` (paralleler TCP-Probe ohne Auth-Last
-  auf der OPNsense), `POST /api/inventory/devices/{id}/test-connection`
-  (vollwertiger HTTPS-Auth-Probe). Schreibvorgänge verifizieren das
-  Master-Passwort vor jedem `save_vault`, um silent corruption zu
-  verhindern.
+  Badge und Heartbeat-Label, Topbar-Suche (Strg K), Add-/Detail-Modal.
+  Backend: `GET /api/inventory`, `POST /api/inventory/devices`,
+  `DELETE /api/inventory/devices/{id}`, `POST /api/inventory/heartbeat`
+  (paralleler TCP-Probe ohne Auth-Last auf der OPNsense),
+  `POST /api/inventory/devices/{id}/test-connection` (vollwertiger
+  HTTPS-Auth-Probe).
+- ✅ **Iter 3.1** (Polish + UX-Feedback):
+  - Master-Passwort wird nur einmal beim Unlock erfragt und in der
+    Session gecached — Add/Remove brauchen es nicht mehr. Der Cache
+    lebt nur während der Session und wird beim Lock/Auto-Lock
+    überschrieben. Spiegelt das Vertrauensmodell „erfahrene Admins,
+    Schutz vor unbefugtem Zugriff, nicht Schutz vor sich selbst".
+  - Farbpalette von Sage- auf Oliv-/Militärgrün gewechselt, Kontrast in
+    beiden Themes deutlich erhöht (Text-Hierarchie, Borders, Karten-
+    Stats jetzt klar lesbar).
+  - Detail-Modal mit Buttons „OPNsense öffnen" (neuer Tab auf
+    `https://host:port/`), „Duplizieren" (öffnet Add-Modal mit
+    vorausgefüllten Feldern, API-Key/Secret bleiben leer) und einem
+    2-Klick-Lösch-Pfad mit Puls-Animation.
+  - Externer-Link-Icon auf jeder Karte für den direkten OPNsense-
+    Webaufruf.
 - ⏸ **Iter 4**: Plan/Apply für Routen + Aliase via Web-API + Modal-UI.
 - ⏸ **Iter 5**: Discovery, Audit-View, Profile-CRUD, Bulk-Import-Wizard.
 - ⏸ **Iter 6**: PySide6 + alle GUI-Tests entfernen, README + QUICKSTART
@@ -52,10 +65,10 @@ Hinzugefügt: `fastapi >= 0.115`, `uvicorn[standard] >= 0.32`,
 `jinja2 >= 3.1`, `python-multipart >= 0.0.12`. `PySide6` bleibt
 vorerst installiert, wird in Iter 6 entfernt.
 
-### Tests-Stand v2.0-Iter-3-Ende
+### Tests-Stand v2.0-Iter-3.1-Ende
 
-515 Tests grün (56 im `tests/unit/web/`-Tree), ruff + mypy strict
-clean.
+513 Tests grün (54 im `tests/unit/web/`-Tree, zwei Wrong-Password-Tests
+entfallen mit dem Session-Cache), ruff + mypy strict clean.
 
 ---
 

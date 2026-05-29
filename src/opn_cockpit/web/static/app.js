@@ -364,6 +364,20 @@
       </svg>`;
       row.appendChild(warn);
     }
+    const openLink = document.createElement('button');
+    openLink.className = 'card-open-link';
+    openLink.type = 'button';
+    openLink.title = 'OPNsense-Weboberfläche öffnen';
+    openLink.innerHTML = `<svg width="12" height="12" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6.5 2H3a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V6.5"/>
+      <path d="M8 1.5h3.5V5"/>
+      <line x1="6" y1="7" x2="11.5" y2="1.5"/>
+    </svg>`;
+    openLink.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openDeviceWeb(device);
+    });
+    row.appendChild(openLink);
     article.appendChild(row);
 
     // Name
@@ -547,16 +561,19 @@
 
   // -------------------- Add-Modal --------------------
 
-  function openAddModal() {
-    $('#ad-name').value = '';
-    $('#ad-host').value = '';
-    $('#ad-port').value = '443';
-    $('#ad-tags').value = '';
-    $('#ad-descr').value = '';
-    $('#ad-tls').checked = true;
-    $('#ad-apikey').value = '';
+  function openAddModal(prefill) {
+    const data = prefill || {};
+    $('#ad-name').value = data.name || '';
+    $('#ad-host').value = data.host || '';
+    $('#ad-port').value = String(data.port || 443);
+    $('#ad-tags').value = (data.tags || []).join(', ');
+    $('#ad-descr').value = data.descr || '';
+    $('#ad-tls').checked = data.tls_verify !== undefined ? data.tls_verify : true;
+    $('#ad-apikey').value = '';     // bewusst leer (auch beim Duplizieren)
     $('#ad-apisecret').value = '';
-    $('#ad-mpw').value = '';
+    $('#add-modal-title').textContent = data.duplicateOf
+      ? `„${data.duplicateOf}" duplizieren`
+      : 'Gerät hinzufügen';
     $('#add-modal-error').hidden = true;
     $('#add-modal').hidden = false;
     setTimeout(() => $('#ad-name').focus(), 0);
@@ -578,10 +595,9 @@
     const tlsVerify = $('#ad-tls').checked;
     const apiKey = $('#ad-apikey').value.trim();
     const apiSecret = $('#ad-apisecret').value;
-    const masterPw = $('#ad-mpw').value;
 
-    if (!name || !host || !apiKey || !apiSecret || !masterPw) {
-      return showAddError('Bitte alle Pflichtfelder ausfüllen.');
+    if (!name || !host || !apiKey || !apiSecret) {
+      return showAddError('Bitte Name, Hostname, API-Key und API-Secret ausfüllen.');
     }
     const port = parseInt(portRaw, 10);
     if (!port || port < 1 || port > 65535) {
@@ -601,10 +617,9 @@
         tags, descr,
         api_key: apiKey,
         api_secret: apiSecret,
-        master_password: masterPw,
       });
       if (response.status === 401) {
-        showAddError('Master-Passwort falsch oder Session abgelaufen.');
+        handleSessionLost();
         return;
       }
       if (!response.ok) {
@@ -630,14 +645,21 @@
     errorBox.hidden = false;
   }
 
-  // -------------------- Device-Modal (Detail + Löschen) --------------------
+  function openDeviceWeb(device) {
+    const url = `https://${device.host}:${device.port}/`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  // -------------------- Device-Modal (Detail + Aktionen) --------------------
 
   let currentDeviceId = null;
+  let deleteArmed = false;
 
   function openDeviceModal(deviceId) {
     const device = state.devices.find((d) => d.id === deviceId);
     if (!device) return;
     currentDeviceId = deviceId;
+    deleteArmed = false;
 
     $('#device-modal-title').textContent = device.name;
     const dl = $('#device-detail-list');
@@ -670,11 +692,9 @@
     appendDetail(dl, 'Geräte-ID', device.id);
 
     $('#device-test-result').textContent = '';
-    $('#device-test-result').classList.remove('toast-error');
     $('#device-test-btn').disabled = false;
-    $('#device-test-btn').textContent = 'Verbindung testen (HTTPS + Auth)';
-    $('#del-mpw').value = '';
     $('#device-modal-error').hidden = true;
+    resetDeleteButton();
     $('#device-modal').hidden = false;
   }
 
@@ -691,6 +711,7 @@
   function closeDeviceModal() {
     $('#device-modal').hidden = true;
     currentDeviceId = null;
+    deleteArmed = false;
   }
 
   async function doTestConnection() {
@@ -698,7 +719,9 @@
     const btn = $('#device-test-btn');
     const result = $('#device-test-result');
     btn.disabled = true;
-    btn.textContent = 'Teste…';
+    const labelSpan = btn.querySelector('span');
+    const originalLabel = labelSpan ? labelSpan.textContent : btn.textContent;
+    if (labelSpan) labelSpan.textContent = 'Teste…';
     result.textContent = '';
     try {
       const response = await apiPost(`/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/test-connection`);
@@ -714,31 +737,63 @@
       result.textContent = err.message;
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Verbindung testen (HTTPS + Auth)';
+      if (labelSpan) labelSpan.textContent = originalLabel;
     }
+  }
+
+  function doOpenWeb() {
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    if (device) openDeviceWeb(device);
+  }
+
+  function doDuplicate() {
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    if (!device) return;
+    const newName = `${device.name} (Kopie)`;
+    closeDeviceModal();
+    openAddModal({
+      name: newName,
+      host: device.host,
+      port: device.port,
+      tls_verify: device.tls_verify,
+      tags: device.tags,
+      descr: device.descr,
+      duplicateOf: device.name,
+    });
+  }
+
+  function resetDeleteButton() {
+    deleteArmed = false;
+    const btn = $('#device-modal-delete');
+    btn.textContent = 'Gerät löschen';
+    btn.classList.remove('btn-danger-armed');
   }
 
   async function doDeleteDevice() {
     if (!currentDeviceId) return;
-    const masterPw = $('#del-mpw').value;
+    const btn = $('#device-modal-delete');
     const errorBox = $('#device-modal-error');
     errorBox.hidden = true;
-    if (!masterPw) {
-      errorBox.textContent = 'Master-Passwort fehlt.';
-      errorBox.hidden = false;
+
+    if (!deleteArmed) {
+      // Zweiter Klick erforderlich — erfahrene Admins, aber keine Versehentliches.
+      deleteArmed = true;
+      btn.textContent = 'Wirklich löschen?';
+      btn.classList.add('btn-danger-armed');
+      setTimeout(() => {
+        if (deleteArmed) resetDeleteButton();
+      }, 5000);
       return;
     }
-    const btn = $('#device-modal-delete');
+
     btn.disabled = true;
     btn.textContent = 'Lösche…';
     try {
       const response = await apiDelete(
         `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}`,
-        { master_password: masterPw },
       );
       if (response.status === 401) {
-        errorBox.textContent = 'Master-Passwort falsch.';
-        errorBox.hidden = false;
+        handleSessionLost();
         return;
       }
       if (!response.ok && response.status !== 204) {
@@ -755,7 +810,7 @@
       errorBox.hidden = false;
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Gerät löschen';
+      resetDeleteButton();
     }
   }
 
@@ -857,6 +912,8 @@
     $('#device-modal-cancel').addEventListener('click', closeDeviceModal);
     $('#device-modal-delete').addEventListener('click', doDeleteDevice);
     $('#device-test-btn').addEventListener('click', doTestConnection);
+    $('#device-open-web-btn').addEventListener('click', doOpenWeb);
+    $('#device-duplicate-btn').addEventListener('click', doDuplicate);
     $('#device-modal').addEventListener('click', (e) => {
       if (e.target.id === 'device-modal') closeDeviceModal();
     });

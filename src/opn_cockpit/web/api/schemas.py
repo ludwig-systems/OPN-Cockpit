@@ -96,9 +96,8 @@ class InventoryResponse(BaseModel):
 class DeviceCreateRequest(BaseModel):
     """Anlegen eines Geraets im Tresor.
 
-    ``master_password`` wird benoetigt, damit die Aenderung verschluesselt
-    auf Platte landet — Spiegelung des CLI/GUI-Verhaltens. Auch nach dem
-    Entsperren halten wir das Passwort nie im Server-Speicher.
+    Das Master-Passwort wird beim Unlock einmalig erfragt und in der
+    Session gecached — Schreibvorgaenge brauchen es nicht erneut.
     """
 
     name: str = Field(..., min_length=1, max_length=120)
@@ -109,13 +108,6 @@ class DeviceCreateRequest(BaseModel):
     descr: str = Field("", max_length=500)
     api_key: str = Field(..., min_length=1, max_length=255)
     api_secret: str = Field(..., min_length=1, max_length=500)
-    master_password: str = Field(..., min_length=1)
-
-
-class DeviceDeleteRequest(BaseModel):
-    """Loeschen eines Geraets — Passwort separat (DELETE-Body, kein Header)."""
-
-    master_password: str = Field(..., min_length=1)
 
 
 class HeartbeatRequest(BaseModel):

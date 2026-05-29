@@ -69,7 +69,7 @@ def unlock(
             detail=str(exc),
         ) from exc
 
-    token, session = manager.create(opened, path)
+    token, session = manager.create(opened, path, payload.password)
     _audit_vault_opened(path)
     return UnlockResponse(
         token=token,
