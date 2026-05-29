@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from opn_cockpit.profiles.backend import (
+    ProfileStoreBackend,
+    get_profile_store_backend,
+)
 from opn_cockpit.profiles.store import (
     Profile,
-    ProfileStore,
     ProfileStoreError,
-    default_profiles_path,
 )
 from opn_cockpit.security.session import Session
 from opn_cockpit.web.api.schemas import (
@@ -26,8 +28,8 @@ from opn_cockpit.web.auth.dependencies import require_session
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 
 
-def _store() -> ProfileStore:
-    return ProfileStore(path=default_profiles_path())
+def _store() -> ProfileStoreBackend:
+    return get_profile_store_backend()
 
 
 def _to_response(profile: Profile) -> ProfileResponse:

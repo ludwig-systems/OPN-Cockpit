@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from opn_cockpit.audit.log import AuditEventKind, AuditLog
+from opn_cockpit.audit.backend import AuditBackend
+from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.core.errors import OpnCockpitError
 from opn_cockpit.core.http_client import HttpClient, HttpTarget
 from opn_cockpit.core.objects.base import (
@@ -118,7 +119,7 @@ class Planner:
     bei jedem Aufruf — keine versteckten Member, die Tests umgehen müssten.
     """
 
-    audit: AuditLog
+    audit: AuditBackend
     session: Session
     max_workers: int = 8
 

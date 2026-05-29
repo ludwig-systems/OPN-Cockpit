@@ -6,7 +6,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from opn_cockpit.audit.log import AuditEventKind, AuditLog, default_audit_path
+from opn_cockpit.audit.backend import get_audit_backend
+from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.security.session import Session
 from opn_cockpit.web.api.schemas import (
     AuditEntryResponse,
@@ -37,7 +38,7 @@ def list_audit(
     ``truncated`` zeigt an, ob noch mehr Eintraege im Log liegen wuerden.
     """
     session.touch()
-    audit = AuditLog(path=default_audit_path())
+    audit = get_audit_backend()
 
     event_enum: AuditEventKind | None = None
     if event:

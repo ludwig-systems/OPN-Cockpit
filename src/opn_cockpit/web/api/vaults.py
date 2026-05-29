@@ -7,7 +7,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from opn_cockpit.audit.log import AuditEventKind, AuditLog, default_audit_path
+from opn_cockpit.audit.backend import get_audit_backend
+from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.config import AppSettings
 from opn_cockpit.vault.discovery import default_new_vault_path, discover_vaults
 from opn_cockpit.vault.errors import VaultError, VaultIOError, WeakPasswordError
@@ -94,7 +95,7 @@ def create_new_vault(
     with contextlib.suppress(OSError):
         settings.save()
 
-    AuditLog(path=default_audit_path()).append(
+    get_audit_backend().append(
         AuditEventKind.VAULT_CREATED,
         vault_path=str(path),
         summary=f"Tresor angelegt (Web): {path}",

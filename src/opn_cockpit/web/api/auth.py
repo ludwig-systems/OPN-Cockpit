@@ -6,7 +6,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from opn_cockpit.audit.log import AuditEventKind, AuditLog, default_audit_path
+from opn_cockpit.audit.backend import AuditBackend, get_audit_backend
+from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.errors import (
     CorruptVaultError,
@@ -128,8 +129,8 @@ def me(session: Session = Depends(require_session)) -> CurrentSessionResponse:
 # ---------------------------------------------------------------------------
 
 
-def _audit_log() -> AuditLog:
-    return AuditLog(path=default_audit_path())
+def _audit_log() -> AuditBackend:
+    return get_audit_backend()
 
 
 def _audit_vault_opened(path: Path) -> None:

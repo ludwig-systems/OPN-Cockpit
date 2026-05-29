@@ -87,6 +87,24 @@ class PlanStore:
                 ids.append(stem)
         return sorted(ids)
 
+    # ----- Loeschen -----
+
+    def delete(self, plan_id: str) -> bool:
+        """Loescht den Plan + den ggf. existierenden Apply-Report.
+
+        Liefert ``True`` wenn der Plan existierte, ``False`` sonst.
+        """
+        if not PLAN_ID_PATTERN.match(plan_id):
+            raise PlanStoreError(f"Ungueltige Plan-ID: {plan_id!r}")
+        plan_path = self.base_dir / f"{plan_id}.json"
+        report_path = self.base_dir / f"{plan_id}.report.json"
+        existed = plan_path.exists()
+        if existed:
+            plan_path.unlink()
+        if report_path.exists():
+            report_path.unlink()
+        return existed
+
     # ----- Apply-Reports -----
 
     def save_report(self, plan_id: str, report: RolloutReport) -> Path:

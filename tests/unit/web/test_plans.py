@@ -369,7 +369,7 @@ class TestPlanListGetDelete:
         token = _unlock(client, vault)
         with patch(
             "opn_cockpit.web.api.plans.Planner.create_plan",
-            return_value=_fake_route_plan("pl-DEL01234"),
+            return_value=_fake_route_plan("pl-DEAD1234"),
         ):
             client.post(
                 "/api/plans/route",
@@ -380,11 +380,11 @@ class TestPlanListGetDelete:
                 },
                 headers=_bearer(token),
             )
-        delete = client.delete("/api/plans/pl-DEL01234", headers=_bearer(token))
+        delete = client.delete("/api/plans/pl-DEAD1234", headers=_bearer(token))
         assert delete.status_code == 204
         # Danach 404
         assert client.get(
-            "/api/plans/pl-DEL01234", headers=_bearer(token),
+            "/api/plans/pl-DEAD1234", headers=_bearer(token),
         ).status_code == 404
 
 

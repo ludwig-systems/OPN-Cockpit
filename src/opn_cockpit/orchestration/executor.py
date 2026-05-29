@@ -23,7 +23,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 
-from opn_cockpit.audit.log import AuditEventKind, AuditLog
+from opn_cockpit.audit.backend import AuditBackend
+from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.core.errors import (
     OpnCockpitError,
     ReconfigureError,
@@ -99,7 +100,7 @@ class Executor:
     """
 
     session: Session
-    audit: AuditLog
+    audit: AuditBackend
     max_workers: int = 8
 
     def apply(

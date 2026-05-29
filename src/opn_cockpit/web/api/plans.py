@@ -9,15 +9,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from opn_cockpit.audit.log import AuditLog, default_audit_path
-from opn_cockpit.config import get_app_data_dir
+from opn_cockpit.audit.backend import get_audit_backend
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 from opn_cockpit.core.objects.aliases import AliasSpec
 from opn_cockpit.core.objects.routes import RouteSpec
 from opn_cockpit.core.result import RolloutReport, Status
 from opn_cockpit.inventory.model import Device
+from opn_cockpit.orchestration.backend import PlanStoreBackend, get_plan_store_backend
 from opn_cockpit.orchestration.executor import Executor
-from opn_cockpit.orchestration.plan_store import PlanStore, PlanStoreError
+from opn_cockpit.orchestration.plan_store import PlanStoreError
 from opn_cockpit.orchestration.planner import Plan, PlannedDeviceAction, Planner
 from opn_cockpit.orchestration.registry import get_binding
 from opn_cockpit.security.session import Session
@@ -221,18 +221,22 @@ def delete_plan(
     session.touch()
     store = _plan_store()
     try:
-        path = store.base_dir / f"{plan_id}.json"
-        if not path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Plan '{plan_id}' nicht gefunden.",
-            )
-        path.unlink()
+        existed = store.delete(plan_id)
+    except PlanStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     except OSError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Plan konnte nicht entfernt werden: {exc}",
         ) from exc
+    if not existed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plan '{plan_id}' nicht gefunden.",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +312,7 @@ def run_apply(
         for d in devices_in_plan
     ]
     tuning = _tuning(session)
-    audit = AuditLog(path=default_audit_path())
+    audit = get_audit_backend()
     executor = Executor(
         session=session,
         audit=audit,
@@ -361,8 +365,8 @@ def _report_to_response(plan: Plan, report: RolloutReport) -> RolloutReportRespo
 # ---------------------------------------------------------------------------
 
 
-def _plan_store() -> PlanStore:
-    return PlanStore(base_dir=get_app_data_dir() / "plans")
+def _plan_store() -> PlanStoreBackend:
+    return get_plan_store_backend()
 
 
 def _tuning(session: Session) -> HttpTuning:
@@ -411,7 +415,7 @@ def _generate_and_save_plan(
     targets = [
         HttpTarget(host=d.host, port=d.port, verify=d.tls_verify) for d in devices
     ]
-    audit = AuditLog(path=default_audit_path())
+    audit = get_audit_backend()
     planner = Planner(
         audit=audit,
         session=session,
