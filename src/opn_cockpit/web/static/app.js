@@ -379,7 +379,6 @@
     openLink.className = 'card-open-link';
     openLink.href = `https://${device.host}:${device.port}/`;
     openLink.target = '_blank';
-    openLink.rel = 'noopener noreferrer';
     openLink.title = 'OPNsense-Weboberfläche öffnen';
     openLink.innerHTML = `<svg width="12" height="12" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
       <path d="M6.5 2H3a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V6.5"/>
@@ -388,6 +387,8 @@
     </svg>`;
     openLink.addEventListener('click', (e) => {
       e.stopPropagation();  // Karte soll nicht das Detail-Modal oeffnen
+      e.preventDefault();   // native Anchor-Navigation abloesen
+      openWebUrl(`https://${device.host}:${device.port}/`);
     });
     row.appendChild(openLink);
     article.appendChild(row);
@@ -839,6 +840,20 @@
     openEditModal(device);
   }
 
+  function openWebUrl(url) {
+    // window.open ohne windowFeatures-string oeffnet einen regulaeren
+    // Tab. Bei Edge funktioniert das auch in Situationen, in denen ein
+    // <a target="_blank">-Klick den Tab leer laesst (Edge-Bug bei
+    // bestimmten rel/target-Kombinationen, gerade mit nicht aufloesbaren
+    // Hosts).
+    const w = window.open(url, '_blank');
+    if (!w) {
+      // Popup-Blocker hat zugeschlagen. URL ist im Modal sichtbar +
+      // Copy-Button als Fallback.
+      showToast('Browser hat den Tab blockiert. URL aus dem Modal kopieren.', true);
+    }
+  }
+
   async function doCopyUrl() {
     const text = $('#device-url-text').textContent || '';
     if (!text || text === '—') return;
@@ -1008,8 +1023,16 @@
     $('#device-modal-cancel').addEventListener('click', closeDeviceModal);
     $('#device-modal-delete').addEventListener('click', doDeleteDevice);
     $('#device-test-btn').addEventListener('click', doTestConnection);
-    // #device-open-web-btn ist ein echter <a target="_blank">,
-    // braucht keinen JS-Handler — Browser navigiert nativ.
+    // Edge hat target=_blank-Anchors bei bestimmten URLs leer gerendert
+    // (vermutlich Edge-Bug mit rel/target + nicht-aufloesbaren Hosts).
+    // Wir fangen den Klick ab und navigieren per window.open — Anchor-
+    // href bleibt als rechtsklick/middle-click Fallback erhalten.
+    $('#device-open-web-btn').addEventListener('click', (e) => {
+      e.preventDefault();
+      const a = e.currentTarget;
+      const url = a.getAttribute('href');
+      if (url && url !== '#') openWebUrl(url);
+    });
     $('#device-edit-btn').addEventListener('click', doEditFromDetail);
     $('#device-duplicate-btn').addEventListener('click', doDuplicate);
     $('#device-url-copy').addEventListener('click', doCopyUrl);
