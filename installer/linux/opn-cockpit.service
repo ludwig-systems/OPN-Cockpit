@@ -1,0 +1,39 @@
+[Unit]
+Description=OPN-Cockpit Multi-Site OPNsense Manager
+Documentation=https://github.com/your-org/opn-cockpit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opncockpit
+Group=opncockpit
+WorkingDirectory=/opt/opn-cockpit
+ExecStart=/opt/opn-cockpit/.venv/bin/python -m opn_cockpit
+Restart=on-failure
+RestartSec=5s
+
+# Daten + Bindings ueber Env. Wenn du den Service auf nicht-Default-Port
+# oder hinter Reverse-Proxy laufen lassen willst, hier ueberschreiben.
+Environment="OPNCOCKPIT_DATA_DIR=/var/lib/opn-cockpit"
+Environment="OPNCOCKPIT_HOST=0.0.0.0"
+Environment="OPNCOCKPIT_PORT=9876"
+Environment="OPNCOCKPIT_NO_BROWSER=1"
+Environment="PYTHONUNBUFFERED=1"
+Environment="TZ=Europe/Berlin"
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/opn-cockpit
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
