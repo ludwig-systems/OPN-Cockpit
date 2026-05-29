@@ -1,0 +1,27 @@
+# Was nicht ins Image kopiert werden soll.
+.venv/
+.git/
+.github/
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+tests/
+mockups/
+installer/
+docs/
+*.md
+.dockerignore
+docker-compose.yml
+Dockerfile
+start.bat
+scripts/setup-venv.ps1

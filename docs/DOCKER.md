@@ -1,0 +1,145 @@
+# Container-Betrieb (Docker / Proxmox)
+
+OPN-Cockpit läuft als Linux-Container auf Debian-12-Basis. Funktioniert
+unter Docker Desktop (Windows/Mac), nativen Linux-Docker und in
+Proxmox-LXC-Containern.
+
+## Voraussetzungen
+
+- Docker 20.10+ oder Docker Desktop 4.x+
+- Für WSL2 (Windows): WSL2 + Docker Desktop, „WSL2-Backend" aktivieren
+- Für Proxmox: LXC-Container mit Docker oder Helper-Skript (Roadmap v3.x)
+
+## Lokal testen (auch unter Windows via Docker Desktop)
+
+```powershell
+# Aus dem Repo-Root
+docker compose up -d
+```
+
+UI auf `http://localhost:9876`. Beim ersten Mal: „Neuen Tresor anlegen…"
+im Login-Screen, Pfad wird vorgeschlagen (im Container: `/data/...opnvault`).
+
+Logs:
+```powershell
+docker compose logs -f
+```
+
+Stoppen:
+```powershell
+docker compose down            # Daten bleiben im Volume
+docker compose down -v         # Daten LÖSCHEN
+```
+
+## Datenpersistenz
+
+Alle App-Daten landen im Named-Volume `opncockpit-data`, gemountet als
+`/data` im Container:
+
+- `/data/...opnvault` — Tresor-Dateien
+- `/data/audit.jsonl` — Audit-Log
+- `/data/plans/` — Plan-Files + Apply-Reports
+- `/data/profiles.json` — Vorlagen
+- `/data/settings.json` — App-Settings
+
+Das Volume überlebt `docker compose down` und Container-Neubauten.
+
+## Backup
+
+Vault rauskopieren ohne Container-Stop:
+```powershell
+docker cp opn-cockpit:/data/produktion.opnvault .
+```
+
+Komplettes Volume sichern (Linux/WSL2):
+```bash
+docker run --rm -v opncockpit-data:/data -v $(pwd):/backup debian:12-slim \
+    tar czf /backup/opncockpit-data.tar.gz -C /data .
+```
+
+## Konfiguration
+
+Über Environment-Variablen in `docker-compose.yml`:
+
+| Variable | Default | Bedeutung |
+|---|---|---|
+| `OPNCOCKPIT_HOST` | `0.0.0.0` | Bind-Interface (im Container immer 0.0.0.0) |
+| `OPNCOCKPIT_PORT` | `9876` | Port |
+| `OPNCOCKPIT_NO_BROWSER` | `1` | Browser-Auto-Open aus (kein Browser im Container) |
+| `OPNCOCKPIT_DATA_DIR` | `/data` | Daten-Root (= Mountpoint) |
+| `TZ` | `Europe/Berlin` | Zeitzone für Audit-Timestamps |
+
+## Reverse-Proxy mit TLS
+
+Für Netzwerk-Betrieb hinter nginx/Traefik mit Let's Encrypt:
+
+```yaml
+services:
+  opn-cockpit:
+    # ... wie oben, aber Port-Mapping weg:
+    expose:
+      - "9876"
+    networks:
+      - reverse-proxy
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - reverse-proxy
+
+networks:
+  reverse-proxy:
+```
+
+Beispiel-`nginx.conf`:
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name opn-cockpit.lan;
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    location / {
+        proxy_pass http://opn-cockpit:9876;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+## Proxmox: LXC-Container
+
+Variante A — manueller LXC:
+1. Debian-12-LXC-Container anlegen (1 vCPU, 512 MB RAM reichen für 25 Boxen)
+2. `apt install docker.io docker-compose-plugin`
+3. Repo clonen, `docker compose up -d`
+
+Variante B — Helper-Skript (Roadmap, kommt mit v3.0):
+```bash
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/.../opn-cockpit/main/installer/proxmox-helper.sh)"
+```
+
+## Update auf neue Version
+
+```powershell
+git pull
+docker compose build --no-cache
+docker compose up -d
+```
+
+Vault + Audit + Plans bleiben erhalten (Volume).
+
+## Grenzen v2.2
+
+- Im Container läuft heute der **Single-User-Modus** mit File-basiertem
+  Vault. User muss sich an der UI mit dem Master-Passwort einloggen.
+- Multi-User-Login (User-DB + Roles) kommt mit v3.0.
+- Auto-Retry-Watcher funktioniert genauso wie unter Windows, hängt aber
+  ebenfalls an der entsperrten Session.
+
+Siehe [ROADMAP.md](ROADMAP.md) für den Vollausbau.

@@ -1,0 +1,37 @@
+# docker-compose fuer OPN-Cockpit.
+#
+# Start:    docker compose up -d
+# Logs:     docker compose logs -f
+# Stop:     docker compose down
+# Update:   docker compose build --no-cache && docker compose up -d
+#
+# Test der UI nach Start: http://localhost:9876
+#
+# Daten liegen im Named-Volume "opncockpit-data". Per Default ueberlebt das
+# `docker compose down`. Mit `docker compose down -v` waere es geloescht.
+
+services:
+  opn-cockpit:
+    build: .
+    image: opn-cockpit:local
+    container_name: opn-cockpit
+    restart: unless-stopped
+    ports:
+      - "9876:9876"
+    volumes:
+      - opncockpit-data:/data
+    environment:
+      # Hier kannst du Defaults override-en. Beispiel:
+      # OPNCOCKPIT_PORT: "9876"
+      # OPNCOCKPIT_NO_BROWSER: "1"
+      TZ: Europe/Berlin
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9876/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  opncockpit-data:
+    name: opncockpit-data
