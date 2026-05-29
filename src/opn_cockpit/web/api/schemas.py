@@ -233,6 +233,32 @@ class RolloutReportResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Profile (Templates)
+# ---------------------------------------------------------------------------
+
+
+class ProfileResponse(BaseModel):
+    id: str
+    name: str
+    action: str
+    subsystem: str
+    default_selector: str
+    spec: dict[str, object]
+
+
+class ProfileListResponse(BaseModel):
+    profiles: list[ProfileResponse]
+
+
+class ProfileCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    action: str = Field(..., min_length=1, max_length=40)
+    subsystem: str = Field(..., min_length=1, max_length=40)
+    default_selector: str = Field("all", min_length=1, max_length=120)
+    spec: dict[str, object]
+
+
+# ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
 

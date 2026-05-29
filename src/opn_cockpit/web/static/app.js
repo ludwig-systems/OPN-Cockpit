@@ -948,6 +948,8 @@
     $('#plan-modal-error').hidden = true;
     $('#plan-preview-error').hidden = true;
     $('#plan-modal').hidden = false;
+    // Profile passend zum Mode laden (async, ohne Modal-Open zu blockieren).
+    loadPlanProfiles().catch(() => {});
     setTimeout(() => {
       const focusEl = mode === 'route' ? $('#pl-route-network') : $('#pl-alias-name');
       if (focusEl) focusEl.focus();
@@ -990,22 +992,26 @@
     const cancel = $('#plan-modal-cancel');
     const back = $('#plan-back-btn');
     const next = $('#plan-next-btn');
+    const saveProfile = $('#plan-save-profile-btn');
     if (phase === 'input') {
       cancel.textContent = 'Abbrechen';
       back.hidden = true;
       next.hidden = false;
       next.textContent = 'Vorschau anzeigen';
       next.disabled = false;
+      saveProfile.hidden = false;
     } else if (phase === 'preview') {
       cancel.textContent = 'Abbrechen';
       back.hidden = false;
       next.hidden = false;
       next.textContent = 'Aktivieren';
       next.disabled = !$('#pl-confirm').checked;
+      saveProfile.hidden = true;
     } else if (phase === 'result') {
       cancel.textContent = 'Schließen';
       back.hidden = true;
       next.hidden = true;
+      saveProfile.hidden = true;
     }
   }
 
@@ -1262,6 +1268,129 @@
       if (d) return d;
     }
     return null;
+  }
+
+  // -------------------- Profile (Templates) --------------------
+
+  let planProfiles = [];
+
+  async function loadPlanProfiles() {
+    const select = $('#pl-profile-select');
+    select.innerHTML = '<option value="">(keine)</option>';
+    $('#pl-profile-delete').hidden = true;
+    try {
+      const response = await apiGet('/api/profiles');
+      if (!response.ok) return;
+      const data = await response.json();
+      const wantedSubsystem = planMode === 'route' ? 'routes' : 'firewall_alias';
+      planProfiles = (data.profiles || []).filter((p) => p.subsystem === wantedSubsystem);
+      for (const p of planProfiles) {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        select.appendChild(opt);
+      }
+    } catch (_) {}
+  }
+
+  function applyProfile(profileId) {
+    const profile = planProfiles.find((p) => p.id === profileId);
+    $('#pl-profile-delete').hidden = !profileId;
+    if (!profile) return;
+    const s = profile.spec || {};
+    if (planMode === 'route') {
+      $('#pl-route-network').value = s.network || '';
+      $('#pl-route-gateway').value = s.gateway || '';
+      $('#pl-route-descr').value = s.descr || '';
+      $('#pl-route-disabled').checked = !!s.disabled;
+    } else {
+      $('#pl-alias-name').value = s.name || '';
+      $('#pl-alias-type').value = s.type || 'host';
+      const content = s.content;
+      $('#pl-alias-content').value = Array.isArray(content) ? content.join(', ') : (content || '');
+      $('#pl-alias-descr').value = s.descr || '';
+      $('#pl-alias-merge').checked = (s.merge_mode === 'append');
+    }
+  }
+
+  async function deleteCurrentProfile() {
+    const id = $('#pl-profile-select').value;
+    if (!id) return;
+    const profile = planProfiles.find((p) => p.id === id);
+    if (!profile) return;
+    if (!confirm(`Vorlage "${profile.name}" löschen?`)) return;
+    try {
+      const response = await apiDelete(`/api/profiles/${encodeURIComponent(id)}`);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (response.status !== 204 && !response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      showToast(`Vorlage "${profile.name}" gelöscht.`);
+      await loadPlanProfiles();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  async function saveCurrentAsProfile() {
+    const name = prompt('Name der Vorlage:');
+    if (!name) return;
+    let spec;
+    let action;
+    let subsystem;
+    if (planMode === 'route') {
+      spec = {
+        network: $('#pl-route-network').value.trim(),
+        gateway: $('#pl-route-gateway').value.trim(),
+        descr: $('#pl-route-descr').value.trim(),
+        disabled: $('#pl-route-disabled').checked,
+      };
+      action = 'add_route';
+      subsystem = 'routes';
+      if (!spec.network || !spec.gateway) {
+        showToast('Bitte Netzwerk und Gateway ausfüllen.', true);
+        return;
+      }
+    } else {
+      const contentRaw = $('#pl-alias-content').value.trim();
+      const content = contentRaw
+        ? contentRaw.split(',').map((c) => c.trim()).filter((c) => c.length > 0)
+        : [];
+      spec = {
+        name: $('#pl-alias-name').value.trim(),
+        type: $('#pl-alias-type').value,
+        content,
+        descr: $('#pl-alias-descr').value.trim(),
+        merge_mode: $('#pl-alias-merge').checked ? 'append' : 'create',
+      };
+      action = $('#pl-alias-merge').checked ? 'append_alias' : 'add_alias';
+      subsystem = 'firewall_alias';
+      if (!spec.name || !content.length) {
+        showToast('Bitte Alias-Name und Inhalte ausfüllen.', true);
+        return;
+      }
+    }
+    try {
+      const response = await apiPost('/api/profiles', {
+        name: name.trim(),
+        action,
+        subsystem,
+        default_selector: 'all',
+        spec,
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      showToast(`Vorlage "${name}" gespeichert.`);
+      await loadPlanProfiles();
+    } catch (err) {
+      showToast(err.message, true);
+    }
   }
 
   async function loadGatewaySuggestions() {
@@ -1548,6 +1677,10 @@
     $('#pl-pick-none').addEventListener('click', pickNoDevices);
     $('#pl-load-gateways').addEventListener('click', loadGatewaySuggestions);
     $('#pl-load-aliases').addEventListener('click', loadAliasSuggestions);
+    $('#pl-profile-select').addEventListener('change', (e) => applyProfile(e.target.value));
+    $('#pl-profile-delete').addEventListener('click', deleteCurrentProfile);
+    $('#pl-save-profile-btn') || null;  // Button id ist plan-save-profile-btn
+    $('#plan-save-profile-btn').addEventListener('click', saveCurrentAsProfile);
     $('#pl-confirm').addEventListener('change', (e) => {
       $('#plan-next-btn').disabled = !e.target.checked;
     });

@@ -416,6 +416,20 @@
 
           <!-- Phase 1: Eingabe -->
           <div class="plan-phase" data-phase="input">
+
+            <!-- Profile/Templates -->
+            <div class="profile-row">
+              <div class="profile-row-col">
+                <label class="form-label" for="pl-profile-select">Aus Vorlage laden</label>
+                <select id="pl-profile-select" class="form-select">
+                  <option value="">(keine)</option>
+                </select>
+              </div>
+              <button class="btn-link" id="pl-profile-delete" type="button" hidden>Vorlage löschen</button>
+            </div>
+
+            <div class="form-divider"></div>
+
             <!-- Route-Felder -->
             <div class="plan-field-set" data-kind="route" hidden>
               <div class="form-row">
@@ -530,6 +544,7 @@
 
         <div class="modal-footer">
           <button class="btn-link" id="plan-modal-cancel">Abbrechen</button>
+          <button class="btn-link" id="plan-save-profile-btn">Als Vorlage speichern</button>
           <button class="btn-secondary" id="plan-back-btn" hidden>← Bearbeiten</button>
           <button class="btn-primary btn-primary-inline" id="plan-next-btn">Vorschau anzeigen</button>
         </div>

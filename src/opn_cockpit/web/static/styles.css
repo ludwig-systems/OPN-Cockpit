@@ -1229,6 +1229,22 @@ a.card-open-link { text-decoration: none; }
   margin-top: 4px;
 }
 
+.profile-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 8px;
+}
+
+.profile-row-col { flex: 1; }
+
+#pl-profile-delete {
+  color: var(--danger);
+  height: 38px;
+  display: flex;
+  align-items: center;
+}
+
 .device-picker {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
