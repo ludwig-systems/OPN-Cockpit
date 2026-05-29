@@ -968,6 +968,7 @@ body {
   display: flex;
   align-items: center;
   gap: 9px;
+  padding-right: 30px;  /* Platz fuer .card-checkbox (18px) + Abstand */
 }
 
 .card-hostname {
