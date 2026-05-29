@@ -264,6 +264,34 @@ class OutstandingResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Auto-Retry-Watcher
+# ---------------------------------------------------------------------------
+
+
+class RetryScheduleRequest(BaseModel):
+    """Startet einen Auto-Retry fuer einen Plan + Geraete-IDs."""
+
+    plan_id: str = Field(..., min_length=1)
+    device_ids: list[str] = Field(..., min_length=1)
+    interval_s: int = Field(180, ge=30, le=3600)
+    max_duration_s: int = Field(3600, ge=60, le=86400)
+
+
+class RetryJobResponse(BaseModel):
+    plan_id: str
+    device_ids: list[str]
+    attempts: int
+    last_failure_count: int
+    started_at_ms: int
+    next_attempt_at_ms: int
+    paused: bool
+
+
+class RetryStatusResponse(BaseModel):
+    jobs: list[RetryJobResponse]
+
+
+# ---------------------------------------------------------------------------
 # Profile (Templates)
 # ---------------------------------------------------------------------------
 

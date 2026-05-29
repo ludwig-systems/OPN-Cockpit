@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from opn_cockpit.audit.log import AuditEventKind, AuditLog, default_audit_path
 from opn_cockpit.security.session import Session
@@ -85,13 +85,21 @@ def unlock(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def lock(
+    request: Request,
     pair: tuple[Session, str] = Depends(require_session_with_token),
     manager: SessionManager = Depends(get_session_manager),
 ) -> None:
-    """Sperrt die aktuelle Session und revoked das Token."""
+    """Sperrt die aktuelle Session und revoked das Token.
+
+    Beendet auch alle laufenden Retry-Watcher-Jobs dieses Tokens — sonst
+    haetten die nach Auto-Lock noch eine Weile (unsinnig) weiterprobiert.
+    """
     session, token = pair
     vault_path = session.vault_path
     manager.revoke(token)
+    watcher = getattr(request.app.state, "retry_watcher", None)
+    if watcher is not None:
+        watcher.cancel_for_session(token)
     _audit_vault_locked(vault_path)
 
 

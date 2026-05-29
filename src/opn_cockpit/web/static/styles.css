@@ -1578,10 +1578,44 @@ a.card-open-link { text-decoration: none; }
 .result-summary-item.fail strong { color: var(--offline); }
 .result-summary-item.skip strong { color: var(--text-subtle); }
 
-.result-retry-btn {
-  margin-left: auto;
+.result-retry-btn,
+.result-retry-auto-btn {
   font-size: 12px;
   padding: 0 14px;
+  height: 32px;
+}
+
+.result-retry-group {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.topbar-retry-indicator {
+  width: auto !important;
+  padding: 0 10px 0 8px !important;
+  gap: 6px;
+  background: var(--checking) !important;
+  color: var(--bg) !important;
+  border-color: var(--checking) !important;
+  animation: retry-pulse 2.4s ease-in-out infinite;
+}
+
+.topbar-retry-indicator:hover {
+  filter: brightness(1.08);
+}
+
+.retry-indicator-count {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+@keyframes retry-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--checking-glow); }
+  50% { box-shadow: 0 0 0 6px transparent; }
 }
 
 .result-list {

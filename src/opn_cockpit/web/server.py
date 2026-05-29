@@ -17,6 +17,7 @@ from starlette.types import Message, Receive, Scope, Send
 from opn_cockpit import __version__
 from opn_cockpit.web.api import register_api_routes
 from opn_cockpit.web.auth.manager import SessionManager
+from opn_cockpit.web.retry_watcher import RetryWatcher
 
 WEB_DIR = Path(__file__).parent
 STATIC_DIR = WEB_DIR / "static"
@@ -62,7 +63,9 @@ def create_app() -> FastAPI:
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     app.state.templates = templates
-    app.state.session_manager = SessionManager()
+    session_manager = SessionManager()
+    app.state.session_manager = session_manager
+    app.state.retry_watcher = RetryWatcher(session_manager)
 
     if STATIC_DIR.exists():
         app.mount(

@@ -245,6 +245,7 @@
     await loadInventory();
     startHeartbeat();
     startSessionTicker();
+    startRetryPolling();
   }
 
   // -------------------- Main: Inventar laden --------------------
@@ -266,6 +267,62 @@
     renderSidebar();
     renderGrid();
     loadOutstanding().catch(() => {});
+  }
+
+  // -------------------- Retry-Status (Topbar-Indikator) --------------------
+
+  let retryPollHandle = null;
+
+  function startRetryPolling() {
+    if (retryPollHandle !== null) return;
+    pollRetryStatus();
+    retryPollHandle = setInterval(pollRetryStatus, 20000);
+  }
+
+  function stopRetryPolling() {
+    if (retryPollHandle !== null) {
+      clearInterval(retryPollHandle);
+      retryPollHandle = null;
+    }
+  }
+
+  async function pollRetryStatus() {
+    try {
+      const response = await apiGet('/api/retry/status');
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) return;
+      const data = await response.json();
+      const count = (data.jobs || []).length;
+      const btn = $('#retry-indicator-btn');
+      const countEl = $('#retry-indicator-count');
+      btn.hidden = count === 0;
+      countEl.textContent = String(count);
+      // Side-effect: Outstanding neu laden, weil sich die Resultate
+      // im Hintergrund veraendert haben koennten.
+      if (count > 0) loadOutstanding().catch(() => {});
+    } catch (_) { /* Netz-Hickup */ }
+  }
+
+  async function showRetryStatus() {
+    try {
+      const response = await apiGet('/api/retry/status');
+      if (!response.ok) return;
+      const data = await response.json();
+      const jobs = data.jobs || [];
+      if (!jobs.length) {
+        showToast('Aktuell läuft kein Auto-Retry.');
+        return;
+      }
+      const lines = jobs.map((j) => {
+        const next = new Date(j.next_attempt_at_ms);
+        const nextStr = next.toLocaleTimeString();
+        return `${j.plan_id}: ${j.device_ids.length} Gerät(e), ${j.attempts} Versuche, nächster ${nextStr}`;
+      });
+      // Toast kann mehrere Zeilen — nutzen wir vorhandene Mechanik.
+      showToast(lines.join(' · '));
+    } catch (err) {
+      showToast(err.message, true);
+    }
   }
 
   async function loadOutstanding() {
@@ -664,6 +721,7 @@
   function handleSessionLost() {
     stopHeartbeat();
     stopSessionTicker();
+    stopRetryPolling();
     clearToken();
     state.devices = [];
     state.heartbeat = {};
@@ -1330,9 +1388,14 @@
     let retryAction = '';
     if (report.failures > 0) {
       retryAction = `
-        <button class="btn-secondary result-retry-btn" id="result-retry-btn">
-          ${report.failures} fehlgeschlagene erneut versuchen
-        </button>
+        <div class="result-retry-group">
+          <button class="btn-secondary result-retry-btn" id="result-retry-btn">
+            ${report.failures} jetzt erneut versuchen
+          </button>
+          <button class="btn-secondary result-retry-auto-btn" id="result-retry-auto-btn" title="Im Hintergrund alle 3 Minuten erneut probieren, bis sie erreichbar sind">
+            Auto-Retry starten
+          </button>
+        </div>
       `;
     }
     summary.innerHTML = `
@@ -1344,6 +1407,10 @@
     const retryBtn = $('#result-retry-btn');
     if (retryBtn) {
       retryBtn.addEventListener('click', () => doRetryFailed(report));
+    }
+    const autoBtn = $('#result-retry-auto-btn');
+    if (autoBtn) {
+      autoBtn.addEventListener('click', () => doScheduleAutoRetry(report));
     }
     const list = $('#pl-result-list');
     list.innerHTML = '';
@@ -1375,6 +1442,33 @@
 
   function planBack() {
     showPlanPhase('input');
+  }
+
+  async function doScheduleAutoRetry(report) {
+    if (!currentPlan) return;
+    const failedIds = report.results
+      .filter((r) => r.status === 'Fehlgeschlagen')
+      .map((r) => r.device_id);
+    if (!failedIds.length) return;
+    try {
+      const response = await apiPost('/api/retry/schedule', {
+        plan_id: currentPlan.plan_id,
+        device_ids: failedIds,
+        interval_s: 180,
+        max_duration_s: 3600,
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      showToast(`Auto-Retry für ${failedIds.length} Gerät(e) aktiv (alle 3 min, max 1 h).`);
+      pollRetryStatus().catch(() => {});
+      closePlanModal();
+    } catch (err) {
+      showToast(err.message, true);
+    }
   }
 
   async function doRetryFailed(report) {
@@ -1885,6 +1979,7 @@
     $('#theme-toggle-main').addEventListener('click', toggleTheme);
     $('#lock-btn').addEventListener('click', doLock);
     $('#audit-open-btn').addEventListener('click', openAuditModal);
+    $('#retry-indicator-btn').addEventListener('click', showRetryStatus);
 
     // Audit-Modal
     $('#audit-modal-close').addEventListener('click', closeAuditModal);

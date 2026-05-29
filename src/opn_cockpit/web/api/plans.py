@@ -253,13 +253,53 @@ def apply_plan(
     will nur die fehlgeschlagenen nachziehen. Wenn ``device_ids`` leer
     oder ``None`` ist, wird der Plan auf allen seinen Geraeten ausgerollt.
     """
-    plan = _load_plan_or_404(plan_id)
-    if payload is not None and payload.device_ids:
-        plan = _filter_plan_by_devices(plan, payload.device_ids)
+    device_ids = payload.device_ids if payload is not None else None
+    try:
+        plan, full_report = run_apply(session, plan_id, device_ids=device_ids)
+    except PlanStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except _NoMatchingDevices as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return _report_to_response(plan, full_report)
+
+
+# ---------------------------------------------------------------------------
+# Helfer fuer Apply: extrahiert, damit der RetryWatcher das gleiche aufruft
+# ---------------------------------------------------------------------------
+
+
+class _NoMatchingDevices(ValueError):
+    """Filter lieferte keine Aktionen — z. B. weil alle device_ids unbekannt sind."""
+
+
+def run_apply(
+    session: Session,
+    plan_id: str,
+    *,
+    device_ids: list[str] | None = None,
+) -> tuple[Plan, RolloutReport]:
+    """Wendet ``plan_id`` an, optional gefiltert auf ``device_ids``.
+
+    Liefert ``(applied_plan, merged_report)``. Der gemergte Report wird
+    bereits persistiert. Wird von ``apply_plan`` (HTTP-Endpoint) und vom
+    Auto-Retry-Watcher gleichermassen aufgerufen.
+
+    Wirft ``PlanStoreError`` wenn der Plan nicht existiert, und
+    ``_NoMatchingDevices`` wenn ein device_ids-Filter alle Aktionen rausfiltert.
+    """
+    store = _plan_store()
+    plan = store.load(plan_id)
+    if device_ids:
+        plan = _filter_plan_by_devices(plan, device_ids)
         if not plan.actions:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Keine der angegebenen Geraete-IDs ist im Plan.",
+            raise _NoMatchingDevices(
+                "Keine der angegebenen Geraete-IDs ist im Plan.",
             )
     binding = get_binding(plan.subsystem)
     devices_in_plan = [a.device for a in plan.actions]
@@ -282,17 +322,16 @@ def apply_plan(
             client=client,
         )
 
-    # Apply-Report neben dem Plan persistieren, damit Outstanding-Aggregation
-    # spaeter weiss, welche Geraete erfolgreich waren.
-    store = _plan_store()
-    if payload is not None and payload.device_ids:
-        # Retry: bestehenden Report mit den neuen Resultaten zusammenmischen.
+    if device_ids:
         previous = store.load_report(plan_id)
         if previous is not None:
             report = _merge_reports(previous, report)
     store.save_report(plan_id, report)
+    return plan, report
 
-    device_names = {d.id: d.name for d in devices_in_plan}
+
+def _report_to_response(plan: Plan, report: RolloutReport) -> RolloutReportResponse:
+    device_names = {a.device.id: a.device.name for a in plan.actions}
     results = [
         DeviceResultResponse(
             device_id=r.device_id,
