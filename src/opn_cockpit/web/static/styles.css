@@ -1141,7 +1141,12 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  text-decoration: none;
 }
+
+a.action-row-btn { color: var(--text); }
+a.action-row-btn:visited { color: var(--text); }
+a.card-open-link { text-decoration: none; }
 
 /* Detail list (device modal) */
 

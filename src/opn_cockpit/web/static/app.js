@@ -364,9 +364,11 @@
       </svg>`;
       row.appendChild(warn);
     }
-    const openLink = document.createElement('button');
+    const openLink = document.createElement('a');
     openLink.className = 'card-open-link';
-    openLink.type = 'button';
+    openLink.href = `https://${device.host}:${device.port}/`;
+    openLink.target = '_blank';
+    openLink.rel = 'noopener noreferrer';
     openLink.title = 'OPNsense-Weboberfläche öffnen';
     openLink.innerHTML = `<svg width="12" height="12" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
       <path d="M6.5 2H3a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V6.5"/>
@@ -374,8 +376,7 @@
       <line x1="6" y1="7" x2="11.5" y2="1.5"/>
     </svg>`;
     openLink.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openDeviceWeb(device);
+      e.stopPropagation();  // Karte soll nicht das Detail-Modal oeffnen
     });
     row.appendChild(openLink);
     article.appendChild(row);
@@ -645,25 +646,6 @@
     errorBox.hidden = false;
   }
 
-  function openDeviceWeb(device) {
-    if (!device || !device.host || !device.port) {
-      showToast('Gerät hat keinen vollständigen Host/Port.', true);
-      return;
-    }
-    const url = `https://${device.host}:${device.port}/`;
-    // Anchor-Klick statt window.open: vermeidet Chromium-Quirks beim
-    // dritten "windowFeatures"-Argument (Popup-Hint hat die URL teils
-    // verschluckt). Anchor trägt rel/target nativ, der Browser
-    // behandelt das als regulären User-Link.
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
 
   // -------------------- Device-Modal (Detail + Aktionen) --------------------
 
@@ -709,6 +691,11 @@
     $('#device-test-result').textContent = '';
     $('#device-test-btn').disabled = false;
     $('#device-modal-error').hidden = true;
+
+    // OPNsense-Web-Link: echter Anchor mit konkreter href.
+    const webLink = $('#device-open-web-btn');
+    webLink.href = `https://${device.host}:${device.port}/`;
+
     resetDeleteButton();
     $('#device-modal').hidden = false;
   }
@@ -754,11 +741,6 @@
       btn.disabled = false;
       if (labelSpan) labelSpan.textContent = originalLabel;
     }
-  }
-
-  function doOpenWeb() {
-    const device = state.devices.find((d) => d.id === currentDeviceId);
-    if (device) openDeviceWeb(device);
   }
 
   function doDuplicate() {
@@ -927,7 +909,8 @@
     $('#device-modal-cancel').addEventListener('click', closeDeviceModal);
     $('#device-modal-delete').addEventListener('click', doDeleteDevice);
     $('#device-test-btn').addEventListener('click', doTestConnection);
-    $('#device-open-web-btn').addEventListener('click', doOpenWeb);
+    // #device-open-web-btn ist ein echter <a target="_blank">,
+    // braucht keinen JS-Handler — Browser navigiert nativ.
     $('#device-duplicate-btn').addEventListener('click', doDuplicate);
     $('#device-modal').addEventListener('click', (e) => {
       if (e.target.id === 'device-modal') closeDeviceModal();
