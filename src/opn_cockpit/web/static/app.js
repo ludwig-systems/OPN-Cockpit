@@ -646,8 +646,23 @@
   }
 
   function openDeviceWeb(device) {
+    if (!device || !device.host || !device.port) {
+      showToast('Gerät hat keinen vollständigen Host/Port.', true);
+      return;
+    }
     const url = `https://${device.host}:${device.port}/`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    // Anchor-Klick statt window.open: vermeidet Chromium-Quirks beim
+    // dritten "windowFeatures"-Argument (Popup-Hint hat die URL teils
+    // verschluckt). Anchor trägt rel/target nativ, der Browser
+    // behandelt das als regulären User-Link.
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 
   // -------------------- Device-Modal (Detail + Aktionen) --------------------
