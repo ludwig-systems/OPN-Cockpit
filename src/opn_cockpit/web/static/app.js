@@ -1,11 +1,11 @@
-// OPN-Cockpit Frontend (Iter 2 — Login + Main-Platzhalter).
+// OPN-Cockpit Frontend (v2.0 Iter 3).
 //
 // State-Machine:
 //   boot  -> versuche /api/auth/me mit gespeichertem Token
 //             ok -> main
 //             401 -> login
 //   login -> Tresor-Auswahl + Passwort, oder Create-Vault-Inline-Dialog
-//   main  -> einfacher Platzhalter (Inventar kommt in Iter 3)
+//   main  -> Inventar-View (Sidebar + Kacheln) mit Heartbeat-Polling
 //
 // Token-Storage: sessionStorage (per Tab, beim Schliessen weg).
 
@@ -14,9 +14,27 @@
 
   const STATE_KEY = 'opn-cockpit-token';
   const THEME_KEY = 'opn-cockpit-theme';
+  const HEARTBEAT_INTERVAL_MS = 30000;
+  const SESSION_TICK_MS = 15000;
+  const HEARTBEAT_STALE_AFTER_MS = 90000;
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  // -------------------- App-State --------------------
+
+  const state = {
+    devices: [],          // DeviceResponse[]
+    tags: [],             // TagSummary[]
+    heartbeat: {},        // device_id -> { reachable: bool, checked_at_ms: number }
+    activeTag: null,      // null = "alle"
+    search: '',           // freitext
+    sessionInfo: null,
+    heartbeatInFlight: false,
+  };
+
+  let heartbeatHandle = null;
+  let sessionTickHandle = null;
 
   // -------------------- Theme --------------------
 
@@ -26,10 +44,7 @@
       document.documentElement.setAttribute('data-theme', saved);
       return;
     }
-    if (
-      window.matchMedia &&
-      window.matchMedia('(prefers-color-scheme: light)').matches
-    ) {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
       document.documentElement.setAttribute('data-theme', 'light');
     }
   }
@@ -38,51 +53,49 @@
     const cur = document.documentElement.getAttribute('data-theme') || 'dark';
     const next = cur === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
-    try {
-      localStorage.setItem(THEME_KEY, next);
-    } catch (_) {}
+    try { localStorage.setItem(THEME_KEY, next); } catch (_) {}
   }
 
   // -------------------- Token --------------------
 
   function getToken() {
-    try {
-      return sessionStorage.getItem(STATE_KEY);
-    } catch (_) {
-      return null;
-    }
+    try { return sessionStorage.getItem(STATE_KEY); } catch (_) { return null; }
   }
 
-  function setToken(token) {
-    try {
-      sessionStorage.setItem(STATE_KEY, token);
-    } catch (_) {}
+  function setToken(t) {
+    try { sessionStorage.setItem(STATE_KEY, t); } catch (_) {}
   }
 
   function clearToken() {
-    try {
-      sessionStorage.removeItem(STATE_KEY);
-    } catch (_) {}
+    try { sessionStorage.removeItem(STATE_KEY); } catch (_) {}
   }
 
   // -------------------- API --------------------
 
   async function apiGet(path) {
     const headers = { Accept: 'application/json' };
-    const token = getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
+    const t = getToken();
+    if (t) headers.Authorization = `Bearer ${t}`;
     return await fetch(path, { headers });
   }
 
   async function apiPost(path, body) {
-    const headers = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-    const token = getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
+    const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+    const t = getToken();
+    if (t) headers.Authorization = `Bearer ${t}`;
     return await fetch(path, {
       method: 'POST',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async function apiDelete(path, body) {
+    const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+    const t = getToken();
+    if (t) headers.Authorization = `Bearer ${t}`;
+    return await fetch(path, {
+      method: 'DELETE',
       headers,
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -92,26 +105,20 @@
 
   function showScreen(name) {
     document.getElementById('app').setAttribute('data-state', name);
-    $$('.screen').forEach((s) => {
-      s.hidden = s.dataset.screen !== name;
-    });
+    $$('.screen').forEach((s) => { s.hidden = s.dataset.screen !== name; });
   }
 
   function showLoginView(name) {
-    $$('.login-view').forEach((v) => {
-      v.hidden = v.dataset.view !== name;
-    });
+    $$('.login-view').forEach((v) => { v.hidden = v.dataset.view !== name; });
     $('#login-error').hidden = true;
     $('#create-error').hidden = true;
   }
 
-  // -------------------- Login --------------------
+  // -------------------- Login (unchanged from Iter 2) --------------------
 
   async function fetchVaultsAndPopulate() {
     const response = await apiGet('/api/vaults');
-    if (!response.ok) {
-      throw new Error('Konnte Tresor-Liste nicht abrufen.');
-    }
+    if (!response.ok) throw new Error('Konnte Tresor-Liste nicht abrufen.');
     const data = await response.json();
     const select = $('#vault-select');
     select.innerHTML = '';
@@ -142,7 +149,6 @@
       $('#password-input').focus();
     }
 
-    // Default-Pfad fuer Create-Form vorbefuellen
     const newPath = $('#new-vault-path');
     if (newPath && !newPath.value) newPath.value = data.suggested_new_path;
   }
@@ -169,8 +175,7 @@
       const data = await response.json();
       setToken(data.token);
       $('#password-input').value = '';
-      enterMain(data);
-      startExpiryTicker();
+      await enterMain(data);
     } catch (err) {
       errorBox.textContent = err.message;
       errorBox.hidden = false;
@@ -187,10 +192,8 @@
     errorBox.hidden = true;
 
     if (!path) return showCreateError('Pfad fehlt.');
-    if (pw1.length < 12)
-      return showCreateError('Passwort muss mindestens 12 Zeichen haben.');
-    if (pw1 !== pw2)
-      return showCreateError('Die beiden Passwörter stimmen nicht überein.');
+    if (pw1.length < 12) return showCreateError('Passwort muss mindestens 12 Zeichen haben.');
+    if (pw1 !== pw2) return showCreateError('Die beiden Passwörter stimmen nicht überein.');
 
     const btn = $('#create-confirm-btn');
     btn.disabled = true;
@@ -203,8 +206,7 @@
       }
       const data = await response.json();
       setToken(data.token);
-      enterMain(data);
-      startExpiryTicker();
+      await enterMain(data);
     } catch (err) {
       showCreateError(err.message);
       btn.disabled = false;
@@ -218,72 +220,564 @@
     errorBox.hidden = false;
   }
 
-  // -------------------- Main --------------------
+  // -------------------- Main: Boot --------------------
 
-  function enterMain(sessionInfo) {
+  async function enterMain(sessionInfo) {
+    state.sessionInfo = sessionInfo;
     $('#current-vault').textContent = sessionInfo.vault_filename;
-    $('#timeout-display').textContent = Math.round(
-      sessionInfo.inactivity_timeout_s / 60
-    );
+    $('#timeout-display').textContent = Math.round(sessionInfo.inactivity_timeout_s / 60);
+    $('#content-eyebrow').textContent = `Tresor · ${sessionInfo.vault_filename.replace(/\.opnvault$/i, '')}`;
     updateExpiry(sessionInfo.seconds_until_expiry);
     showScreen('main');
+    await loadInventory();
+    startHeartbeat();
+    startSessionTicker();
+  }
+
+  // -------------------- Main: Inventar laden --------------------
+
+  async function loadInventory() {
+    const response = await apiGet('/api/inventory');
+    if (response.status === 401) {
+      handleSessionLost();
+      return;
+    }
+    if (!response.ok) {
+      showToast('Inventar konnte nicht geladen werden.', true);
+      return;
+    }
+    const data = await response.json();
+    state.devices = data.devices || [];
+    state.tags = data.tags || [];
+    renderSidebar();
+    renderGrid();
+  }
+
+  // -------------------- Sidebar --------------------
+
+  function renderSidebar() {
+    const list = $('#group-list');
+    list.innerHTML = '';
+
+    const totalCount = state.devices.length;
+    list.appendChild(makeGroupItem({
+      label: 'Alle Geräte',
+      count: totalCount,
+      tag: null,
+    }));
+
+    for (const t of state.tags) {
+      list.appendChild(makeGroupItem({
+        label: t.name,
+        count: t.count,
+        tag: t.name,
+      }));
+    }
+  }
+
+  function makeGroupItem({ label, count, tag }) {
+    const li = document.createElement('li');
+    li.className = 'group-item';
+    if ((tag === null && state.activeTag === null) || tag === state.activeTag) {
+      li.classList.add('active');
+    }
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = label;
+    li.appendChild(labelSpan);
+    const countSpan = document.createElement('span');
+    countSpan.className = 'group-count';
+    countSpan.textContent = String(count);
+    li.appendChild(countSpan);
+    li.addEventListener('click', () => {
+      state.activeTag = tag;
+      renderSidebar();
+      renderGrid();
+    });
+    return li;
+  }
+
+  // -------------------- Grid + Status-Summary --------------------
+
+  function renderGrid() {
+    const grid = $('#card-grid');
+    const empty = $('#empty-state');
+
+    if (state.devices.length === 0) {
+      grid.innerHTML = '';
+      empty.hidden = false;
+      $('#status-summary').innerHTML = '';
+      return;
+    }
+
+    empty.hidden = true;
+    const visible = state.devices.filter(deviceMatchesFilter);
+
+    grid.innerHTML = '';
+    for (const device of visible) {
+      grid.appendChild(renderCard(device));
+    }
+
+    renderStatusSummary(state.devices);
+  }
+
+  function deviceMatchesFilter(device) {
+    if (state.activeTag && !device.tags.includes(state.activeTag)) return false;
+    if (state.search) {
+      const q = state.search;
+      const hay = [
+        device.name,
+        device.host,
+        device.descr || '',
+        ...(device.tags || []),
+      ].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }
+
+  function renderCard(device) {
+    const hb = state.heartbeat[device.id];
+    const reachability = computeReachability(hb);
+    const article = document.createElement('article');
+    article.className = 'card';
+    if (reachability === 'offline') article.classList.add('offline');
+    if (!device.tls_verify) article.classList.add('tls-warning');
+
+    // Status row
+    const row = document.createElement('div');
+    row.className = 'card-status-row';
+    const dot = document.createElement('span');
+    dot.className = `status-dot ${reachability}`;
+    row.appendChild(dot);
+    const hostname = document.createElement('span');
+    hostname.className = 'card-hostname';
+    hostname.textContent = device.host;
+    row.appendChild(hostname);
+    if (!device.tls_verify) {
+      const warn = document.createElement('span');
+      warn.className = 'card-warning-badge';
+      warn.title = 'TLS-Zertifikat wird nicht geprüft';
+      warn.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 1.4L2 3.2v3.5c0 3 2 5.8 5 6.7 3-.9 5-3.7 5-6.7V3.2L7 1.4z"/>
+        <line x1="7" y1="5" x2="7" y2="7.5"/>
+        <circle cx="7" cy="9.4" r="0.55" fill="currentColor"/>
+      </svg>`;
+      row.appendChild(warn);
+    }
+    article.appendChild(row);
+
+    // Name
+    const name = document.createElement('div');
+    name.className = 'card-name';
+    name.textContent = device.name;
+    article.appendChild(name);
+
+    // Tags
+    if (device.tags && device.tags.length) {
+      const tagsRow = document.createElement('div');
+      tagsRow.className = 'card-tags';
+      for (const t of device.tags) {
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = t;
+        tagsRow.appendChild(tag);
+      }
+      article.appendChild(tagsRow);
+    }
+
+    // Stats
+    const stats = document.createElement('div');
+    stats.className = 'card-stats';
+    stats.innerHTML = `
+      <span class="stat"><span class="stat-label">Port</span><span class="stat-value">${device.port}</span></span>
+      <span class="stat"><span class="stat-value ${device.tls_verify ? 'tls-on' : 'tls-off'}">${device.tls_verify ? 'TLS ✓' : 'TLS AUS'}</span></span>
+      <span class="stat"><span class="stat-value">${formatHeartbeatLabel(hb, reachability)}</span></span>
+    `;
+    article.appendChild(stats);
+
+    article.addEventListener('click', () => openDeviceModal(device.id));
+    return article;
+  }
+
+  function computeReachability(hb) {
+    if (!hb) return 'checking';
+    const age = Date.now() - hb.checked_at_ms;
+    if (age > HEARTBEAT_STALE_AFTER_MS) return 'checking';
+    return hb.reachable ? 'online' : 'offline';
+  }
+
+  function formatHeartbeatLabel(hb, reach) {
+    if (!hb) return 'prüfe…';
+    if (reach === 'checking') return 'prüfe…';
+    const age = Math.round((Date.now() - hb.checked_at_ms) / 1000);
+    if (age < 5) return 'gerade eben';
+    if (age < 60) return `vor ${age} s`;
+    const mins = Math.round(age / 60);
+    return `vor ${mins} min`;
+  }
+
+  function renderStatusSummary(devices) {
+    const summary = $('#status-summary');
+    let online = 0, offline = 0, checking = 0;
+    let tlsRisk = 0;
+    for (const d of devices) {
+      const r = computeReachability(state.heartbeat[d.id]);
+      if (r === 'online') online += 1;
+      else if (r === 'offline') offline += 1;
+      else checking += 1;
+      if (!d.tls_verify) tlsRisk += 1;
+    }
+
+    const parts = [];
+    parts.push(summaryItem('online', online, 'erreichbar'));
+    parts.push(`<div class="status-summary-separator"></div>`);
+    parts.push(summaryItem('offline', offline, 'offline'));
+    if (checking) {
+      parts.push(`<div class="status-summary-separator"></div>`);
+      parts.push(summaryItem('checking', checking, 'Prüfung läuft'));
+    }
+    if (tlsRisk) {
+      parts.push(`<div class="status-summary-separator"></div>`);
+      parts.push(summaryItem('warn', tlsRisk, 'TLS-Risiko'));
+    }
+    summary.innerHTML = parts.join('');
+  }
+
+  function summaryItem(kind, n, label) {
+    const dotPart = (kind === 'warn')
+      ? ''
+      : `<span class="status-dot ${kind}" style="width:6px;height:6px;box-shadow:none"></span>`;
+    return `
+      <div class="status-summary-item ${kind}">
+        ${dotPart}<strong>${n}</strong><span>${label}</span>
+      </div>
+    `;
+  }
+
+  // -------------------- Heartbeat-Polling --------------------
+
+  function startHeartbeat() {
+    if (heartbeatHandle !== null) return;
+    pollHeartbeat();
+    heartbeatHandle = setInterval(pollHeartbeat, HEARTBEAT_INTERVAL_MS);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatHandle !== null) {
+      clearInterval(heartbeatHandle);
+      heartbeatHandle = null;
+    }
+  }
+
+  async function pollHeartbeat() {
+    if (state.heartbeatInFlight) return;
+    if (!state.devices.length) return;
+    state.heartbeatInFlight = true;
+    try {
+      const response = await apiPost('/api/inventory/heartbeat', { device_ids: [], timeout_s: 2.5 });
+      if (response.status === 401) {
+        handleSessionLost();
+        return;
+      }
+      if (!response.ok) return;
+      const data = await response.json();
+      const now = Date.now();
+      for (const entry of data.results) {
+        state.heartbeat[entry.device_id] = {
+          reachable: entry.reachable,
+          checked_at_ms: now,
+        };
+      }
+      renderGrid();
+    } catch (_) {
+      // Netzwerk-Hickup, nächster Tick versucht erneut.
+    } finally {
+      state.heartbeatInFlight = false;
+    }
+  }
+
+  // -------------------- Session-Ticker --------------------
+
+  function startSessionTicker() {
+    if (sessionTickHandle !== null) return;
+    sessionTickHandle = setInterval(async () => {
+      try {
+        const response = await apiGet('/api/auth/me');
+        if (response.status === 401) { handleSessionLost(); return; }
+        if (!response.ok) return;
+        const data = await response.json();
+        state.sessionInfo = data;
+        updateExpiry(data.seconds_until_expiry);
+      } catch (_) { /* Netzwerk-Hickup */ }
+    }, SESSION_TICK_MS);
+  }
+
+  function stopSessionTicker() {
+    if (sessionTickHandle !== null) {
+      clearInterval(sessionTickHandle);
+      sessionTickHandle = null;
+    }
   }
 
   function updateExpiry(seconds) {
     const el = $('#expiry-display');
     if (!el) return;
-    if (!seconds || seconds <= 0) {
-      el.textContent = 'sofort';
-      return;
-    }
+    if (!seconds || seconds <= 0) { el.textContent = '00:00'; return; }
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     el.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
 
-  async function checkSession() {
-    const response = await apiGet('/api/auth/me');
-    if (response.status === 401) {
-      clearToken();
-      return null;
-    }
-    if (!response.ok) {
-      throw new Error(`Backend-Fehler ${response.status}`);
-    }
-    return await response.json();
+  function handleSessionLost() {
+    stopHeartbeat();
+    stopSessionTicker();
+    clearToken();
+    state.devices = [];
+    state.heartbeat = {};
+    state.sessionInfo = null;
+    showScreen('login');
+    showLoginView('picker');
+    fetchVaultsAndPopulate().catch(() => {});
   }
 
   async function doLock() {
-    await apiPost('/api/auth/lock');
-    clearToken();
-    showScreen('login');
-    showLoginView('picker');
-    await fetchVaultsAndPopulate();
+    try { await apiPost('/api/auth/lock'); } catch (_) {}
+    handleSessionLost();
   }
 
-  let expiryTickerHandle = null;
+  // -------------------- Add-Modal --------------------
 
-  function startExpiryTicker() {
-    if (expiryTickerHandle !== null) return;
-    expiryTickerHandle = setInterval(async () => {
-      try {
-        const session = await checkSession();
-        if (!session) {
-          clearInterval(expiryTickerHandle);
-          expiryTickerHandle = null;
-          showScreen('login');
-          showLoginView('picker');
-          await fetchVaultsAndPopulate();
-          return;
-        }
-        updateExpiry(session.seconds_until_expiry);
-      } catch (_) {
-        // Netzwerk-Hickup — ignorieren, naechster Tick versucht es wieder.
+  function openAddModal() {
+    $('#ad-name').value = '';
+    $('#ad-host').value = '';
+    $('#ad-port').value = '443';
+    $('#ad-tags').value = '';
+    $('#ad-descr').value = '';
+    $('#ad-tls').checked = true;
+    $('#ad-apikey').value = '';
+    $('#ad-apisecret').value = '';
+    $('#ad-mpw').value = '';
+    $('#add-modal-error').hidden = true;
+    $('#add-modal').hidden = false;
+    setTimeout(() => $('#ad-name').focus(), 0);
+  }
+
+  function closeAddModal() {
+    $('#add-modal').hidden = true;
+  }
+
+  async function doAddDevice() {
+    const errorBox = $('#add-modal-error');
+    errorBox.hidden = true;
+
+    const name = $('#ad-name').value.trim();
+    const host = $('#ad-host').value.trim();
+    const portRaw = $('#ad-port').value;
+    const tagsRaw = $('#ad-tags').value.trim();
+    const descr = $('#ad-descr').value.trim();
+    const tlsVerify = $('#ad-tls').checked;
+    const apiKey = $('#ad-apikey').value.trim();
+    const apiSecret = $('#ad-apisecret').value;
+    const masterPw = $('#ad-mpw').value;
+
+    if (!name || !host || !apiKey || !apiSecret || !masterPw) {
+      return showAddError('Bitte alle Pflichtfelder ausfüllen.');
+    }
+    const port = parseInt(portRaw, 10);
+    if (!port || port < 1 || port > 65535) {
+      return showAddError('Port muss zwischen 1 und 65535 liegen.');
+    }
+    const tags = tagsRaw
+      ? tagsRaw.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+      : [];
+
+    const btn = $('#add-modal-confirm');
+    btn.disabled = true;
+    btn.textContent = 'Speichere…';
+    try {
+      const response = await apiPost('/api/inventory/devices', {
+        name, host, port,
+        tls_verify: tlsVerify,
+        tags, descr,
+        api_key: apiKey,
+        api_secret: apiSecret,
+        master_password: masterPw,
+      });
+      if (response.status === 401) {
+        showAddError('Master-Passwort falsch oder Session abgelaufen.');
+        return;
       }
-    }, 30000);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showAddError(body.detail || `Fehler ${response.status}`);
+        return;
+      }
+      closeAddModal();
+      await loadInventory();
+      pollHeartbeat();
+      showToast(`Gerät „${name}" angelegt.`);
+    } catch (err) {
+      showAddError(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Hinzufügen';
+    }
   }
 
-  // -------------------- Bootstrap --------------------
+  function showAddError(msg) {
+    const errorBox = $('#add-modal-error');
+    errorBox.textContent = msg;
+    errorBox.hidden = false;
+  }
+
+  // -------------------- Device-Modal (Detail + Löschen) --------------------
+
+  let currentDeviceId = null;
+
+  function openDeviceModal(deviceId) {
+    const device = state.devices.find((d) => d.id === deviceId);
+    if (!device) return;
+    currentDeviceId = deviceId;
+
+    $('#device-modal-title').textContent = device.name;
+    const dl = $('#device-detail-list');
+    dl.innerHTML = '';
+    appendDetail(dl, 'Hostname', device.host);
+    appendDetail(dl, 'Port', String(device.port));
+    appendDetail(
+      dl,
+      'TLS',
+      device.tls_verify
+        ? '<span class="tls-on">verifiziert</span>'
+        : '<span class="tls-off">deaktiviert (Risiko)</span>',
+      true,
+    );
+    if (device.tags && device.tags.length) {
+      const dt = document.createElement('dt');
+      dt.textContent = 'Tags';
+      dl.appendChild(dt);
+      const dd = document.createElement('dd');
+      dd.className = 'detail-tags';
+      for (const t of device.tags) {
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = t;
+        dd.appendChild(tag);
+      }
+      dl.appendChild(dd);
+    }
+    if (device.descr) appendDetail(dl, 'Notiz', device.descr);
+    appendDetail(dl, 'Geräte-ID', device.id);
+
+    $('#device-test-result').textContent = '';
+    $('#device-test-result').classList.remove('toast-error');
+    $('#device-test-btn').disabled = false;
+    $('#device-test-btn').textContent = 'Verbindung testen (HTTPS + Auth)';
+    $('#del-mpw').value = '';
+    $('#device-modal-error').hidden = true;
+    $('#device-modal').hidden = false;
+  }
+
+  function appendDetail(dl, label, value, html) {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    dl.appendChild(dt);
+    const dd = document.createElement('dd');
+    if (html) dd.innerHTML = value;
+    else dd.textContent = value;
+    dl.appendChild(dd);
+  }
+
+  function closeDeviceModal() {
+    $('#device-modal').hidden = true;
+    currentDeviceId = null;
+  }
+
+  async function doTestConnection() {
+    if (!currentDeviceId) return;
+    const btn = $('#device-test-btn');
+    const result = $('#device-test-result');
+    btn.disabled = true;
+    btn.textContent = 'Teste…';
+    result.textContent = '';
+    try {
+      const response = await apiPost(`/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/test-connection`);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        result.textContent = body.detail || `Fehler ${response.status}`;
+        return;
+      }
+      const data = await response.json();
+      result.textContent = data.summary;
+    } catch (err) {
+      result.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Verbindung testen (HTTPS + Auth)';
+    }
+  }
+
+  async function doDeleteDevice() {
+    if (!currentDeviceId) return;
+    const masterPw = $('#del-mpw').value;
+    const errorBox = $('#device-modal-error');
+    errorBox.hidden = true;
+    if (!masterPw) {
+      errorBox.textContent = 'Master-Passwort fehlt.';
+      errorBox.hidden = false;
+      return;
+    }
+    const btn = $('#device-modal-delete');
+    btn.disabled = true;
+    btn.textContent = 'Lösche…';
+    try {
+      const response = await apiDelete(
+        `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}`,
+        { master_password: masterPw },
+      );
+      if (response.status === 401) {
+        errorBox.textContent = 'Master-Passwort falsch.';
+        errorBox.hidden = false;
+        return;
+      }
+      if (!response.ok && response.status !== 204) {
+        const body = await response.json().catch(() => ({}));
+        errorBox.textContent = body.detail || `Fehler ${response.status}`;
+        errorBox.hidden = false;
+        return;
+      }
+      closeDeviceModal();
+      await loadInventory();
+      showToast('Gerät gelöscht.');
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Gerät löschen';
+    }
+  }
+
+  // -------------------- Toast --------------------
+
+  let toastEl = null;
+  let toastTimer = null;
+
+  function showToast(msg, isError) {
+    if (!toastEl) {
+      toastEl = document.createElement('div');
+      toastEl.className = 'toast';
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = msg;
+    toastEl.classList.toggle('toast-error', !!isError);
+    toastEl.hidden = false;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.hidden = true; }, 3200);
+  }
+
+  // -------------------- Bootstrap + Events --------------------
 
   async function bootstrap() {
     initTheme();
@@ -291,7 +785,6 @@
 
     const status = $('#boot-status');
 
-    // 1) Versionspruefung
     try {
       const v = await fetch('/api/version').then((r) => r.json());
       status.textContent = `Backend bereit · v${v.version}`;
@@ -300,21 +793,18 @@
       return;
     }
 
-    // 2) Existierende Session?
     if (getToken()) {
       try {
-        const session = await checkSession();
-        if (session) {
-          enterMain(session);
-          startExpiryTicker();
+        const response = await apiGet('/api/auth/me');
+        if (response.ok) {
+          const session = await response.json();
+          await enterMain(session);
           return;
         }
-      } catch (_) {
-        // Token kaputt — Login-Screen zeigen.
-      }
+        clearToken();
+      } catch (_) { /* fallthrough auf Login */ }
     }
 
-    // 3) Login
     showScreen('login');
     showLoginView('picker');
     try {
@@ -327,6 +817,7 @@
   }
 
   function bindStaticEvents() {
+    // Login
     $('#unlock-btn').addEventListener('click', doUnlock);
     $('#password-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doUnlock();
@@ -335,13 +826,53 @@
       showLoginView('create');
       $('#new-vault-pw1').focus();
     });
-    $('#create-back-btn').addEventListener('click', () => {
-      showLoginView('picker');
-    });
+    $('#create-back-btn').addEventListener('click', () => showLoginView('picker'));
     $('#create-confirm-btn').addEventListener('click', doCreateVault);
     $('#theme-toggle-login').addEventListener('click', toggleTheme);
+
+    // Main: top bar
     $('#theme-toggle-main').addEventListener('click', toggleTheme);
     $('#lock-btn').addEventListener('click', doLock);
+
+    // Main: search
+    $('#search-input').addEventListener('input', (e) => {
+      state.search = e.target.value.trim().toLowerCase();
+      renderGrid();
+    });
+
+    // Sidebar actions
+    $('#add-device-btn').addEventListener('click', openAddModal);
+    $('#empty-add-btn').addEventListener('click', openAddModal);
+
+    // Add-Modal
+    $('#add-modal-close').addEventListener('click', closeAddModal);
+    $('#add-modal-cancel').addEventListener('click', closeAddModal);
+    $('#add-modal-confirm').addEventListener('click', doAddDevice);
+    $('#add-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'add-modal') closeAddModal();
+    });
+
+    // Device-Modal
+    $('#device-modal-close').addEventListener('click', closeDeviceModal);
+    $('#device-modal-cancel').addEventListener('click', closeDeviceModal);
+    $('#device-modal-delete').addEventListener('click', doDeleteDevice);
+    $('#device-test-btn').addEventListener('click', doTestConnection);
+    $('#device-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'device-modal') closeDeviceModal();
+    });
+
+    // Global hotkeys: Strg+K -> Suche, Esc -> Modal schliessen
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        if (document.getElementById('app').dataset.state !== 'main') return;
+        const search = document.getElementById('search-input');
+        if (search) { e.preventDefault(); search.focus(); search.select(); }
+      }
+      if (e.key === 'Escape') {
+        if (!$('#add-modal').hidden) closeAddModal();
+        else if (!$('#device-modal').hidden) closeDeviceModal();
+      }
+    });
   }
 
   document.addEventListener('DOMContentLoaded', bootstrap);

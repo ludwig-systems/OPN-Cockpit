@@ -27,7 +27,6 @@
           <span class="brand-version">v{{ version }}</span>
         </div>
 
-        <!-- Vault picker view -->
         <div class="login-view" data-view="picker">
           <p class="login-hint" id="login-hint"></p>
 
@@ -53,7 +52,6 @@
           </div>
         </div>
 
-        <!-- Create-vault view -->
         <div class="login-view" data-view="create" hidden>
           <p class="login-hint">
             Lege einen neuen Tresor an. Das Master-Passwort schützt deine
@@ -64,20 +62,10 @@
           <input id="new-vault-path" class="form-input" type="text" />
 
           <label class="form-label" for="new-vault-pw1">Master-Passwort (min. 12 Zeichen)</label>
-          <input
-            id="new-vault-pw1"
-            class="form-input"
-            type="password"
-            autocomplete="new-password"
-          />
+          <input id="new-vault-pw1" class="form-input" type="password" autocomplete="new-password" />
 
           <label class="form-label" for="new-vault-pw2">Wiederholen</label>
-          <input
-            id="new-vault-pw2"
-            class="form-input"
-            type="password"
-            autocomplete="new-password"
-          />
+          <input id="new-vault-pw2" class="form-input" type="password" autocomplete="new-password" />
 
           <div class="form-error" id="create-error" hidden></div>
 
@@ -94,14 +82,25 @@
       </footer>
     </section>
 
-    <!-- ================ MAIN-PLATZHALTER (Iter 3+) ================ -->
+    <!-- ================ MAIN ================ -->
     <section class="screen screen-main" data-screen="main" hidden>
       <header class="topbar">
         <div class="brand">
           <h1>OPN-Cockpit</h1>
           <span class="vault-name" id="current-vault">—</span>
         </div>
-        <div class="topbar-spacer"></div>
+
+        <div class="search">
+          <span class="search-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <circle cx="6.2" cy="6.2" r="4.3" stroke="currentColor" stroke-width="1.4"/>
+              <line x1="9.5" y1="9.5" x2="12.3" y2="12.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <input id="search-input" type="search" placeholder="Geräte, Tags, Hostnamen durchsuchen…" />
+          <kbd id="search-kbd">Strg K</kbd>
+        </div>
+
         <div class="topbar-actions">
           <button class="icon-btn" id="theme-toggle-main" title="Theme wechseln">
             <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
@@ -127,21 +126,210 @@
         </div>
       </header>
 
-      <main class="main-content">
-        <div class="placeholder">
-          <div class="placeholder-eyebrow">Iteration 3 in Vorbereitung</div>
-          <h2>Inventar</h2>
-          <p>
-            Die Kachel-Ansicht aus dem Mockup landet in der nächsten Iteration hier.
-            Aktuell zeigt das Backend: Tresor erfolgreich entsperrt, Session aktiv,
-            Auto-Sperre nach <strong id="timeout-display">—</strong> Minuten Inaktivität.
-          </p>
-          <div class="placeholder-meta">
-            <span>Session läuft ab in <span id="expiry-display">—</span></span>
+      <div class="main-layout">
+        <aside class="sidebar">
+          <section class="sidebar-section">
+            <h3>Gruppen</h3>
+            <ul class="group-list" id="group-list"></ul>
+          </section>
+
+          <section class="sidebar-section">
+            <h3>Aktionen</h3>
+            <div class="action-list">
+              <button class="action-btn" id="add-device-btn">
+                <span class="action-icon">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="7" y1="2.5" x2="7" y2="11.5"/>
+                    <line x1="2.5" y1="7" x2="11.5" y2="7"/>
+                  </svg>
+                </span>
+                <span>Gerät hinzufügen</span>
+              </button>
+              <button class="action-btn action-btn-disabled" title="Kommt in Iter 4">
+                <span class="action-icon">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1.5 7h7M8.5 4l3 3-3 3"/>
+                  </svg>
+                </span>
+                <span>Route hinzufügen</span>
+              </button>
+              <button class="action-btn action-btn-disabled" title="Kommt in Iter 4">
+                <span class="action-icon">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11.5 7.5L7.5 11.5 1.5 5.5V1.5h4l6 6z"/>
+                  </svg>
+                </span>
+                <span>Alias hinzufügen</span>
+              </button>
+            </div>
+          </section>
+
+          <div class="sidebar-footer">
+            <div class="shortcut">
+              <span>Session läuft ab</span>
+              <span class="shortcut-keys"><kbd id="expiry-display">--:--</kbd></span>
+            </div>
+            <div class="shortcut">
+              <span>Auto-Sperre nach</span>
+              <span class="shortcut-keys"><kbd><span id="timeout-display">—</span> min</kbd></span>
+            </div>
           </div>
-        </div>
-      </main>
+        </aside>
+
+        <main class="content">
+          <header class="content-header">
+            <div class="content-title-block">
+              <div class="content-eyebrow" id="content-eyebrow">Tresor</div>
+              <h2>Inventar</h2>
+            </div>
+
+            <div class="status-summary" id="status-summary"></div>
+          </header>
+
+          <div class="card-grid" id="card-grid"></div>
+
+          <div class="empty-state" id="empty-state" hidden>
+            <div class="empty-eyebrow">Tresor ist leer</div>
+            <h3>Noch keine Geräte</h3>
+            <p>Lege das erste Gerät an, um die Inventar-Ansicht zu füllen.</p>
+            <button class="btn-primary btn-primary-inline" id="empty-add-btn">Gerät hinzufügen</button>
+          </div>
+        </main>
+      </div>
     </section>
+
+    <!-- ================ MODAL: Gerät hinzufügen ================ -->
+    <div class="modal-backdrop" id="add-modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
+        <div class="modal-header">
+          <h2 id="add-modal-title">Gerät hinzufügen</h2>
+          <button class="icon-btn modal-close" id="add-modal-close" aria-label="Schließen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ad-name">Name</label>
+              <input id="ad-name" class="form-input" type="text" placeholder="HQ Berlin" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col flex-grow">
+              <label class="form-label" for="ad-host">Hostname / IP</label>
+              <input id="ad-host" class="form-input" type="text" placeholder="opn-berlin.lab" />
+            </div>
+            <div class="form-col form-col-port">
+              <label class="form-label" for="ad-port">Port</label>
+              <input id="ad-port" class="form-input" type="number" min="1" max="65535" value="443" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ad-tags">Tags (Komma-separiert)</label>
+              <input id="ad-tags" class="form-input" type="text" placeholder="branches, germany" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ad-descr">Beschreibung (optional)</label>
+              <input id="ad-descr" class="form-input" type="text" placeholder="" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-checkbox">
+                <input id="ad-tls" type="checkbox" checked />
+                <span>TLS-Zertifikat verifizieren</span>
+              </label>
+              <div class="form-hint">Deaktiviere nur bei selbst-signierten Zertifikaten — wird in der UI als Risiko markiert.</div>
+            </div>
+          </div>
+
+          <div class="form-divider"></div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ad-apikey">API-Key</label>
+              <input id="ad-apikey" class="form-input" type="text" autocomplete="off" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ad-apisecret">API-Secret</label>
+              <input id="ad-apisecret" class="form-input" type="password" autocomplete="off" />
+            </div>
+          </div>
+
+          <div class="form-divider"></div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ad-mpw">Master-Passwort (zum Speichern)</label>
+              <input id="ad-mpw" class="form-input" type="password" autocomplete="current-password" />
+            </div>
+          </div>
+
+          <div class="form-error" id="add-modal-error" hidden></div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="add-modal-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="add-modal-confirm">Hinzufügen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Geräte-Detail / Löschen ================ -->
+    <div class="modal-backdrop" id="device-modal" hidden>
+      <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="device-modal-title">
+        <div class="modal-header">
+          <h2 id="device-modal-title">Gerät</h2>
+          <button class="icon-btn modal-close" id="device-modal-close" aria-label="Schließen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <dl class="detail-list" id="device-detail-list"></dl>
+
+          <div class="form-row" id="device-test-row">
+            <div class="form-col">
+              <button class="btn-secondary" id="device-test-btn">Verbindung testen (HTTPS + Auth)</button>
+              <div class="form-hint" id="device-test-result"></div>
+            </div>
+          </div>
+
+          <div class="form-divider"></div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="del-mpw">Master-Passwort zum Löschen</label>
+              <input id="del-mpw" class="form-input" type="password" autocomplete="current-password" />
+            </div>
+          </div>
+
+          <div class="form-error" id="device-modal-error" hidden></div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="device-modal-cancel">Abbrechen</button>
+          <button class="btn-danger" id="device-modal-delete">Gerät löschen</button>
+        </div>
+      </div>
+    </div>
 
   </div>
 

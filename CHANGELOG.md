@@ -19,8 +19,16 @@ einer publikations-tauglichen Optik („Calm Precision"-Aesthetik, siehe
   `GET /api/auth/me`), Vault-Discovery + Inline-Create
   (`GET/POST /api/vaults`), Login-UI mit Tresor-Picker, Bearer-Token-
   Session in `sessionStorage`, 30 s-Expiry-Ticker mit Auto-Lock-UI.
-- 🔧 **Iter 3** (in Arbeit): Inventar-Kachelansicht mit TCP-Heartbeat,
-  Add/Remove-Device, Tag-Sidebar.
+- ✅ **Iter 3**: Inventar-Kachelansicht aus dem Mockup geliftet:
+  Sidebar mit Tag-Filter + Aktionen, Karten-Grid mit Status-Dot, TLS-
+  Badge und Heartbeat-Label, Topbar-Suche (Strg K), Add-/Detail-Modal
+  mit Master-Passwort-Re-Auth. Backend: `GET /api/inventory`,
+  `POST /api/inventory/devices`, `DELETE /api/inventory/devices/{id}`,
+  `POST /api/inventory/heartbeat` (paralleler TCP-Probe ohne Auth-Last
+  auf der OPNsense), `POST /api/inventory/devices/{id}/test-connection`
+  (vollwertiger HTTPS-Auth-Probe). Schreibvorgänge verifizieren das
+  Master-Passwort vor jedem `save_vault`, um silent corruption zu
+  verhindern.
 - ⏸ **Iter 4**: Plan/Apply für Routen + Aliase via Web-API + Modal-UI.
 - ⏸ **Iter 5**: Discovery, Audit-View, Profile-CRUD, Bulk-Import-Wizard.
 - ⏸ **Iter 6**: PySide6 + alle GUI-Tests entfernen, README + QUICKSTART
@@ -44,9 +52,9 @@ Hinzugefügt: `fastapi >= 0.115`, `uvicorn[standard] >= 0.32`,
 `jinja2 >= 3.1`, `python-multipart >= 0.0.12`. `PySide6` bleibt
 vorerst installiert, wird in Iter 6 entfernt.
 
-### Tests-Stand v2.0-Iter-2-Ende
+### Tests-Stand v2.0-Iter-3-Ende
 
-494 Tests grün (35 neu im `tests/unit/web/`-Tree), ruff + mypy strict
+515 Tests grün (56 im `tests/unit/web/`-Tree), ruff + mypy strict
 clean.
 
 ---
