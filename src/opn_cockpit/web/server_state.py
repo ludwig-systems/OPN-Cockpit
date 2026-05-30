@@ -36,7 +36,11 @@ ueberkreuzen.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import secrets
+import sys
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
@@ -80,6 +84,7 @@ class ServerState:
     _opened_vault: OpenedVault | None = None
     _vault_path: Path | None = None
     _master_password: str | None = None
+    _bootstrap_token: str | None = None
     _lock: RLock = field(default_factory=RLock)
 
     # ----- Konstruktion -----
@@ -91,12 +96,40 @@ class ServerState:
         Im Multi-User-Mode wird die User-DB sofort geoeffnet, der Vault
         bleibt aber noch geschlossen — er wird beim Server-Admin-Login
         durch :meth:`bootstrap_unlock_vault` entsperrt.
+
+        Im Multi-Mode wird zudem ein Bootstrap-Token generiert und auf
+        stderr geschrieben — der Setup-Wizard verlangt ihn, damit nicht
+        irgendein Netzwerk-Erstankoemmling sich als Admin anmelden kann
+        (Audit #5).
         """
         s = settings or AppSettings.load()
         state = cls(settings=s)
         if state.is_multi_user_mode:
             state._user_store = UserStore(path=default_users_db_path())
+            state._mint_bootstrap_token_if_needed()
         return state
+
+    def _mint_bootstrap_token_if_needed(self) -> None:
+        """Generiert einen Bootstrap-Token wenn Bootstrap noetig ist.
+
+        Token wird beim Start UND nach jedem Server-Restart in einem
+        nicht-``ready`` Status auf stderr ausgegeben (typisch
+        ``docker compose logs`` / ``journalctl -u opn-cockpit``).
+        """
+        if self.bootstrap_status == "ready":
+            return
+        token = secrets.token_urlsafe(24)
+        self._bootstrap_token = token
+        sys.stderr.write(
+            "\n"
+            + "=" * 60 + "\n"
+            + "  OPN-Cockpit BOOTSTRAP-TOKEN\n"
+            + "  Status: " + self.bootstrap_status + "\n"
+            + "  Token : " + token + "\n"
+            + "  Diesen Token im Setup-Wizard eingeben.\n"
+            + "=" * 60 + "\n",
+        )
+        sys.stderr.flush()
 
     # ----- Mode-Abfragen -----
 
@@ -119,6 +152,36 @@ class ServerState:
     @property
     def is_vault_unlocked(self) -> bool:
         return self._opened_vault is not None
+
+    @property
+    def bootstrap_token(self) -> str | None:
+        """Aktueller Bootstrap-Token (None wenn nicht im Bootstrap-Status)."""
+        return self._bootstrap_token
+
+    def verify_bootstrap_token(self, supplied: str) -> bool:
+        """Konstant-Zeit-Vergleich des Bootstrap-Tokens."""
+        if not self._bootstrap_token or not supplied:
+            return False
+        return secrets.compare_digest(self._bootstrap_token, supplied)
+
+    def invalidate_bootstrap_token(self) -> None:
+        """Verbraucht den Bootstrap-Token (nach erfolgreichem Bootstrap-Schritt)."""
+        self._bootstrap_token = None
+
+    @contextlib.contextmanager
+    def vault_mutation_lock(self) -> Iterator[None]:
+        """Serialisiert Read-Modify-Write auf dem zentralen Vault (Audit #9).
+
+        Im Single-Mode ein No-Op — jede Session hat ihren eigenen
+        Vault. Im Multi-Mode haelt der Lock von "lese opened.data.devices"
+        bis "persist_session_vault hat gespeichert" gegen andere Sessions
+        ab, die auf denselben OpenedVault zeigen.
+        """
+        if self.is_multi_user_mode:
+            with self._lock:
+                yield
+        else:
+            yield
 
     # ----- Lifecycle / Status -----
 

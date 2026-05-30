@@ -17,6 +17,7 @@ from starlette.types import Message, Receive, Scope, Send
 from opn_cockpit import __version__
 from opn_cockpit.web.api import register_api_routes
 from opn_cockpit.web.auth.manager import SessionManager
+from opn_cockpit.web.rate_limit import RateLimiter
 from opn_cockpit.web.retry_watcher import RetryWatcher
 from opn_cockpit.web.server_state import ServerState
 
@@ -68,6 +69,13 @@ def create_app() -> FastAPI:
     app.state.session_manager = session_manager
     app.state.retry_watcher = RetryWatcher(session_manager)
     app.state.server_state = ServerState.from_settings()
+    app.state.login_rate_limiter = RateLimiter()
+    app.state.bootstrap_rate_limiter = RateLimiter(
+        # Bootstrap ist seltener als Login — strenger limitieren.
+        max_attempts=5, window_s=60 * 60.0, cooldown_s=10 * 60.0,
+    )
+
+    _install_security_middleware(app)
 
     if STATIC_DIR.exists():
         app.mount(
@@ -92,3 +100,33 @@ def create_app() -> FastAPI:
     register_api_routes(app)
 
     return app
+
+
+def _install_security_middleware(app: FastAPI) -> None:
+    """Setzt Security-Header auf alle Responses (Audit #6).
+
+    * ``X-Content-Type-Options: nosniff`` — verhindert MIME-Sniffing
+    * ``X-Frame-Options: DENY`` — Clickjacking-Schutz
+    * ``Referrer-Policy: same-origin`` — kein Referrer-Leak nach extern
+    * ``Content-Security-Policy`` — XSS-Defense-in-Depth (eng gesetzt,
+      eigene Scripts + Inline-Styles erlaubt — alles andere blockiert)
+    """
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+
+    @app.middleware("http")
+    async def _add_security_headers(request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Content-Security-Policy", csp)
+        return response

@@ -180,11 +180,13 @@
   // -------------------- Setup-Wizard (Multi-User-First-Run) --------------------
 
   async function doSetupAdmin() {
+    const token = $('#su-token').value.trim();
     const username = $('#su-username').value.trim();
     const pw1 = $('#su-pw1').value;
     const pw2 = $('#su-pw2').value;
     const errorBox = $('#setup-admin-error');
     errorBox.hidden = true;
+    if (!token) return showSetupError(errorBox, 'Bootstrap-Token fehlt (siehe Server-Log).');
     if (!username) return showSetupError(errorBox, 'Benutzername fehlt.');
     if (pw1.length < 12) return showSetupError(errorBox, 'Passwort muss mindestens 12 Zeichen haben.');
     if (pw1 !== pw2) return showSetupError(errorBox, 'Die beiden Passwoerter stimmen nicht ueberein.');
@@ -194,7 +196,11 @@
     try {
       const response = await fetch('/api/bootstrap/admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'X-Bootstrap-Token': token,
+        },
         body: JSON.stringify({ username, password: pw1 }),
       });
       if (!response.ok) {
@@ -213,10 +219,12 @@
   }
 
   async function doSetupUnlockVault() {
+    const token = $('#su-vault-token').value.trim();
     const path = $('#su-vault-path').value.trim();
     const password = $('#su-vault-pw').value;
     const errorBox = $('#setup-vault-error');
     errorBox.hidden = true;
+    if (!token) return showSetupError(errorBox, 'Bootstrap-Token fehlt (siehe Server-Log).');
     if (!path) return showSetupError(errorBox, 'Pfad zur Tresor-Datei fehlt.');
     if (!password) return showSetupError(errorBox, 'Master-Passwort fehlt.');
     const btn = $('#setup-vault-btn');
@@ -225,7 +233,11 @@
     try {
       const response = await fetch('/api/bootstrap/vault', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'X-Bootstrap-Token': token,
+        },
         body: JSON.stringify({ vault_path: path, password }),
       });
       if (!response.ok) {

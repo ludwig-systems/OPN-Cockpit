@@ -31,9 +31,13 @@
         <div class="login-view" data-view="setup-admin" hidden>
           <p class="login-hint">
             <strong>Erste Einrichtung — Multi-User-Server.</strong><br />
-            Lege das erste Admin-Konto an. Mit diesem User loggst du dich
-            danach ein und kannst weitere Accounts vergeben.
+            Lege das erste Admin-Konto an. Den Bootstrap-Token findest du
+            in den Server-Logs (<code>docker compose logs</code> oder
+            <code>journalctl -u opn-cockpit</code>).
           </p>
+
+          <label class="form-label" for="su-token">Bootstrap-Token</label>
+          <input id="su-token" class="form-input" type="text" autocomplete="off" placeholder="aus dem Server-Log" />
 
           <label class="form-label" for="su-username">Admin-Benutzername</label>
           <input id="su-username" class="form-input" type="text" autocomplete="username" placeholder="admin" />
@@ -54,9 +58,12 @@
           <p class="login-hint">
             <strong>Zentralen Tresor entsperren.</strong><br />
             Der Server benoetigt einmalig Zugriff auf den Tresor mit den
-            OPNsense-Credentials. Nach dem Entsperren teilen sich alle
-            angemeldeten User diese Daten.
+            OPNsense-Credentials. Bootstrap-Token ist in den Server-Logs
+            (rotiert nach jedem Schritt).
           </p>
+
+          <label class="form-label" for="su-vault-token">Bootstrap-Token</label>
+          <input id="su-vault-token" class="form-input" type="text" autocomplete="off" placeholder="aus dem Server-Log" />
 
           <label class="form-label" for="su-vault-path">Pfad zur Tresor-Datei</label>
           <input id="su-vault-path" class="form-input" type="text" placeholder="/data/firewalls.opnvault" />

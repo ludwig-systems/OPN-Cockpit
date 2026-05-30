@@ -23,6 +23,7 @@ from opn_cockpit.web.acl import (
     require_device_access,
     require_write_role,
 )
+from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     ConnectionTestResponse,
     DeviceCreateRequest,
@@ -35,6 +36,7 @@ from opn_cockpit.web.api.schemas import (
     TagSummary,
 )
 from opn_cockpit.web.auth.dependencies import require_session
+from opn_cockpit.web.server_state import ServerState
 from opn_cockpit.web.vault_writes import persist_session_vault
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
@@ -79,35 +81,37 @@ def add_device(
     payload: DeviceCreateRequest,
     request: Request,
     session: Session = Depends(require_session),
+    server: ServerState = Depends(get_server_state),
 ) -> DeviceResponse:
     """Legt ein Geraet im Tresor an und persistiert."""
     require_write_role(session)
     vault_path = _require_vault_path(session)
-    if _name_exists(session, payload.name):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Ein Geraet mit dem Namen '{payload.name}' existiert bereits.",
+    # Audit #9: Read-Modify-Write unter Lock im Multi-Mode.
+    with server.vault_mutation_lock():
+        if _name_exists(session, payload.name):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Ein Geraet mit dem Namen '{payload.name}' existiert bereits.",
+            )
+        new_device = VaultDevice(
+            id=VaultDevice.new_id(),
+            name=payload.name,
+            host=payload.host,
+            port=payload.port,
+            tls_verify=payload.tls_verify,
+            tags=list(payload.tags),
+            api_key=payload.api_key,
+            api_secret=payload.api_secret,
+            descr=payload.descr,
         )
+        devices = session.opened.data.devices
+        devices.append(new_device)
 
-    new_device = VaultDevice(
-        id=VaultDevice.new_id(),
-        name=payload.name,
-        host=payload.host,
-        port=payload.port,
-        tls_verify=payload.tls_verify,
-        tags=list(payload.tags),
-        api_key=payload.api_key,
-        api_secret=payload.api_secret,
-        descr=payload.descr,
-    )
-    devices = session.opened.data.devices
-    devices.append(new_device)
+        def _rollback_add() -> None:
+            devices.pop()
 
-    def _rollback_add() -> None:
-        devices.pop()
-
-    persist_session_vault(request, session, vault_path, rollback=_rollback_add)
-    return _to_device_response(Device.from_vault_device(new_device))
+        persist_session_vault(request, session, vault_path, rollback=_rollback_add)
+        return _to_device_response(Device.from_vault_device(new_device))
 
 
 # ---------------------------------------------------------------------------
@@ -121,67 +125,69 @@ def update_device(
     payload: DeviceUpdateRequest,
     request: Request,
     session: Session = Depends(require_session),
+    server: ServerState = Depends(get_server_state),
 ) -> DeviceResponse:
     """Aktualisiert ausgewaehlte Felder eines Geraets und persistiert."""
     require_write_role(session)
     vault_path = _require_vault_path(session)
-    devices = session.opened.data.devices
-    index = next((i for i, d in enumerate(devices) if d.id == device_id), -1)
-    if index < 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+    with server.vault_mutation_lock():
+        devices = session.opened.data.devices
+        index = next((i for i, d in enumerate(devices) if d.id == device_id), -1)
+        if index < 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+            )
+
+        current = devices[index]
+        require_device_access(current, session)
+
+        # Namens-Eindeutigkeit pruefen, falls geaendert.
+        if payload.name is not None and payload.name != current.name:
+            new_name_lower = payload.name.strip().lower()
+            for i, d in enumerate(devices):
+                if i != index and d.name.strip().lower() == new_name_lower:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Ein anderes Geraet heisst bereits '{payload.name}'.",
+                    )
+
+        # Snapshot fuer Rollback.
+        snapshot = VaultDevice(
+            id=current.id,
+            name=current.name,
+            host=current.host,
+            port=current.port,
+            tls_verify=current.tls_verify,
+            tags=list(current.tags),
+            api_key=current.api_key,
+            api_secret=current.api_secret,
+            descr=current.descr,
         )
 
-    current = devices[index]
-    require_device_access(current, session)
+        # In-place mutate. api_key/api_secret nur wenn explizit gesetzt + nicht leer.
+        if payload.name is not None:
+            current.name = payload.name
+        if payload.host is not None:
+            current.host = payload.host
+        if payload.port is not None:
+            current.port = payload.port
+        if payload.tls_verify is not None:
+            current.tls_verify = payload.tls_verify
+        if payload.tags is not None:
+            current.tags = list(payload.tags)
+        if payload.descr is not None:
+            current.descr = payload.descr
+        if payload.api_key:
+            current.api_key = payload.api_key
+        if payload.api_secret:
+            current.api_secret = payload.api_secret
 
-    # Namens-Eindeutigkeit pruefen, falls geaendert.
-    if payload.name is not None and payload.name != current.name:
-        new_name_lower = payload.name.strip().lower()
-        for i, d in enumerate(devices):
-            if i != index and d.name.strip().lower() == new_name_lower:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Ein anderes Geraet heisst bereits '{payload.name}'.",
-                )
+        def _rollback_update() -> None:
+            devices[index] = snapshot
 
-    # Snapshot fuer Rollback.
-    snapshot = VaultDevice(
-        id=current.id,
-        name=current.name,
-        host=current.host,
-        port=current.port,
-        tls_verify=current.tls_verify,
-        tags=list(current.tags),
-        api_key=current.api_key,
-        api_secret=current.api_secret,
-        descr=current.descr,
-    )
-
-    # In-place mutate. api_key/api_secret nur wenn explizit gesetzt + nicht leer.
-    if payload.name is not None:
-        current.name = payload.name
-    if payload.host is not None:
-        current.host = payload.host
-    if payload.port is not None:
-        current.port = payload.port
-    if payload.tls_verify is not None:
-        current.tls_verify = payload.tls_verify
-    if payload.tags is not None:
-        current.tags = list(payload.tags)
-    if payload.descr is not None:
-        current.descr = payload.descr
-    if payload.api_key:
-        current.api_key = payload.api_key
-    if payload.api_secret:
-        current.api_secret = payload.api_secret
-
-    def _rollback_update() -> None:
-        devices[index] = snapshot
-
-    persist_session_vault(request, session, vault_path, rollback=_rollback_update)
-    return _to_device_response(Device.from_vault_device(current))
+        persist_session_vault(request, session, vault_path, rollback=_rollback_update)
+        return _to_device_response(Device.from_vault_device(current))
 
 
 # ---------------------------------------------------------------------------
@@ -194,24 +200,26 @@ def remove_device(
     device_id: str,
     request: Request,
     session: Session = Depends(require_session),
+    server: ServerState = Depends(get_server_state),
 ) -> None:
     """Entfernt ein Geraet aus dem Tresor."""
     require_write_role(session)
     vault_path = _require_vault_path(session)
-    devices = session.opened.data.devices
-    index = next((i for i, d in enumerate(devices) if d.id == device_id), -1)
-    if index < 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
-        )
-    require_device_access(devices[index], session)
-    backup = devices.pop(index)
+    with server.vault_mutation_lock():
+        devices = session.opened.data.devices
+        index = next((i for i, d in enumerate(devices) if d.id == device_id), -1)
+        if index < 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+            )
+        require_device_access(devices[index], session)
+        backup = devices.pop(index)
 
-    def _rollback_remove() -> None:
-        devices.insert(index, backup)
+        def _rollback_remove() -> None:
+            devices.insert(index, backup)
 
-    persist_session_vault(request, session, vault_path, rollback=_rollback_remove)
+        persist_session_vault(request, session, vault_path, rollback=_rollback_remove)
 
 
 # ---------------------------------------------------------------------------

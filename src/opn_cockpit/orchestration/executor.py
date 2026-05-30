@@ -352,6 +352,10 @@ class Executor:
     # ----- Audit-Eintrag pro Geräte-Ergebnis -----
 
     def _audit_device_result(self, plan: Plan, device: Device, result: Result) -> None:
+        # Audit #13: TLS-Verify-Status sichtbar machen, damit Audit-Reviewer
+        # sehen, gegen welche Geraete mit deaktivierter Zertifikats-Pruefung
+        # gerollt wurde.
+        tls_marker = "" if device.tls_verify else " [TLS-AUS]"
         self.audit.append(
             AuditEventKind.DEVICE_RESULT,
             action=plan.action,
@@ -361,8 +365,13 @@ class Executor:
             error_kind=result.error_kind,
             failed_phase=str(result.failed_phase) if result.failed_phase else None,
             duration_ms=result.duration_ms,
-            parameters=mask_dict({"device_host": device.host}),
-            summary=f"{device.name}: {result.status} — {result.short_message}",
+            parameters=mask_dict({
+                "device_host": device.host,
+                "tls_verify": device.tls_verify,
+            }),
+            summary=(
+                f"{device.name}{tls_marker}: {result.status} — {result.short_message}"
+            ),
         )
 
 

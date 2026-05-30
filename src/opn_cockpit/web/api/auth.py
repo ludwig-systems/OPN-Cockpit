@@ -30,9 +30,51 @@ from opn_cockpit.web.auth.dependencies import (
     require_session_with_token,
 )
 from opn_cockpit.web.auth.manager import SessionManager
+from opn_cockpit.web.rate_limit import RateLimiter
 from opn_cockpit.web.server_state import ServerState, ServerStateError
+from opn_cockpit.web.vault_path import VaultPathError, resolve_safe_vault_path
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _login_limiter(request: Request) -> RateLimiter:
+    limiter = getattr(request.app.state, "login_rate_limiter", None)
+    if not isinstance(limiter, RateLimiter):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Rate-Limiter not initialised",
+        )
+    return limiter
+
+
+def _client_key(request: Request) -> str:
+    """Liefert einen stabilen Client-Schluessel — Audit #4.
+
+    Reverse-Proxy-Setup nutzt X-Forwarded-For (linker erster Eintrag),
+    sonst die direkte Client-IP. Defensiv gegen Header-Injection: nur
+    ersten Komma-Separierten Wert nehmen, max 64 Zeichen.
+    """
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        first = fwd.split(",", 1)[0].strip()
+        if first:
+            return first[:64]
+    client = request.client
+    return client.host if client else "unknown"
+
+
+def _check_rate_limit(request: Request, limiter: RateLimiter) -> None:
+    """Wirft 429 wenn der Client gerade gesperrt ist."""
+    key = _client_key(request)
+    remaining = limiter.check(key)
+    if remaining is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Zu viele Versuche — bitte {int(remaining) + 1} s warten."
+            ),
+            headers={"Retry-After": str(int(remaining) + 1)},
+        )
 
 
 @router.post(
@@ -42,12 +84,24 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 )
 def unlock(
     payload: UnlockRequest,
+    request: Request,
     manager: SessionManager = Depends(get_session_manager),
 ) -> UnlockResponse:
     """Entsperrt einen Tresor und liefert ein Bearer-Token zurueck."""
-    path = Path(payload.vault_path)
+    limiter = _login_limiter(request)
+    _check_rate_limit(request, limiter)
+    client_key = _client_key(request)
+    try:
+        path = resolve_safe_vault_path(payload.vault_path)
+    except VaultPathError as exc:
+        limiter.register_failure(client_key)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     if not path.exists():
         _audit_login_failed(path, "vault_missing")
+        limiter.register_failure(client_key)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Tresor-Datei nicht gefunden: {path}",
@@ -56,12 +110,14 @@ def unlock(
         opened = open_vault(path, payload.password)
     except InvalidPasswordError as exc:
         _audit_login_failed(path, "invalid_password")
+        limiter.register_failure(client_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Master-Passwort falsch oder Tresor manipuliert.",
         ) from exc
     except (CorruptVaultError, VaultVersionError, VaultIOError) as exc:
         _audit_login_failed(path, "vault_corrupt")
+        limiter.register_failure(client_key)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
@@ -73,6 +129,7 @@ def unlock(
             detail=str(exc),
         ) from exc
 
+    limiter.register_success(client_key)
     token, session = manager.create(opened, path, payload.password)
     _audit_vault_opened(path)
     return UnlockResponse(
@@ -91,6 +148,7 @@ def unlock(
 )
 def login(
     payload: LoginRequest,
+    request: Request,
     manager: SessionManager = Depends(get_session_manager),
     server: ServerState = Depends(get_server_state),
 ) -> UnlockResponse:
@@ -113,6 +171,9 @@ def login(
                 f"{server.bootstrap_status}."
             ),
         )
+    limiter = _login_limiter(request)
+    _check_rate_limit(request, limiter)
+    client_key = _client_key(request)
     try:
         backend = server.auth_backend()
     except ServerStateError as exc:
@@ -126,10 +187,12 @@ def login(
     })
     if result is None:
         _audit_login_failed_user(payload.username)
+        limiter.register_failure(client_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Benutzername oder Passwort falsch.",
         )
+    limiter.register_success(client_key)
     token, session = manager.create_from(result)
     _audit_user_logged_in(payload.username)
     return UnlockResponse(

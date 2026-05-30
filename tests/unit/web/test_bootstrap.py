@@ -19,6 +19,17 @@ VAULT_PASSWORD = "korrektes-pferd-batterie-heftklammer"
 USER_PASSWORD = "user-passwort-mit-genug-zeichen"
 
 
+def _bootstrap_headers(client: TestClient) -> dict[str, str]:
+    """Holt den aktuellen Bootstrap-Token aus der Server-State als Header.
+
+    Tests muessen den Token kennen — im Production-Code laesst ihn der
+    Server beim Start in stderr (siehe Audit #5).
+    """
+    server: ServerState = client.app.state.server_state
+    token = server.bootstrap_token or ""
+    return {"X-Bootstrap-Token": token}
+
+
 def _make_vault(tmp_path: Path) -> Path:
     path = tmp_path / "shared.opnvault"
     devices = [
@@ -125,10 +136,11 @@ class TestBootstrapAdmin:
     ) -> None:
         path = _make_vault(tmp_path)
         client = multi_client_factory(vault_path=path)
-        response = client.post("/api/bootstrap/admin", json={
-            "username": "alice",
-            "password": USER_PASSWORD,
-        })
+        response = client.post(
+            "/api/bootstrap/admin",
+            headers=_bootstrap_headers(client),
+            json={"username": "alice", "password": USER_PASSWORD},
+        )
         assert response.status_code == 201
         assert response.json()["status"] == "needs-vault-unlock"
 
@@ -137,10 +149,11 @@ class TestBootstrapAdmin:
     ) -> None:
         path = _make_vault(tmp_path)
         client = multi_client_factory(vault_path=path)
-        response = client.post("/api/bootstrap/admin", json={
-            "username": "alice",
-            "password": "zu-kurz",  # < 12
-        })
+        response = client.post(
+            "/api/bootstrap/admin",
+            headers=_bootstrap_headers(client),
+            json={"username": "alice", "password": "zu-kurz"},
+        )
         # Pydantic validiert min_length=12 → 422.
         assert response.status_code == 422
 
@@ -151,10 +164,11 @@ class TestBootstrapAdmin:
         client = multi_client_factory(
             vault_path=path, admin_pre_created=True,
         )
-        response = client.post("/api/bootstrap/admin", json={
-            "username": "bob",
-            "password": USER_PASSWORD,
-        })
+        response = client.post(
+            "/api/bootstrap/admin",
+            headers=_bootstrap_headers(client),
+            json={"username": "bob", "password": USER_PASSWORD},
+        )
         assert response.status_code == 409
 
     def test_admin_in_single_mode_rejected_with_409(
@@ -180,10 +194,11 @@ class TestBootstrapVault:
         client = multi_client_factory(
             vault_path=path, admin_pre_created=True,
         )
-        response = client.post("/api/bootstrap/vault", json={
-            "vault_path": str(path),
-            "password": VAULT_PASSWORD,
-        })
+        response = client.post(
+            "/api/bootstrap/vault",
+            headers=_bootstrap_headers(client),
+            json={"vault_path": str(path), "password": VAULT_PASSWORD},
+        )
         assert response.status_code == 200
         assert response.json()["status"] == "ready"
 
@@ -194,10 +209,11 @@ class TestBootstrapVault:
         client = multi_client_factory(
             vault_path=path, admin_pre_created=True,
         )
-        response = client.post("/api/bootstrap/vault", json={
-            "vault_path": str(path),
-            "password": "falsch-aber-12+",
-        })
+        response = client.post(
+            "/api/bootstrap/vault",
+            headers=_bootstrap_headers(client),
+            json={"vault_path": str(path), "password": "falsch-aber-12+"},
+        )
         assert response.status_code == 401
 
     def test_missing_vault_returns_404(
@@ -207,10 +223,14 @@ class TestBootstrapVault:
         client = multi_client_factory(
             vault_path=path, admin_pre_created=True,
         )
-        response = client.post("/api/bootstrap/vault", json={
-            "vault_path": str(tmp_path / "nope.opnvault"),
-            "password": VAULT_PASSWORD,
-        })
+        response = client.post(
+            "/api/bootstrap/vault",
+            headers=_bootstrap_headers(client),
+            json={
+                "vault_path": str(tmp_path / "nope.opnvault"),
+                "password": VAULT_PASSWORD,
+            },
+        )
         assert response.status_code == 404
 
     def test_without_admin_returns_409(
@@ -218,10 +238,11 @@ class TestBootstrapVault:
     ) -> None:
         path = _make_vault(tmp_path)
         client = multi_client_factory(vault_path=path)
-        response = client.post("/api/bootstrap/vault", json={
-            "vault_path": str(path),
-            "password": VAULT_PASSWORD,
-        })
+        response = client.post(
+            "/api/bootstrap/vault",
+            headers=_bootstrap_headers(client),
+            json={"vault_path": str(path), "password": VAULT_PASSWORD},
+        )
         assert response.status_code == 409
 
 

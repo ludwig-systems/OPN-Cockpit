@@ -33,11 +33,13 @@ from opn_cockpit.inventory.model import Device
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.model import VaultDevice
 from opn_cockpit.web.acl import require_write_role
+from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     DeviceImportResponse,
     DeviceResponse,
 )
 from opn_cockpit.web.auth.dependencies import require_session
+from opn_cockpit.web.server_state import ServerState
 from opn_cockpit.web.vault_writes import persist_session_vault
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
@@ -55,6 +57,7 @@ async def import_devices(
     file: Annotated[UploadFile, File(description="CSV oder JSON mit Geraeten")],
     format: Annotated[str, Form(description="csv oder json")] = "csv",
     session: Session = Depends(require_session),
+    server: ServerState = Depends(get_server_state),
 ) -> DeviceImportResponse:
     """Laedt Geraete aus einer Datei und fuegt sie dem Tresor hinzu."""
     require_write_role(session)
@@ -73,16 +76,16 @@ async def import_devices(
         )
 
     parsed_devices = await _parse_upload_or_400(file, fmt)
-    to_add, skipped = _filter_new(session, parsed_devices)
-
-    if not to_add:
-        return DeviceImportResponse(
-            added=[],
-            skipped_existing=skipped,
-            parsed_count=len(parsed_devices),
-        )
-
-    _persist_or_500(request, session, vault_path, to_add)
+    # Audit #9: Filter + Save unter dem gleichen Lock im Multi-Mode.
+    with server.vault_mutation_lock():
+        to_add, skipped = _filter_new(session, parsed_devices)
+        if not to_add:
+            return DeviceImportResponse(
+                added=[],
+                skipped_existing=skipped,
+                parsed_count=len(parsed_devices),
+            )
+        _persist_or_500(request, session, vault_path, to_add)
     return DeviceImportResponse(
         added=[_to_device_response(d) for d in to_add],
         skipped_existing=skipped,

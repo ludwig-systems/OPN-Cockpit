@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from opn_cockpit.audit.backend import get_audit_backend
@@ -36,7 +36,12 @@ from opn_cockpit.vault.errors import (
     VaultIOError,
     VaultVersionError,
 )
+from opn_cockpit.web.rate_limit import RateLimiter
 from opn_cockpit.web.server_state import ServerState, ServerStateError
+from opn_cockpit.web.vault_path import (
+    VaultPathError,
+    resolve_safe_vault_path,
+)
 
 router = APIRouter(prefix="/api/bootstrap", tags=["bootstrap"])
 
@@ -84,6 +89,51 @@ def get_server_state(request: Request) -> ServerState:
     return state
 
 
+def _bootstrap_limiter(request: Request) -> RateLimiter:
+    limiter = getattr(request.app.state, "bootstrap_rate_limiter", None)
+    if not isinstance(limiter, RateLimiter):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bootstrap-Rate-Limiter not initialised",
+        )
+    return limiter
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        first = fwd.split(",", 1)[0].strip()
+        if first:
+            return first[:64]
+    client = request.client
+    return client.host if client else "unknown"
+
+
+def _check_bootstrap_token(
+    server: ServerState, supplied_token: str | None,
+) -> None:
+    """Wirft 403 wenn der gelieferte Token nicht passt (Audit #5).
+
+    Im Single-Mode haben wir hier nichts zu tun (Bootstrap-Endpunkte
+    lehnen vorher schon ab).
+    """
+    if not server.is_multi_user_mode:
+        return
+    if not supplied_token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Bootstrap-Token fehlt. Token steht im Server-Log "
+                "(docker compose logs / journalctl)."
+            ),
+        )
+    if not server.verify_bootstrap_token(supplied_token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bootstrap-Token ungueltig.",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Routen
 # ---------------------------------------------------------------------------
@@ -110,12 +160,14 @@ def bootstrap_status(
 )
 def bootstrap_admin(
     payload: BootstrapAdminRequest,
+    request: Request,
     server: ServerState = Depends(get_server_state),
+    x_bootstrap_token: str | None = Header(None, alias="X-Bootstrap-Token"),
 ) -> dict[str, str]:
     """Legt den ersten Admin an.
 
-    Schlaegt mit 409 fehl, wenn der Server nicht im ``needs-admin``-Status
-    ist (Single-Mode, bereits Admin angelegt, oder Vault schon entsperrt).
+    Erfordert ``X-Bootstrap-Token`` aus dem Server-Log (Audit #5).
+    Rate-Limit: 5 Versuche pro Stunde pro IP (Audit #4).
     """
     if server.bootstrap_status != "needs-admin":
         raise HTTPException(
@@ -125,6 +177,20 @@ def bootstrap_admin(
                 f"{server.bootstrap_status}."
             ),
         )
+    limiter = _bootstrap_limiter(request)
+    client_key = _client_ip(request)
+    remaining = limiter.check(client_key)
+    if remaining is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Zu viele Bootstrap-Versuche — {int(remaining) + 1} s warten.",
+            headers={"Retry-After": str(int(remaining) + 1)},
+        )
+    try:
+        _check_bootstrap_token(server, x_bootstrap_token)
+    except HTTPException:
+        limiter.register_failure(client_key)
+        raise
     try:
         server.bootstrap_create_admin(payload.username, payload.password)
     except UserStoreError as exc:
@@ -137,6 +203,11 @@ def bootstrap_admin(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    # Admin angelegt — alter Token wird verbraucht, neuer fuer Vault-Unlock
+    # generiert (rotiert; Server-Admin muss neu in die Logs schauen).
+    server.invalidate_bootstrap_token()
+    server._mint_bootstrap_token_if_needed()
+    limiter.register_success(client_key)
     _audit_admin_created(payload.username)
     return {"status": server.bootstrap_status}
 
@@ -147,13 +218,14 @@ def bootstrap_admin(
 )
 def bootstrap_vault(
     payload: BootstrapVaultRequest,
+    request: Request,
     server: ServerState = Depends(get_server_state),
+    x_bootstrap_token: str | None = Header(None, alias="X-Bootstrap-Token"),
 ) -> dict[str, str]:
     """Entsperrt den zentralen Multi-User-Vault.
 
-    Schlaegt mit 409 fehl, wenn der Server nicht im ``needs-vault-unlock``-
-    Status ist. Bei falschem Passwort: 401. Bei kaputter/fehlender Datei:
-    503/404.
+    Erfordert ``X-Bootstrap-Token`` aus dem Server-Log (Audit #5).
+    Rate-Limit: 5 Versuche pro Stunde pro IP (Audit #4).
     """
     if server.bootstrap_status != "needs-vault-unlock":
         raise HTTPException(
@@ -163,7 +235,27 @@ def bootstrap_vault(
                 f"{server.bootstrap_status}."
             ),
         )
-    path = Path(payload.vault_path)
+    limiter = _bootstrap_limiter(request)
+    client_key = _client_ip(request)
+    remaining = limiter.check(client_key)
+    if remaining is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Zu viele Bootstrap-Versuche — {int(remaining) + 1} s warten.",
+            headers={"Retry-After": str(int(remaining) + 1)},
+        )
+    try:
+        _check_bootstrap_token(server, x_bootstrap_token)
+    except HTTPException:
+        limiter.register_failure(client_key)
+        raise
+    try:
+        path = resolve_safe_vault_path(payload.vault_path)
+    except VaultPathError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     if not path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -172,6 +264,7 @@ def bootstrap_vault(
     try:
         server.bootstrap_unlock_vault(path, payload.password)
     except InvalidPasswordError as exc:
+        limiter.register_failure(client_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Master-Passwort falsch oder Tresor manipuliert.",
@@ -191,6 +284,8 @@ def bootstrap_vault(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    server.invalidate_bootstrap_token()
+    limiter.register_success(client_key)
     _audit_vault_bootstrap(path)
     return {"status": server.bootstrap_status}
 
