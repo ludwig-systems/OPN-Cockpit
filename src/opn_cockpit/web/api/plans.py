@@ -10,10 +10,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from opn_cockpit.audit.backend import get_audit_backend
+from opn_cockpit.core.errors import ValidationError
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 from opn_cockpit.core.objects.aliases import AliasSpec
 from opn_cockpit.core.objects.routes import RouteSpec
 from opn_cockpit.core.result import RolloutReport, Status
+from opn_cockpit.core.validation import (
+    parse_cidr,
+    validate_alias_content,
+    validate_alias_name,
+    validate_alias_type,
+    validate_gateway_name,
+)
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.orchestration.backend import PlanStoreBackend, get_plan_store_backend
 from opn_cockpit.orchestration.executor import Executor
@@ -63,6 +71,16 @@ def plan_route(
     require_device_ids_accessible(
         payload.target_device_ids, session.opened.data.devices, session,
     )
+    # Plausibilitaetspruefung vorab — User soll Fehler im Modal sehen,
+    # nicht erst beim Apply gegen die OPNsense.
+    try:
+        parse_cidr(payload.network)
+        validate_gateway_name(payload.gateway)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     devices = _devices_or_404(session, payload.target_device_ids)
     spec = RouteSpec(
         network=payload.network,
@@ -99,19 +117,24 @@ def plan_alias(
     require_device_ids_accessible(
         payload.target_device_ids, session.opened.data.devices, session,
     )
+    # Plausibilitaetspruefung: Name + Typ + typabhaengige Content-Validierung.
+    try:
+        validate_alias_name(payload.name)
+        validate_alias_type(payload.type)
+        cleaned_content = validate_alias_content(payload.type, payload.content)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     devices = _devices_or_404(session, payload.target_device_ids)
     spec = AliasSpec(
         name=payload.name,
         type=payload.type,
-        content=tuple(c.strip() for c in payload.content if c.strip()),
+        content=tuple(cleaned_content),
         descr=payload.descr,
         merge_mode=payload.merge_mode,  # type: ignore[arg-type]
     )
-    if not spec.content:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Mindestens ein Alias-Eintrag erforderlich.",
-        )
     action_name = "append_alias" if payload.merge_mode == "append" else "add_alias"
     plan = _generate_and_save_plan(
         session=session,

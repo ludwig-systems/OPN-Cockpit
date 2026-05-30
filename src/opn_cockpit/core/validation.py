@@ -142,3 +142,179 @@ def validate_gateway_name(name: str) -> str:
             context=make_context(error_kind="gateway_name_pattern"),
         )
     return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Host (IPv4/IPv6 oder DNS-Hostname)
+# ---------------------------------------------------------------------------
+
+# RFC-1035-konformes Hostname-Label: ein bis 63 Zeichen, Buchstaben/Ziffern/
+# Bindestrich, beginnt und endet nicht mit Bindestrich. FQDN: Labels durch
+# Punkte getrennt, max. 253 Zeichen gesamt.
+_HOSTNAME_LABEL = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
+HOSTNAME_MAX_LEN = 253
+PORT_MIN = 1
+PORT_MAX = 65535
+
+
+def validate_host(value: str) -> str:
+    """Validiert einen Host (IPv4, IPv6 oder DNS-Hostname / FQDN).
+
+    Liefert den getrimmten Wert. Wirft ``ValidationError`` bei
+    ungueltigen Eingaben. Akzeptiert:
+
+    * IPv4: ``10.0.0.1``
+    * IPv6: ``2001:db8::1`` (auch in eckigen Klammern)
+    * Hostname: ``opn-1.lab``, ``hq-berlin``
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError(
+            "Hostname / IP darf nicht leer sein.",
+            context=make_context(error_kind="host_empty"),
+        )
+    cleaned = value.strip()
+    # IPv6 oft in eckigen Klammern in URLs — wir akzeptieren das
+    cleaned_inner = (
+        cleaned[1:-1]
+        if cleaned.startswith("[") and cleaned.endswith("]")
+        else cleaned
+    )
+    # IP-Versuch zuerst
+    try:
+        ipaddress.ip_address(cleaned_inner)
+        return cleaned
+    except ValueError:
+        pass
+    # Dann Hostname
+    if len(cleaned) > HOSTNAME_MAX_LEN:
+        raise ValidationError(
+            f"Hostname '{cleaned}' ueberschreitet {HOSTNAME_MAX_LEN} Zeichen.",
+            context=make_context(error_kind="host_too_long"),
+        )
+    labels = cleaned.rstrip(".").split(".")
+    for label in labels:
+        if not _HOSTNAME_LABEL.fullmatch(label):
+            raise ValidationError(
+                f"'{cleaned}' ist weder eine gueltige IP noch ein gueltiger Hostname.",
+                context=make_context(error_kind="host_pattern"),
+            )
+    return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Port-Range (fuer Alias-Content vom Typ "port")
+# ---------------------------------------------------------------------------
+
+_PORT_RANGE_RE = re.compile(r"^(\d{1,5})(?:[-:](\d{1,5}))?$")
+
+
+def validate_port_value(value: str) -> str:
+    """Akzeptiert eine Port-Zahl (1-65535) oder eine Range (``80-90``, ``1024:2048``)."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError(
+            "Port-Wert darf nicht leer sein.",
+            context=make_context(error_kind="port_empty"),
+        )
+    cleaned = value.strip()
+    m = _PORT_RANGE_RE.fullmatch(cleaned)
+    if m is None:
+        raise ValidationError(
+            f"Port-Wert '{cleaned}' nicht erkannt (erwartet: 1-65535 oder Range).",
+            context=make_context(error_kind="port_pattern"),
+        )
+    start = int(m.group(1))
+    end = int(m.group(2)) if m.group(2) else start
+    if not (PORT_MIN <= start <= PORT_MAX and PORT_MIN <= end <= PORT_MAX):
+        raise ValidationError(
+            f"Port '{cleaned}' ausserhalb des Bereichs {PORT_MIN}-{PORT_MAX}.",
+            context=make_context(error_kind="port_out_of_range"),
+        )
+    if end < start:
+        raise ValidationError(
+            f"Port-Range '{cleaned}': End-Port < Start-Port.",
+            context=make_context(error_kind="port_range_reversed"),
+        )
+    return cleaned
+
+
+# ---------------------------------------------------------------------------
+# URL (fuer Alias-Content vom Typ "url" / "urltable")
+# ---------------------------------------------------------------------------
+
+_URL_RE = re.compile(r"^https?://[^\s]+$", re.IGNORECASE)
+
+
+def validate_url(value: str) -> str:
+    """Minimaler URL-Check: http/https-Schema, kein Whitespace."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError(
+            "URL darf nicht leer sein.",
+            context=make_context(error_kind="url_empty"),
+        )
+    cleaned = value.strip()
+    if not _URL_RE.fullmatch(cleaned):
+        raise ValidationError(
+            f"'{cleaned}' ist keine gueltige http/https-URL.",
+            context=make_context(error_kind="url_pattern"),
+        )
+    return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Alias-Content (typabhaengige Validierung der Listen-Eintraege)
+# ---------------------------------------------------------------------------
+
+
+def validate_alias_content(alias_type: str, content: list[str] | tuple[str, ...]) -> list[str]:
+    """Validiert die Inhalte eines Alias gegen den deklarierten Typ.
+
+    * ``host``: IPv4/IPv6 oder Hostname
+    * ``network``: CIDR
+    * ``port``: Port oder Port-Range
+    * ``url`` / ``urltable``: http/https-URL
+    * andere Typen (mac, asn, geoip, ...) werden heute nicht
+      strikt validiert — nur Leer-Check, weil die genaue Form je nach
+      OPNsense-Version variiert. Spaeter koennte man hier ausbauen.
+
+    Liefert die getrimmten Werte. Wirft ``ValidationError`` mit klarer
+    Meldung bei der ersten verletzenden Zeile (inkl. Index).
+    """
+    if not content:
+        raise ValidationError(
+            "Mindestens ein Alias-Eintrag erforderlich.",
+            context=make_context(error_kind="alias_content_empty"),
+        )
+    t = (alias_type or "").strip().lower()
+    cleaned: list[str] = []
+    for i, raw in enumerate(content):
+        v = (raw or "").strip()
+        if not v:
+            continue
+        try:
+            if t == "host":
+                cleaned.append(validate_host(v))
+            elif t == "network":
+                parse_cidr(v)
+                cleaned.append(v)
+            elif t == "port":
+                cleaned.append(validate_port_value(v))
+            elif t in ("url", "urltable"):
+                cleaned.append(validate_url(v))
+            else:
+                # Unbekannter Typ → minimal akzeptieren
+                cleaned.append(v)
+        except ValidationError as exc:
+            # Fehler mit Position ergaenzen
+            raise ValidationError(
+                f"Alias-Eintrag #{i + 1}: {exc}",
+                context=make_context(
+                    error_kind="alias_content_invalid",
+                    summary=str(exc),
+                ),
+            ) from exc
+    if not cleaned:
+        raise ValidationError(
+            "Alle Alias-Eintraege sind leer.",
+            context=make_context(error_kind="alias_content_all_empty"),
+        )
+    return cleaned

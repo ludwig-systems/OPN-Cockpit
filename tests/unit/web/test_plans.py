@@ -304,7 +304,7 @@ class TestPlanAlias:
         kwargs = create.call_args.kwargs
         assert kwargs["action"] == "append_alias"
 
-    def test_empty_content_returns_400(
+    def test_empty_content_returns_422(
         self,
         client: TestClient,
         vault: Path,
@@ -320,7 +320,10 @@ class TestPlanAlias:
             },
             headers=_bearer(token),
         )
-        assert response.status_code == 400
+        # Seit v5-Pass 2: validate_alias_content greift vorab und
+        # liefert 422 statt 400 (semantisch konsistenter — Plan ist
+        # ungueltig wegen Eingabe-Form, nicht wegen Plan-State).
+        assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------

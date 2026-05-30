@@ -13,8 +13,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from opn_cockpit.core.errors import ValidationError
 from opn_cockpit.core.health import check_device, tcp_probe
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
+from opn_cockpit.core.validation import validate_host
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.model import VaultDevice
@@ -86,6 +88,14 @@ def add_device(
     """Legt ein Geraet im Tresor an und persistiert."""
     require_write_role(session)
     vault_path = _require_vault_path(session)
+    # Plausibilitaetspruefung Host (IP oder Hostname) vor dem Anlegen.
+    try:
+        validate_host(payload.host)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     # Audit #9: Read-Modify-Write unter Lock im Multi-Mode.
     with server.vault_mutation_lock():
         if _name_exists(session, payload.name):
@@ -130,6 +140,15 @@ def update_device(
     """Aktualisiert ausgewaehlte Felder eines Geraets und persistiert."""
     require_write_role(session)
     vault_path = _require_vault_path(session)
+    # Host-Plausibilitaet pruefen, falls Host geaendert werden soll.
+    if payload.host is not None:
+        try:
+            validate_host(payload.host)
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
     with server.vault_mutation_lock():
         devices = session.opened.data.devices
         index = next((i for i, d in enumerate(devices) if d.id == device_id), -1)
@@ -165,23 +184,8 @@ def update_device(
             descr=current.descr,
         )
 
-        # In-place mutate. api_key/api_secret nur wenn explizit gesetzt + nicht leer.
-        if payload.name is not None:
-            current.name = payload.name
-        if payload.host is not None:
-            current.host = payload.host
-        if payload.port is not None:
-            current.port = payload.port
-        if payload.tls_verify is not None:
-            current.tls_verify = payload.tls_verify
-        if payload.tags is not None:
-            current.tags = list(payload.tags)
-        if payload.descr is not None:
-            current.descr = payload.descr
-        if payload.api_key:
-            current.api_key = payload.api_key
-        if payload.api_secret:
-            current.api_secret = payload.api_secret
+        # In-place mutate via Helper, um Branch-Count niedrig zu halten.
+        _apply_device_update(current, payload)
 
         def _rollback_update() -> None:
             devices[index] = snapshot
@@ -308,6 +312,30 @@ def test_connection(
 # ---------------------------------------------------------------------------
 # Helfer
 # ---------------------------------------------------------------------------
+
+
+def _apply_device_update(current: VaultDevice, payload: DeviceUpdateRequest) -> None:
+    """Updated ``current`` in-place mit den gesetzten Feldern aus ``payload``.
+
+    api_key/api_secret werden nur gesetzt wenn explizit nicht-leer, damit
+    User Host/Port aendern koennen, ohne die Credentials neu zu tippen.
+    """
+    if payload.name is not None:
+        current.name = payload.name
+    if payload.host is not None:
+        current.host = payload.host
+    if payload.port is not None:
+        current.port = payload.port
+    if payload.tls_verify is not None:
+        current.tls_verify = payload.tls_verify
+    if payload.tags is not None:
+        current.tags = list(payload.tags)
+    if payload.descr is not None:
+        current.descr = payload.descr
+    if payload.api_key:
+        current.api_key = payload.api_key
+    if payload.api_secret:
+        current.api_secret = payload.api_secret
 
 
 def _require_vault_path(session: Session) -> Path:
