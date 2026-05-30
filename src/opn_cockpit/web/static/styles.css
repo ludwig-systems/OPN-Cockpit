@@ -1836,7 +1836,8 @@ a.card-open-link { text-decoration: none; }
 
 .users-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 12px;
 }
 

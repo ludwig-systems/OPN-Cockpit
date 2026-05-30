@@ -2250,6 +2250,67 @@
     box.hidden = false;
   }
 
+  // -------------------- Vault-Switch (admin-only, Multi-Mode) --------------------
+
+  function openVaultSwitchModal() {
+    $('#vsw-path').value = '';
+    $('#vsw-pw').value = '';
+    $('#vsw-create').checked = false;
+    $('#vault-switch-error').hidden = true;
+    $('#vault-switch-modal').hidden = false;
+    setTimeout(() => $('#vsw-path').focus(), 0);
+  }
+
+  function closeVaultSwitchModal() {
+    $('#vault-switch-modal').hidden = true;
+  }
+
+  async function submitVaultSwitch() {
+    const path = $('#vsw-path').value.trim();
+    const pw = $('#vsw-pw').value;
+    const createIfMissing = $('#vsw-create').checked;
+    const errorBox = $('#vault-switch-error');
+    errorBox.hidden = true;
+    if (!path) return showVaultSwitchError('Pfad zum neuen Tresor fehlt.');
+    if (pw.length < 12) return showVaultSwitchError('Passwort muss mindestens 12 Zeichen haben.');
+    if (!confirm(`Tresor wirklich wechseln?\n\nAlle anderen Sessions werden invalidiert.`)) return;
+    const btn = $('#vault-switch-submit');
+    btn.disabled = true;
+    btn.textContent = 'Wechsle…';
+    try {
+      const response = await apiPost('/api/vaults/switch', {
+        vault_path: path,
+        password: pw,
+        create_if_missing: createIfMissing,
+      });
+      if (response.status === 401) {
+        return showVaultSwitchError('Master-Passwort falsch.');
+      }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        return showVaultSwitchError(body.detail || `Fehler ${response.status}`);
+      }
+      const result = await response.json();
+      closeVaultSwitchModal();
+      closeUsersModal();
+      const desc = result.created === 'true' ? 'neu angelegt' : 'entsperrt';
+      showToast(`Tresor gewechselt (${desc}). ${result.revoked_sessions} Session(s) invalidiert.`);
+      await loadInventory();
+      pollHeartbeat();
+    } catch (err) {
+      showVaultSwitchError(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Wechseln';
+    }
+  }
+
+  function showVaultSwitchError(msg) {
+    const box = $('#vault-switch-error');
+    box.textContent = msg;
+    box.hidden = false;
+  }
+
   // -------------------- Self-Service Passwort --------------------
 
   function openSelfPasswordModal() {
@@ -2671,6 +2732,21 @@
       $('#users-add-submit').addEventListener('click', submitAddUser);
       $('#users-modal').addEventListener('click', (e) => {
         if (e.target.id === 'users-modal') closeUsersModal();
+      });
+      const switchBtn = $('#users-switch-vault-btn');
+      if (switchBtn) {
+        switchBtn.addEventListener('click', openVaultSwitchModal);
+      }
+    }
+
+    // Vault-Switch-Modal
+    const vswClose = $('#vault-switch-close');
+    if (vswClose) {
+      vswClose.addEventListener('click', closeVaultSwitchModal);
+      $('#vault-switch-cancel').addEventListener('click', closeVaultSwitchModal);
+      $('#vault-switch-submit').addEventListener('click', submitVaultSwitch);
+      $('#vault-switch-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'vault-switch-modal') closeVaultSwitchModal();
       });
     }
 

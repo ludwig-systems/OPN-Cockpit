@@ -82,11 +82,8 @@ def _count_active_admins(store: UserStore) -> int:
 
 
 def _audit(event: AuditEventKind, actor: str, summary: str) -> None:
-    backend = get_audit_backend()
-    # AuditLog setzt actor aus os.getpass; wir wollen den eingeloggten User.
-    # Wir reichen den Username via summary durch — saubere actor-Anpassung
-    # kommt mit dem Audit-Refactor (Roadmap-Item zur Multi-User-Sauberkeit).
-    backend.append(event, summary=f"[{actor}] {summary}")
+    """Schreibt einen Audit-Eintrag mit dem eingeloggten Username als actor."""
+    get_audit_backend().append(event, actor=actor, summary=summary)
 
 
 # ---------------------------------------------------------------------------

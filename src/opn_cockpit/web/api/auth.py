@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from opn_cockpit.audit.backend import AuditBackend, get_audit_backend
+from opn_cockpit.audit.backend import AuditBackend, audit_actor, get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.errors import (
@@ -220,11 +220,12 @@ def lock(
     """
     session, token = pair
     vault_path = session.vault_path
+    actor = audit_actor(session)
     manager.revoke(token)
     watcher = getattr(request.app.state, "retry_watcher", None)
     if watcher is not None:
         watcher.cancel_for_session(token)
-    _audit_vault_locked(vault_path)
+    _audit_vault_locked(vault_path, actor=actor)
 
 
 @router.get(
@@ -264,9 +265,10 @@ def _audit_vault_opened(path: Path) -> None:
     )
 
 
-def _audit_vault_locked(path: Path | None) -> None:
+def _audit_vault_locked(path: Path | None, *, actor: str | None = None) -> None:
     _audit_log().append(
         AuditEventKind.VAULT_LOCKED,
+        actor=actor,
         vault_path=str(path) if path else None,
         summary="Tresor gesperrt (Web).",
     )
@@ -283,6 +285,7 @@ def _audit_login_failed(path: Path, reason: str) -> None:
 def _audit_login_failed_user(username: str) -> None:
     _audit_log().append(
         AuditEventKind.LOGIN_FAILED,
+        actor=username,
         summary=f"Multi-User-Login fehlgeschlagen fuer '{username}'.",
     )
 
@@ -290,5 +293,6 @@ def _audit_login_failed_user(username: str) -> None:
 def _audit_user_logged_in(username: str) -> None:
     _audit_log().append(
         AuditEventKind.VAULT_OPENED,
+        actor=username,
         summary=f"Multi-User-Login erfolgreich: '{username}'.",
     )

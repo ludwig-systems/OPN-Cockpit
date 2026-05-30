@@ -101,8 +101,29 @@ def reset_db_cache() -> None:
         _DbCache.instance = None
 
 
+def audit_actor(session: object | None) -> str | None:
+    """Liefert den Audit-Actor fuer einen Web-Request.
+
+    Im Multi-User-Mode steht der eingeloggte Username im Log statt des
+    OS-Users — sonst sieht der Audit-Reviewer nur ``LocalService`` oder
+    ``opncockpit``. Im Single-Mode geben wir ``None`` zurueck, dann
+    behaelt der Backend seinen Default-Actor.
+
+    Argument ist locker getypt, damit dieses Modul keine Web-Imports
+    braucht (kein Circular-Import).
+    """
+    if session is None:
+        return None
+    user = getattr(session, "user", None)
+    if user is None:
+        return None
+    username = getattr(user, "username", None)
+    return str(username) if username else None
+
+
 __all__ = [
     "AuditBackend",
+    "audit_actor",
     "get_audit_backend",
     "reset_db_cache",
 ]

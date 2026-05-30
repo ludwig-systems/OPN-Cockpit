@@ -214,7 +214,12 @@ class AuditLog:
         ``parameters`` wird vor dem Persistieren rekursiv maskiert. Das
         ``summary``-Feld wird defensiv auf ``SUMMARY_MAX_LEN`` Zeichen
         gekürzt.
+
+        ``actor`` kann pro-Aufruf ueberschrieben werden (Multi-User-Mode:
+        eingeloggter Username statt OS-User). Ohne Override gilt der
+        Default-Actor aus dem Konstruktor.
         """
+        actor_override = fields_in.pop("actor", None)
         unknown = set(fields_in.keys()) - _APPEND_WHITELIST
         if unknown:
             raise AuditFieldError(
@@ -233,7 +238,7 @@ class AuditLog:
 
         record = AuditRecord(
             timestamp_utc=self.clock(),
-            actor=self.actor,
+            actor=str(actor_override) if actor_override else self.actor,
             event=event,
             summary=summary,
             parameters=parameters,

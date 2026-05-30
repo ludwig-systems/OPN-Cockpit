@@ -598,6 +598,7 @@
 
         <div class="modal-body">
           <div class="users-toolbar">
+            <button class="btn-link" id="users-switch-vault-btn">Tresor wechseln…</button>
             <button class="btn-primary btn-primary-inline" id="users-add-btn">Neuer User</button>
           </div>
 
@@ -682,6 +683,48 @@
         <div class="modal-footer">
           <button class="btn-link" id="pwself-cancel">Abbrechen</button>
           <button class="btn-primary btn-primary-inline" id="pwself-submit">Speichern</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Vault-Switch (admin-only, Multi-Mode) ================ -->
+    <div class="modal-backdrop" id="vault-switch-modal" hidden>
+      <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="vault-switch-title">
+        <div class="modal-header">
+          <h2 id="vault-switch-title">Aktiven Tresor wechseln</h2>
+          <button class="icon-btn modal-close" id="vault-switch-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <p class="form-hint">
+            <strong>Achtung:</strong> Alle anderen aktiven Sessions werden
+            invalidiert. Andere User muessen sich neu einloggen. Du selbst
+            bleibst eingeloggt, deine Session zeigt danach auf den neuen
+            Tresor.
+          </p>
+
+          <label class="form-label" for="vsw-path">Pfad zum neuen Tresor</label>
+          <input id="vsw-path" class="form-input" type="text" placeholder="/data/anderer.opnvault" />
+
+          <label class="form-label" for="vsw-pw">Master-Passwort (min. 12 Zeichen)</label>
+          <input id="vsw-pw" class="form-input" type="password" autocomplete="off" />
+
+          <label class="form-checkbox">
+            <input id="vsw-create" type="checkbox" />
+            <span>Tresor neu anlegen, falls die Datei nicht existiert</span>
+          </label>
+
+          <div class="form-error" id="vault-switch-error" hidden></div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="vault-switch-cancel">Abbrechen</button>
+          <button class="btn-danger" id="vault-switch-submit">Wechseln</button>
         </div>
       </div>
     </div>

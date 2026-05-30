@@ -7,27 +7,43 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from opn_cockpit.audit.backend import get_audit_backend
+from opn_cockpit.audit.backend import audit_actor, get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.config import AppSettings
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.discovery import default_new_vault_path, discover_vaults
-from opn_cockpit.vault.errors import VaultError, VaultIOError, WeakPasswordError
+from opn_cockpit.vault.errors import (
+    CorruptVaultError,
+    InvalidPasswordError,
+    VaultError,
+    VaultIOError,
+    VaultVersionError,
+    WeakPasswordError,
+)
 from opn_cockpit.vault.model import VaultData
 from opn_cockpit.vault.store import create_vault, open_vault
+from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     CreateVaultRequest,
     CreateVaultResponse,
     TemplateExportRequest,
     VaultEntry,
     VaultListResponse,
+    VaultSwitchRequest,
 )
-from opn_cockpit.web.auth.dependencies import get_session_manager, require_session
+from opn_cockpit.web.auth.dependencies import (
+    get_session_manager,
+    require_admin,
+    require_session,
+    require_session_with_token,
+)
 from opn_cockpit.web.auth.manager import SessionManager
+from opn_cockpit.web.server_state import ServerState, ServerStateError
+from opn_cockpit.web.vault_path import VaultPathError, resolve_safe_vault_path
 
 router = APIRouter(prefix="/api/vaults", tags=["vaults"])
 
@@ -145,6 +161,7 @@ def export_backup(
     session.touch()
     get_audit_backend().append(
         AuditEventKind.TEMPLATE_EXPORTED,
+        actor=audit_actor(session),
         vault_path=str(path),
         summary=f"Backup-Download des Tresors: {path.name}",
     )
@@ -214,6 +231,7 @@ def export_template(
 
     get_audit_backend().append(
         AuditEventKind.TEMPLATE_EXPORTED,
+        actor=audit_actor(session),
         vault_path=str(session.vault_path),
         summary=(
             f"Template-Export erstellt ({len(blanked)} Geraete, "
@@ -236,3 +254,115 @@ def export_template(
 def _cleanup(path: Path) -> None:
     with contextlib.suppress(OSError):
         path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Admin: Vault wechseln (Multi-User-Mode)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/switch", status_code=status.HTTP_200_OK)
+def switch_vault(
+    payload: VaultSwitchRequest,
+    request: Request,
+    server: ServerState = Depends(get_server_state),
+    admin: Session = Depends(require_admin),
+    pair: tuple[Session, str] = Depends(require_session_with_token),
+    manager: SessionManager = Depends(get_session_manager),
+) -> dict[str, str]:
+    """Admin wechselt den aktiven Multi-User-Vault ohne Server-Restart.
+
+    Aktive Sessions anderer User werden invalidiert (Token gesperrt) —
+    die Browser-Tabs landen beim naechsten Request auf dem Login-Screen
+    zurueck. Der Admin behaelt seinen Token; seine Session zeigt nach
+    dem Switch auf den neuen Vault.
+
+    Im Single-Mode nicht verfuegbar (Single-User-Sessions haben jeweils
+    ihren eigenen Vault — Logout + Vault-Picker reicht).
+    """
+    if not server.is_multi_user_mode:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Vault-Switch ist nur im Multi-User-Mode verfuegbar. "
+                "Im Single-Mode: Logout und anderen Tresor waehlen."
+            ),
+        )
+    _admin_session, admin_token = pair
+    try:
+        new_path = resolve_safe_vault_path(payload.vault_path)
+    except VaultPathError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    # Self-Check: gleicher Pfad wie aktiver -> nix tun
+    if server.vault_path and new_path.resolve() == server.vault_path.resolve():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Neuer Pfad ist identisch mit dem aktiven Tresor.",
+        )
+    if not new_path.exists() and not payload.create_if_missing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Tresor-Datei nicht gefunden: {new_path}. "
+                "Setze create_if_missing=true, um einen neuen anzulegen."
+            ),
+        )
+    try:
+        created = server.switch_vault(
+            new_path, payload.password,
+            create_if_missing=payload.create_if_missing,
+        )
+    except InvalidPasswordError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Master-Passwort des neuen Tresors falsch.",
+        ) from exc
+    except (CorruptVaultError, VaultVersionError, VaultIOError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except VaultError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except ServerStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    # Andere Sessions invalidieren — die Admin-Session behalten + auf neuen Vault zeigen.
+    revoked = manager.revoke_all_except(admin_token)
+    # Admin-Session selbst aktualisieren (Vault-Pfad + opened-Referenz).
+    new_opened = server._opened_vault
+    if new_opened is not None:
+        admin.replace_opened(new_opened)
+        # Session-internen vault_path-Slot ueberschreiben — replace_opened
+        # taucht den vault_path nicht an, also rufen wir unlock() neu auf
+        # mit dem neuen Pfad. Sauberer als private Slots zu pokern.
+        admin.unlock(new_opened, new_path, payload.password, user=admin.user)
+    # Retry-Watcher fuer revoked Sessions wurden in revoke nicht abgebrochen —
+    # der einfacheren Implementierung halber sammeln wir das nicht. Watcher
+    # bemerkt fehlende Session beim naechsten Tick und beendet sich.
+
+    get_audit_backend().append(
+        AuditEventKind.VAULT_OPENED,
+        actor=audit_actor(admin),
+        vault_path=str(new_path),
+        summary=(
+            f"Vault-Switch durchgefuehrt: {new_path} "
+            f"({'neu angelegt' if created else 'entsperrt'}, "
+            f"{revoked} Session(s) invalidiert)."
+        ),
+    )
+
+    return {
+        "status": server.bootstrap_status,
+        "created": "true" if created else "false",
+        "revoked_sessions": str(revoked),
+    }

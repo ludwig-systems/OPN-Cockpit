@@ -314,6 +314,7 @@ def bootstrap_vault(
 def _audit_admin_created(username: str) -> None:
     get_audit_backend().append(
         AuditEventKind.USER_CREATED,
+        actor=username,
         summary=f"Bootstrap: Admin-User '{username}' angelegt.",
     )
 

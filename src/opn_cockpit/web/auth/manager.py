@@ -122,6 +122,25 @@ class SessionManager:
         with self._lock:
             return len(self._sessions)
 
+    def revoke_all_except(self, keep_token: str) -> int:
+        """Sperrt alle Sessions ausser ``keep_token``. Liefert die Anzahl der
+        gesperrten.
+
+        Wird beim Vault-Switch im Multi-User-Mode aufgerufen — der Admin,
+        der den Switch ausgeloest hat, behaelt sein Token (mit neuem
+        Vault), alle anderen muessen sich neu einloggen.
+        """
+        n = 0
+        with self._lock:
+            tokens_to_remove = [
+                t for t in self._sessions if t != keep_token
+            ]
+            for t in tokens_to_remove:
+                entry = self._sessions.pop(t)
+                entry.session.lock()
+                n += 1
+        return n
+
     def replace_opened_everywhere(
         self,
         new_opened: OpenedVault,

@@ -181,6 +181,19 @@ class VaultImportRequest(BaseModel):
     source_password: str = Field(..., min_length=1, description="Master-Passwort des Quell-Vaults")
 
 
+class VaultSwitchRequest(BaseModel):
+    """Admin wechselt den aktiven Multi-User-Vault zur Laufzeit.
+
+    Aktive Sessions anderer User werden invalidiert — die muessen sich
+    danach neu einloggen. Der Admin behaelt sein Token; der zeigt
+    danach auf den neuen Vault.
+    """
+
+    vault_path: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=12)
+    create_if_missing: bool = Field(False)
+
+
 class TemplateExportRequest(BaseModel):
     """Template-Export: erstellt eine Vault-Kopie mit leeren Secret-Feldern.
 

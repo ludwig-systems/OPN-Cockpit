@@ -280,6 +280,42 @@ class ServerState:
             self._master_password = password
             return created
 
+    def switch_vault(
+        self,
+        new_path: Path,
+        new_password: str,
+        *,
+        create_if_missing: bool = False,
+    ) -> bool:
+        """Wechselt den aktiven Multi-User-Vault zur Laufzeit.
+
+        Vergisst den aktuellen Vault + Master-PW und entsperrt einen
+        neuen (legt ihn ggf. an). Aufrufer muss alle nicht-Admin-
+        Sessions ueber den SessionManager invalidieren — sonst zeigen
+        sie auf den alten OpenedVault.
+
+        Returns:
+            ``True`` wenn ein neuer Vault angelegt wurde, ``False`` bei Open.
+        """
+        if not self.is_multi_user_mode:
+            raise ServerStateError(
+                "switch_vault ist nur im Multi-User-Mode verfuegbar.",
+            )
+        with self._lock:
+            # Erst den neuen Vault validieren, dann erst den alten freigeben.
+            created = False
+            if not new_path.exists():
+                if not create_if_missing:
+                    open_vault(new_path, new_password)  # wirft VaultIOError
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                create_vault(new_path, new_password, VaultData())
+                created = True
+            opened = open_vault(new_path, new_password)
+            self._opened_vault = opened
+            self._vault_path = new_path
+            self._master_password = new_password
+            return created
+
     def lock_vault(self) -> None:
         """Vergisst den zentralen Vault. Multi-User: setzt Server zurueck auf needs-vault-unlock."""
         with self._lock:

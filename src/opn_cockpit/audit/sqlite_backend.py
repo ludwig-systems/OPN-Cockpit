@@ -103,6 +103,7 @@ class SqliteAuditBackend:
     # ----- Schreiben -----
 
     def append(self, event: AuditEventKind, /, **fields_in: Any) -> AuditRecord:
+        actor_override = fields_in.pop("actor", None)
         unknown = set(fields_in.keys()) - _APPEND_WHITELIST
         if unknown:
             raise AuditFieldError(
@@ -118,7 +119,7 @@ class SqliteAuditBackend:
             parameters = mask_dict(parameters)
         record = AuditRecord(
             timestamp_utc=self.clock(),
-            actor=self.actor,
+            actor=str(actor_override) if actor_override else self.actor,
             event=event,
             summary=summary,
             parameters=parameters,

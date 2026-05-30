@@ -119,22 +119,32 @@ class TestWhitelist:
         assert "http_response_body" in msg
         assert "stack_trace" in msg
 
-    def test_timestamp_actor_event_not_allowed_as_kwargs(self, tmp_path: Path) -> None:
-        # Diese drei werden vom Logger gesetzt — der Aufrufer darf sie nicht
-        # überschreiben.
+    def test_timestamp_event_not_allowed_as_kwargs(self, tmp_path: Path) -> None:
+        # timestamp_utc und event werden vom Logger selbst gesetzt — der
+        # Aufrufer darf sie nicht ueberschreiben.
         log = _log(tmp_path / "audit.jsonl")
-        with pytest.raises(AuditFieldError):
-            log.append(
-                AuditEventKind.VAULT_OPENED,
-                summary="x",
-                actor="fake-actor",  # versuchter Identitäts-Spoof
-            )
         with pytest.raises(AuditFieldError):
             log.append(
                 AuditEventKind.VAULT_OPENED,
                 summary="x",
                 timestamp_utc="1970-01-01T00:00:00.000Z",
             )
+
+    def test_actor_override_is_explicit_server_decision(
+        self, tmp_path: Path,
+    ) -> None:
+        # v4-Pass 1: actor-Override ist eine erlaubte, explizite Server-
+        # Funktion (Multi-User-Mode setzt eingeloggten Username statt
+        # OS-User). Kein Spoofing-Vektor, weil der Aufrufer der
+        # vertrauenswuerdige Endpoint ist.
+        log = _log(tmp_path / "audit.jsonl")
+        log.append(
+            AuditEventKind.VAULT_OPENED,
+            summary="x",
+            actor="alice",
+        )
+        records = log.read_all()
+        assert records[0].actor == "alice"
 
 
 # ---------------------------------------------------------------------------
