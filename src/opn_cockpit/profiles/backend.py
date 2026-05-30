@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from opn_cockpit.audit.backend import _shared_db
+from opn_cockpit.config import AppSettings
+from opn_cockpit.profiles.sqlite_store import SqliteProfileStore
 from opn_cockpit.profiles.store import ProfileStore, default_profiles_path
 
 if TYPE_CHECKING:
@@ -42,7 +45,12 @@ class ProfileStoreBackend(Protocol):
 
 
 def get_profile_store_backend() -> ProfileStoreBackend:
-    """Liefert das aktuell konfigurierte Profile-Store-Backend."""
+    """Liefert das aktuell konfigurierte Profile-Store-Backend.
+
+    File-Default oder SQLite je nach ``AppSettings.storage_backend``.
+    """
+    if AppSettings.load().storage_backend == "sqlite":
+        return SqliteProfileStore(db=_shared_db())
     return ProfileStore(path=default_profiles_path())
 
 

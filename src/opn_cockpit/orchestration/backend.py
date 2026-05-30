@@ -15,12 +15,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from opn_cockpit.config import get_app_data_dir
+from opn_cockpit.audit.backend import _shared_db
+from opn_cockpit.config import AppSettings, get_app_data_dir
 from opn_cockpit.orchestration.plan_store import PlanStore
+from opn_cockpit.orchestration.sqlite_store import SqlitePlanStore
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from opn_cockpit.core.result import RolloutReport
     from opn_cockpit.orchestration.planner import Plan
 
@@ -29,7 +29,10 @@ if TYPE_CHECKING:
 class PlanStoreBackend(Protocol):
     """Pflichtschnittstelle aller Plan-Store-Backends."""
 
-    def save(self, plan: Plan) -> Path:
+    def save(self, plan: Plan) -> object:
+        # File-Backend liefert ``Path``, SQLite-Backend ``str`` (plan_id).
+        # Aufrufer ignorieren den Rueckgabewert ueberwiegend; wir geben ihn
+        # nur Typ-allgemein an.
         ...
 
     def load(self, plan_id_or_path: str) -> Plan:
@@ -38,7 +41,7 @@ class PlanStoreBackend(Protocol):
     def list_ids(self) -> list[str]:
         ...
 
-    def save_report(self, plan_id: str, report: RolloutReport) -> Path:
+    def save_report(self, plan_id: str, report: RolloutReport) -> object:
         ...
 
     def load_report(self, plan_id: str) -> RolloutReport | None:
@@ -51,9 +54,11 @@ class PlanStoreBackend(Protocol):
 def get_plan_store_backend() -> PlanStoreBackend:
     """Liefert das aktuell konfigurierte Plan-Store-Backend.
 
-    Heute: immer File-basierter ``PlanStore`` unter
-    ``$APP_DATA_DIR/plans/``. In v3 wahlweise SqlPlanStoreBackend.
+    File-Default oder SQLite je nach ``AppSettings.storage_backend``.
+    Beide teilen sich die Plan-Dict-Serialisierung aus ``plan_store``.
     """
+    if AppSettings.load().storage_backend == "sqlite":
+        return SqlitePlanStore(db=_shared_db())
     return PlanStore(base_dir=get_app_data_dir() / "plans")
 
 
