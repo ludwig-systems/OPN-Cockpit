@@ -216,7 +216,7 @@ class TestBootstrapVault:
         )
         assert response.status_code == 401
 
-    def test_missing_vault_returns_404(
+    def test_missing_vault_returns_404_without_create_flag(
         self, multi_client_factory, tmp_path: Path,
     ) -> None:
         path = _make_vault(tmp_path)
@@ -232,6 +232,32 @@ class TestBootstrapVault:
             },
         )
         assert response.status_code == 404
+
+    def test_creates_new_vault_when_flag_set(
+        self, multi_client_factory, tmp_path: Path,
+    ) -> None:
+        """UX: Erstinstallations-Pfad — neuer Server, kein Vault existiert."""
+        # Vault-Pfad als suggested mitgeben; dann auf einem neuen Pfad anlegen
+        suggested = _make_vault(tmp_path)
+        client = multi_client_factory(
+            vault_path=suggested, admin_pre_created=True,
+        )
+        new_path = tmp_path / "fresh.opnvault"
+        assert not new_path.exists()
+        response = client.post(
+            "/api/bootstrap/vault",
+            headers=_bootstrap_headers(client),
+            json={
+                "vault_path": str(new_path),
+                "password": "frischer-master-pw-12+",
+                "create_if_missing": True,
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "ready"
+        assert body["created"] == "true"
+        assert new_path.exists()
 
     def test_without_admin_returns_409(
         self, multi_client_factory, tmp_path: Path,

@@ -73,13 +73,38 @@ Write-Host "Installiere Dienst '$ServiceName'..."
 & $nssm set $ServiceName Start SERVICE_AUTO_START
 & $nssm set $ServiceName ObjectName "NT AUTHORITY\LocalService"
 
-# Env-Variablen — Multi-User-Server bindet auf 0.0.0.0, kein Browser-Auto-Open.
+# Env-Variablen — Multi-User-Server ist der Default fuer Service-Setups.
+# Beim ersten Setup-Wizard-Lauf wird der Tresor automatisch unter
+# OPNCOCKPIT_VAULT_PATH angelegt, falls noch keiner da ist.
+$dataDir = Join-Path $env:ProgramData "OPN-Cockpit"
+$vaultPath = Join-Path $dataDir "firewalls.opnvault"
 $envBlock = @(
     "OPNCOCKPIT_HOST=0.0.0.0",
     "OPNCOCKPIT_PORT=9876",
-    "OPNCOCKPIT_NO_BROWSER=1"
+    "OPNCOCKPIT_NO_BROWSER=1",
+    "OPNCOCKPIT_DATA_DIR=$dataDir",
+    "OPNCOCKPIT_AUTH_BACKEND=user-db",
+    "OPNCOCKPIT_DEPLOYMENT_MODE=multi-server",
+    "OPNCOCKPIT_VAULT_PATH=$vaultPath",
+    "OPNCOCKPIT_VAULT_DIR=$dataDir",
+    "OPNCOCKPIT_STORAGE_BACKEND=sqlite"
 ) -join "`r`n"
 & $nssm set $ServiceName AppEnvironmentExtra $envBlock
+
+# Daten-Verzeichnis vorbereiten — der LocalService-Account hat hier
+# Schreibrechte (System-Default-Permission auf %ProgramData%-Unterordner).
+if (-not (Test-Path $dataDir)) {
+    New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+}
+$acl = Get-Acl $dataDir
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    "NT AUTHORITY\LocalService",
+    "Modify",
+    "ContainerInherit,ObjectInherit",
+    "None",
+    "Allow")
+$acl.SetAccessRule($rule)
+Set-Acl -Path $dataDir -AclObject $acl
 
 # Log-Routing
 & $nssm set $ServiceName AppStdout (Join-Path $LogDir "stdout.log")

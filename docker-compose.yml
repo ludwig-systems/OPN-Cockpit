@@ -22,21 +22,17 @@ services:
       - opncockpit-data:/data
     environment:
       TZ: Europe/Berlin
-      # ---- Default-Setup (Single-User) ----
-      # Ohne weitere Variablen laeuft der Server im Single-User-Mode:
-      # Vault-Picker, jeder User entsperrt seinen eigenen Tresor.
-      #
-      # ---- Multi-User-Server aktivieren ----
-      # Folgende Variablen einkommentieren, dann `docker compose up -d`:
-      # OPNCOCKPIT_AUTH_BACKEND: "user-db"
-      # OPNCOCKPIT_DEPLOYMENT_MODE: "multi-server"
-      # OPNCOCKPIT_VAULT_PATH: "/data/firewalls.opnvault"  # Default-Vault-Vorschlag im Setup-Wizard
-      #
-      # Voraussetzung: Im Volume liegt bereits eine .opnvault-Datei. Anlegen
-      # geht ueber:
-      #   1) Erststart im Single-Mode -> Wizard "Neuen Tresor anlegen"
-      #   2) Container stoppen, die obigen Env-Variablen aktivieren, neu starten
-      #   3) Setup-Wizard fragt Admin-Account ab, dann Vault-PW
+      # Multi-User-Server ist der Default fuer Container-Deployments.
+      # Beim ersten Aufruf legt der Setup-Wizard automatisch einen leeren
+      # Tresor unter OPNCOCKPIT_VAULT_PATH an, falls noch keiner da ist.
+      OPNCOCKPIT_AUTH_BACKEND: "user-db"
+      OPNCOCKPIT_DEPLOYMENT_MODE: "multi-server"
+      OPNCOCKPIT_VAULT_PATH: "/data/firewalls.opnvault"
+      # SQLite-Storage fuer Audit/Plans/Profiles — Single-File-Backup.
+      OPNCOCKPIT_STORAGE_BACKEND: "sqlite"
+      # Wenn du stattdessen Single-User-Mode willst: diese drei Werte
+      # auskommentieren und nichts setzen. Dann erscheint der klassische
+      # Vault-Picker.
       #
       # Weitere Tunables:
       # OPNCOCKPIT_PORT: "9876"

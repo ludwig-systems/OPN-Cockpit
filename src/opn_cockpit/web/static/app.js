@@ -222,11 +222,12 @@
     const token = $('#su-vault-token').value.trim();
     const path = $('#su-vault-path').value.trim();
     const password = $('#su-vault-pw').value;
+    const createIfMissing = $('#su-vault-create').checked;
     const errorBox = $('#setup-vault-error');
     errorBox.hidden = true;
     if (!token) return showSetupError(errorBox, 'Bootstrap-Token fehlt (siehe Server-Log).');
     if (!path) return showSetupError(errorBox, 'Pfad zur Tresor-Datei fehlt.');
-    if (!password) return showSetupError(errorBox, 'Master-Passwort fehlt.');
+    if (password.length < 12) return showSetupError(errorBox, 'Master-Passwort muss mindestens 12 Zeichen haben.');
     const btn = $('#setup-vault-btn');
     btn.disabled = true;
     btn.textContent = 'Entsperre…';
@@ -238,7 +239,11 @@
           Accept: 'application/json',
           'X-Bootstrap-Token': token,
         },
-        body: JSON.stringify({ vault_path: path, password }),
+        body: JSON.stringify({
+          vault_path: path,
+          password,
+          create_if_missing: createIfMissing,
+        }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -1890,11 +1895,61 @@
   function openBulkModal() {
     $('#bk-fmt-csv').checked = true;
     $('#bk-fmt-json').checked = false;
+    $('#bk-fmt-vault').checked = false;
     $('#bk-file').value = '';
+    $('#bk-vault-path').value = '';
+    $('#bk-vault-pw').value = '';
     $('#bulk-modal-error').hidden = true;
     $('#bulk-parse-errors').hidden = true;
     updateBulkFormatHint();
     $('#bulk-modal').hidden = false;
+  }
+
+  async function submitVaultImport() {
+    const errorBox = $('#bulk-modal-error');
+    errorBox.hidden = true;
+    const path = $('#bk-vault-path').value.trim();
+    const password = $('#bk-vault-pw').value;
+    if (!path || !password) {
+      errorBox.textContent = 'Bitte Pfad und Master-Passwort des Quell-Tresors angeben.';
+      errorBox.hidden = false;
+      return;
+    }
+    const btn = $('#bulk-submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Importiere…';
+    try {
+      const response = await apiPost('/api/imports/vault', {
+        source_path: path,
+        source_password: password,
+      });
+      if (response.status === 401) {
+        const body = await response.json().catch(() => ({}));
+        errorBox.textContent = body.detail || 'Master-Passwort falsch.';
+        errorBox.hidden = false;
+        return;
+      }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        errorBox.textContent = body.detail || `Fehler ${response.status}`;
+        errorBox.hidden = false;
+        return;
+      }
+      const result = await response.json();
+      closeBulkModal();
+      await loadInventory();
+      pollHeartbeat();
+      const skipText = result.skipped_existing.length
+        ? ` (${result.skipped_existing.length} bereits vorhanden, übersprungen)`
+        : '';
+      showToast(`${result.added.length} Firewall(s) aus Quell-Tresor übernommen${skipText}.`);
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Importieren';
+    }
   }
 
   function closeBulkModal() {
@@ -1903,12 +1958,18 @@
 
   function updateBulkFormatHint() {
     const isCsv = $('#bk-fmt-csv').checked;
+    const isJson = $('#bk-fmt-json').checked;
+    const isVault = $('#bk-fmt-vault').checked;
+    // File-Felder anzeigen vs Vault-Felder
+    $('#bulk-file-row').hidden = isVault;
+    $('#bulk-vault-path-row').hidden = !isVault;
+    $('#bulk-vault-pw-row').hidden = !isVault;
     if (isCsv) {
       $('#bk-format-hint').innerHTML =
         'CSV-Spalten: <code>name, host, port, tls_verify, tags, descr, api_key, api_secret</code>. ' +
         'Tags semikolon-getrennt. Header-Zeile zwingend.';
       $('#bk-file').setAttribute('accept', '.csv,text/csv');
-    } else {
+    } else if (isJson) {
       $('#bk-format-hint').innerHTML =
         'JSON-Array von Objekten: <code>{name, host, port, tls_verify, tags[], descr, api_key, api_secret}</code>.';
       $('#bk-file').setAttribute('accept', '.json,application/json');
@@ -1920,6 +1981,11 @@
     const parseErrBox = $('#bulk-parse-errors');
     errorBox.hidden = true;
     parseErrBox.hidden = true;
+
+    // Vault-Import-Pfad ist ein eigener API-Endpoint (kein Multipart-Upload).
+    if ($('#bk-fmt-vault').checked) {
+      return submitVaultImport();
+    }
 
     const file = $('#bk-file').files[0];
     if (!file) {
@@ -2541,6 +2607,7 @@
     $('#bulk-submit-btn').addEventListener('click', submitBulkImport);
     $('#bk-fmt-csv').addEventListener('change', updateBulkFormatHint);
     $('#bk-fmt-json').addEventListener('change', updateBulkFormatHint);
+    $('#bk-fmt-vault').addEventListener('change', updateBulkFormatHint);
     $('#bulk-modal').addEventListener('click', (e) => {
       if (e.target.id === 'bulk-modal') closeBulkModal();
     });

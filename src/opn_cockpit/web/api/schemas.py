@@ -168,6 +168,19 @@ class DeviceImportResponse(BaseModel):
     parsed_count: int
 
 
+class VaultImportRequest(BaseModel):
+    """Geraete aus einer fremden .opnvault-Datei in den aktiven Vault uebernehmen.
+
+    Quelle wird mit ``source_password`` entsperrt, Inhalt gelesen, Datei
+    wieder geschlossen. Nur die Geraete-Stammdaten + Credentials werden
+    uebernommen, Settings/Schema des aktiven Vaults bleiben unangetastet.
+    Bereits vorhandene Geraete-Namen werden uebersprungen.
+    """
+
+    source_path: str = Field(..., min_length=1, description="Pfad zur Quell-.opnvault-Datei")
+    source_password: str = Field(..., min_length=1, description="Master-Passwort des Quell-Vaults")
+
+
 class DeviceCreateRequest(BaseModel):
     """Anlegen eines Geraets im Tresor.
 

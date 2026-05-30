@@ -72,43 +72,49 @@ docker run --rm -v opncockpit-data:/data -v $(pwd):/backup debian:12-slim \
 | `OPNCOCKPIT_VAULT_PATH` | _(leer)_ | Default-Pfad zum zentralen Vault im Setup-Wizard |
 | `TZ` | `Europe/Berlin` | Zeitzone für Audit-Timestamps |
 
-## Multi-User-Modus aktivieren
+## Setup-Flow
 
-Der Container startet per Default im **Single-User-Modus**. So aktivierst
-du Multi-User:
+**Default ist Multi-User-Server** (siehe `docker-compose.yml`). Beim
+Erststart:
 
-**Schritt 1 — Vault anlegen** (einmalig, im Single-Modus):
 1. `docker compose up -d`
-2. Browser auf `http://localhost:9876`
-3. „Neuen Tresor anlegen…" → Pfad `/data/firewalls.opnvault`, starkes
-   Master-PW vergeben
-4. Optional: ein paar Test-Firewalls anlegen
-5. Im Browser sperren, dann `docker compose down`
+2. `docker compose logs opn-cockpit` — dort findest du den
+   **Bootstrap-Token**:
+   ```
+   ============================================================
+     OPN-Cockpit BOOTSTRAP-TOKEN
+     Status: needs-admin
+     Token : Z60Z8NYn4XobdjsWqLEsJfONiAesZpa4
+   ============================================================
+   ```
+3. Browser auf `http://localhost:9876` → Setup-Wizard:
+   - **Step 1 — Admin anlegen**: Token + Username + Passwort
+   - **Step 2 — Vault**: Pfad ist vorausgefüllt (`/data/firewalls.opnvault`),
+     Master-Passwort vergeben, **„Tresor neu anlegen, falls die Datei
+     nicht existiert"** ankreuzen
+4. Multi-User-Login erscheint. Weitere User legst du als Admin in der
+   User-Verwaltungs-UI an.
 
-**Schritt 2 — Multi-User aktivieren**: in `docker-compose.yml` die
-Env-Variablen einkommentieren:
-```yaml
-    environment:
-      TZ: Europe/Berlin
-      OPNCOCKPIT_AUTH_BACKEND: "user-db"
-      OPNCOCKPIT_DEPLOYMENT_MODE: "multi-server"
-      OPNCOCKPIT_VAULT_PATH: "/data/firewalls.opnvault"
-```
+Der Token rotiert nach jedem Schritt — schau für Step 2 nochmal in die
+Logs.
 
-**Schritt 3 — Neustart + Setup-Wizard**:
-```powershell
-docker compose up -d
-```
-Auf `http://localhost:9876` erscheint jetzt der Setup-Wizard:
-1. Admin-Konto anlegen (mind. 12 Zeichen)
-2. Zentralen Vault entsperren (Pfad ist vorausgefüllt)
+## Firewalls aus anderem Tresor übernehmen
 
-Danach erscheint der Multi-User-Login. Weitere User legt der Admin in
-der User-Verwaltungs-UI an (kommt mit v3.0 Iter 3).
+Falls du schon einen `.opnvault` mit Firewalls hast und nicht alles
+neu anlegen willst:
 
-**Zurück zu Single-User**: Env-Variablen wieder rausnehmen, neustarten.
-Vault-Daten + User-DB bleiben im Volume erhalten, sind aber im
-Single-Modus inaktiv.
+1. Datei ins Volume kopieren: `docker cp meine-firewalls.opnvault opn-cockpit:/data/import.opnvault`
+2. Im UI: „Bulk-Import" → Tab „Anderer Tresor (.opnvault)"
+3. Pfad: `/data/import.opnvault`, Master-Passwort des Quell-Vaults
+4. Firewalls werden in den aktiven Vault übernommen (Duplikate
+   übersprungen)
+
+## Zurück zu Single-User
+
+In `docker-compose.yml` die drei Env-Variablen
+(`OPNCOCKPIT_AUTH_BACKEND`, `OPNCOCKPIT_DEPLOYMENT_MODE`,
+`OPNCOCKPIT_VAULT_PATH`) auskommentieren, `docker compose up -d`.
+Der klassische Vault-Picker erscheint.
 
 ## Reverse-Proxy mit TLS
 

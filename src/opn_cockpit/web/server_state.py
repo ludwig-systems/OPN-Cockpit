@@ -53,7 +53,8 @@ from opn_cockpit.security.auth_backend import (
     VaultAuthBackend,
 )
 from opn_cockpit.security.users import UserStore, default_users_db_path
-from opn_cockpit.vault.store import OpenedVault, open_vault, save_vault
+from opn_cockpit.vault.model import VaultData
+from opn_cockpit.vault.store import OpenedVault, create_vault, open_vault, save_vault
 
 VAULT_PATH_ENV = "OPNCOCKPIT_VAULT_PATH"
 
@@ -243,22 +244,41 @@ class ServerState:
         self,
         vault_path: Path,
         password: str,
-    ) -> None:
-        """Entsperrt den zentralen Vault.
+        *,
+        create_if_missing: bool = False,
+    ) -> bool:
+        """Entsperrt den zentralen Vault oder legt ihn neu an.
 
         Multi-User-only. Bei falschem Passwort wirft ``InvalidPasswordError``;
-        bei kaputter/fehlender Datei wirft ``VaultIOError``/``CorruptVaultError``.
-        Diese sollen vom Endpoint in saubere HTTP-Fehler gemappt werden.
+        bei kaputter Datei wirft ``VaultIOError``/``CorruptVaultError``.
+
+        ``create_if_missing=True``: wenn die Datei nicht existiert, wird ein
+        neuer leerer Vault mit dem uebergebenen Passwort angelegt. Auf
+        einem frischen Multi-User-Server ist das der Default-Pfad — der
+        Admin gibt sein Master-Passwort ein, der Server erstellt den
+        Vault, danach ist der Server ``ready``.
+
+        Returns:
+            ``True`` wenn ein neuer Vault angelegt wurde, ``False`` bei Open.
         """
         if not self.is_multi_user_mode:
             raise ServerStateError(
                 "bootstrap_unlock_vault ist nur im Multi-User-Mode verfuegbar.",
             )
         with self._lock:
+            created = False
+            if not vault_path.exists():
+                if not create_if_missing:
+                    # Aufrufer hat das nicht erlaubt — Endpoint mappt zu 404.
+                    open_vault(vault_path, password)  # wirft VaultIOError
+                vault_path.parent.mkdir(parents=True, exist_ok=True)
+                create_vault(vault_path, password, VaultData())
+                created = True
             opened = open_vault(vault_path, password)
             self._opened_vault = opened
             self._vault_path = vault_path
             self._master_password = password
+            return created
 
     def lock_vault(self) -> None:
         """Vergisst den zentralen Vault. Multi-User: setzt Server zurueck auf needs-vault-unlock."""

@@ -31,41 +31,37 @@ Das Skript:
 - Routet stdout/stderr nach `%ProgramData%\OPN-Cockpit\logs\`
 - Startet den Dienst
 
-## Multi-User-Modus aktivieren
+## Erststart-Flow
 
-Nach der Service-Registrierung läuft der Server zunächst im
-Single-User-Mode. Multi-User aktivieren:
+Der Service ist per Default Multi-User-Server (alle relevanten Env-
+Variablen sind im NSSM-Setup hinterlegt). Daten landen in
+`%ProgramData%\OPN-Cockpit\`.
 
-```powershell
-# Admin-PowerShell, im Installations-Verzeichnis
-.\bundle\nssm.exe edit OPN-Cockpit
-```
+Beim ersten Aufruf von `http://localhost:9876`:
 
-Im „Environment"-Tab folgende Variablen ergänzen:
+1. Bootstrap-Token aus dem Server-Log auslesen:
+   ```powershell
+   Get-Content "$env:ProgramData\OPN-Cockpit\logs\stderr.log" -Tail 20
+   ```
+2. Setup-Wizard Step 1: Token + Admin-Username + Passwort
+3. Setup-Wizard Step 2: Vault-Pfad ist vorausgefüllt
+   (`...\firewalls.opnvault`). **„Tresor neu anlegen, falls die Datei
+   nicht existiert"** ankreuzen, Master-Passwort vergeben.
+4. Multi-User-Login erscheint.
 
-```
-OPNCOCKPIT_AUTH_BACKEND=user-db
-OPNCOCKPIT_DEPLOYMENT_MODE=multi-server
-OPNCOCKPIT_VAULT_PATH=C:\ProgramData\OPN-Cockpit\firewalls.opnvault
-```
+Token rotiert zwischen Step 1 und Step 2 — fürs zweite Mal nochmal in
+die Logs schauen.
 
-Den Vault musst du **vorher** im Single-Mode angelegt haben (oder den
-Pfad auf einen bestehenden zeigen). Dann:
+## Firewalls aus anderem Tresor übernehmen
 
-```powershell
-Restart-Service -Name OPN-Cockpit
-```
+Wenn du bereits einen `.opnvault` hast und nicht alles neu anlegen
+willst:
 
-Beim ersten Aufruf auf `http://localhost:9876` erscheint der
-Setup-Wizard. Den **Bootstrap-Token** liest du aus dem Log:
-
-```powershell
-Get-Content "$env:ProgramData\OPN-Cockpit\logs\stderr.log" -Tail 20
-```
-
-Das Setup verlangt den Token plus deine Admin-Credentials. Nach
-erfolgreichem Bootstrap rotiert der Token einmalig für den Vault-
-Unlock-Schritt (im Log erscheint ein zweiter Eintrag).
+1. Quell-Vault nach `%ProgramData%\OPN-Cockpit\` kopieren
+2. Im UI: „Bulk-Import" → Tab „Anderer Tresor (.opnvault)"
+3. Pfad + Master-Passwort des Quell-Vaults angeben
+4. Firewalls werden übernommen, Duplikate übersprungen, der Quell-
+   Vault bleibt unverändert
 
 ## Service verwalten
 

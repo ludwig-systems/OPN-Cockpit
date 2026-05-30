@@ -13,12 +13,18 @@ ExecStart=/opt/opn-cockpit/.venv/bin/python -m opn_cockpit
 Restart=on-failure
 RestartSec=5s
 
-# Daten + Bindings ueber Env. Wenn du den Service auf nicht-Default-Port
-# oder hinter Reverse-Proxy laufen lassen willst, hier ueberschreiben.
+# Daten + Bindings ueber Env. Default ist Multi-User-Server mit SQLite-
+# Storage; beim ersten Setup-Wizard-Lauf legt der Server unter
+# OPNCOCKPIT_VAULT_PATH einen leeren Tresor an, falls noch keiner da ist.
 Environment="OPNCOCKPIT_DATA_DIR=/var/lib/opn-cockpit"
+Environment="OPNCOCKPIT_VAULT_DIR=/var/lib/opn-cockpit"
+Environment="OPNCOCKPIT_VAULT_PATH=/var/lib/opn-cockpit/firewalls.opnvault"
 Environment="OPNCOCKPIT_HOST=0.0.0.0"
 Environment="OPNCOCKPIT_PORT=9876"
 Environment="OPNCOCKPIT_NO_BROWSER=1"
+Environment="OPNCOCKPIT_AUTH_BACKEND=user-db"
+Environment="OPNCOCKPIT_DEPLOYMENT_MODE=multi-server"
+Environment="OPNCOCKPIT_STORAGE_BACKEND=sqlite"
 Environment="PYTHONUNBUFFERED=1"
 Environment="TZ=Europe/Berlin"
 

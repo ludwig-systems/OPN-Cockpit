@@ -70,8 +70,15 @@ class BootstrapAdminRequest(BaseModel):
 
 
 class BootstrapVaultRequest(BaseModel):
+    """Bootstrap-Vault. Wenn ``create_if_missing=True`` und die Datei nicht
+    existiert, legt der Server einen neuen leeren Vault unter dem
+    gewaehlten Pfad mit dem gelieferten Passwort an. Erstinstallations-
+    Pfad fuer einen frischen Multi-User-Server.
+    """
+
     vault_path: str = Field(..., min_length=1)
-    password: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=12)
+    create_if_missing: bool = Field(False)
 
 
 # ---------------------------------------------------------------------------
@@ -256,13 +263,19 @@ def bootstrap_vault(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-    if not path.exists():
+    if not path.exists() and not payload.create_if_missing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tresor-Datei nicht gefunden: {path}",
+            detail=(
+                f"Tresor-Datei nicht gefunden: {path}. "
+                "Setze create_if_missing=true, um einen neuen anzulegen."
+            ),
         )
     try:
-        server.bootstrap_unlock_vault(path, payload.password)
+        created = server.bootstrap_unlock_vault(
+            path, payload.password,
+            create_if_missing=payload.create_if_missing,
+        )
     except InvalidPasswordError as exc:
         limiter.register_failure(client_key)
         raise HTTPException(
@@ -286,8 +299,11 @@ def bootstrap_vault(
         ) from exc
     server.invalidate_bootstrap_token()
     limiter.register_success(client_key)
-    _audit_vault_bootstrap(path)
-    return {"status": server.bootstrap_status}
+    if created:
+        _audit_vault_created(path)
+    else:
+        _audit_vault_bootstrap(path)
+    return {"status": server.bootstrap_status, "created": "true" if created else "false"}
 
 
 # ---------------------------------------------------------------------------
@@ -307,4 +323,12 @@ def _audit_vault_bootstrap(path: Path) -> None:
         AuditEventKind.VAULT_OPENED,
         vault_path=str(path),
         summary=f"Bootstrap: zentraler Multi-User-Vault entsperrt ({path}).",
+    )
+
+
+def _audit_vault_created(path: Path) -> None:
+    get_audit_backend().append(
+        AuditEventKind.VAULT_CREATED,
+        vault_path=str(path),
+        summary=f"Bootstrap: neuer Multi-User-Vault angelegt ({path}).",
     )

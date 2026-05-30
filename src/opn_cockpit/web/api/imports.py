@@ -31,15 +31,25 @@ from opn_cockpit.importers.csv_devices import parse_devices_csv
 from opn_cockpit.importers.json_devices import parse_devices_json
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.security.session import Session
+from opn_cockpit.vault.errors import (
+    CorruptVaultError,
+    InvalidPasswordError,
+    VaultError,
+    VaultIOError,
+    VaultVersionError,
+)
 from opn_cockpit.vault.model import VaultDevice
+from opn_cockpit.vault.store import open_vault
 from opn_cockpit.web.acl import require_write_role
 from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     DeviceImportResponse,
     DeviceResponse,
+    VaultImportRequest,
 )
 from opn_cockpit.web.auth.dependencies import require_session
 from opn_cockpit.web.server_state import ServerState
+from opn_cockpit.web.vault_path import VaultPathError, resolve_safe_vault_path
 from opn_cockpit.web.vault_writes import persist_session_vault
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
@@ -185,6 +195,86 @@ def _to_device_response(vd: VaultDevice) -> DeviceResponse:
         tls_verify=d.tls_verify,
         tags=list(d.tags),
         descr=d.descr,
+    )
+
+
+@router.post(
+    "/vault",
+    response_model=DeviceImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def import_from_vault(
+    payload: VaultImportRequest,
+    request: Request,
+    session: Session = Depends(require_session),
+    server: ServerState = Depends(get_server_state),
+) -> DeviceImportResponse:
+    """Geraete aus einer anderen .opnvault-Datei in den aktiven Vault uebernehmen.
+
+    Heute der pragmatische Ersatz fuer einen kompletten Vault-Switch
+    (Roadmap). Bestehende Geraete-Namen werden uebersprungen. Der Quell-
+    Vault wird nur fuer den Lese-Vorgang entsperrt und sofort wieder
+    aus dem Speicher entfernt — Original-Datei bleibt unangetastet.
+    """
+    require_write_role(session)
+    vault_path = session.vault_path
+    if vault_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tresor-Pfad fehlt in der Session.",
+        )
+    try:
+        source = resolve_safe_vault_path(payload.source_path)
+    except VaultPathError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    if not source.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Quell-Tresor nicht gefunden: {source}",
+        )
+    if source.resolve() == vault_path.resolve():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Quell-Tresor ist identisch mit dem aktiven Tresor.",
+        )
+    try:
+        source_opened = open_vault(source, payload.source_password)
+    except InvalidPasswordError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Master-Passwort des Quell-Tresors falsch.",
+        ) from exc
+    except (CorruptVaultError, VaultVersionError, VaultIOError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except VaultError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    source_devices = list(source_opened.data.devices)
+    # Quell-Vault loslassen — kein Caching von fremden Credentials.
+    del source_opened
+
+    with server.vault_mutation_lock():
+        to_add, skipped = _filter_new(session, source_devices)
+        if not to_add:
+            return DeviceImportResponse(
+                added=[],
+                skipped_existing=skipped,
+                parsed_count=len(source_devices),
+            )
+        _persist_or_500(request, session, vault_path, to_add)
+    return DeviceImportResponse(
+        added=[_to_device_response(d) for d in to_add],
+        skipped_existing=skipped,
+        parsed_count=len(source_devices),
     )
 
 
