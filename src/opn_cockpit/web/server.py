@@ -6,6 +6,7 @@ die App via ``create_app()`` und fahren sie ueber ``TestClient`` ab.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -103,13 +104,16 @@ def create_app() -> FastAPI:
 
 
 def _install_security_middleware(app: FastAPI) -> None:
-    """Setzt Security-Header auf alle Responses (Audit #6).
+    """Setzt Security-Header auf alle Responses (Audit #6 + v4-Pass 4).
 
     * ``X-Content-Type-Options: nosniff`` — verhindert MIME-Sniffing
     * ``X-Frame-Options: DENY`` — Clickjacking-Schutz
     * ``Referrer-Policy: same-origin`` — kein Referrer-Leak nach extern
     * ``Content-Security-Policy`` — XSS-Defense-in-Depth (eng gesetzt,
       eigene Scripts + Inline-Styles erlaubt — alles andere blockiert)
+    * ``Strict-Transport-Security`` — nur aktiv wenn
+      ``OPNCOCKPIT_HSTS_ENABLED=1`` (oder beim TLS-Bind). Bricht sonst
+      lokale http-Setups, wenn der Browser einmal HSTS gecacht hat.
     """
     csp = (
         "default-src 'self'; "
@@ -121,6 +125,9 @@ def _install_security_middleware(app: FastAPI) -> None:
         "base-uri 'self'; "
         "form-action 'self'"
     )
+    hsts_enabled = os.environ.get("OPNCOCKPIT_HSTS_ENABLED", "").strip() in {"1", "true", "yes"}
+    hsts_max_age = os.environ.get("OPNCOCKPIT_HSTS_MAX_AGE", "31536000").strip()
+    hsts_header = f"max-age={hsts_max_age}; includeSubDomains"
 
     @app.middleware("http")
     async def _add_security_headers(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -129,4 +136,6 @@ def _install_security_middleware(app: FastAPI) -> None:
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("Content-Security-Policy", csp)
+        if hsts_enabled:
+            response.headers.setdefault("Strict-Transport-Security", hsts_header)
         return response

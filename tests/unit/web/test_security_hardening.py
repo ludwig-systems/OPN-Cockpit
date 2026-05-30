@@ -54,6 +54,21 @@ class TestSecurityHeaders:
         assert response.headers.get("X-Content-Type-Options") == "nosniff"
         assert response.headers.get("X-Frame-Options") == "DENY"
 
+    def test_hsts_off_by_default(self, tmp_path: Path) -> None:
+        client = TestClient(create_app())
+        response = client.get("/")
+        assert "Strict-Transport-Security" not in response.headers
+
+    def test_hsts_enabled_via_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("OPNCOCKPIT_HSTS_ENABLED", "1")
+        client = TestClient(create_app())
+        response = client.get("/")
+        hsts = response.headers.get("Strict-Transport-Security", "")
+        assert "max-age=" in hsts
+        assert "includeSubDomains" in hsts
+
 
 # ---------------------------------------------------------------------------
 # Path-Validierung (Audit #14)

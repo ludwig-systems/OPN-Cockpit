@@ -32,13 +32,20 @@ sitzt in einer geteilten Helper-Funktion in ``audit.log``.
 
 from __future__ import annotations
 
+import contextlib
 import getpass
 import json
+import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from typing import Any
 
+from opn_cockpit.audit.chain import (
+    GENESIS_HASH,
+    ChainedRecord,
+    compute_this_hash,
+)
 from opn_cockpit.audit.log import (
     SUMMARY_MAX_LEN,
     AuditEventKind,
@@ -64,12 +71,20 @@ CREATE TABLE IF NOT EXISTS audit (
     error_kind TEXT,
     failed_phase TEXT,
     duration_ms INTEGER,
-    vault_path TEXT
+    vault_path TEXT,
+    prev_hash TEXT,
+    this_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(timestamp_utc);
 CREATE INDEX IF NOT EXISTS idx_audit_event ON audit(event);
 CREATE INDEX IF NOT EXISTS idx_audit_device ON audit(target_device_id);
 """
+
+# Migration fuer existierende DBs: prev_hash/this_hash-Spalten nachziehen.
+_MIGRATIONS = (
+    "ALTER TABLE audit ADD COLUMN prev_hash TEXT",
+    "ALTER TABLE audit ADD COLUMN this_hash TEXT",
+)
 
 _APPEND_WHITELIST: frozenset[str] = frozenset(
     f.name
@@ -96,9 +111,19 @@ class SqliteAuditBackend:
     db: SqliteDb
     actor: str = field(default_factory=_default_actor)
     clock: Callable[[], str] = field(default=_now_utc_iso)
+    chain_secret: bytes | None = None
+    """HMAC-Schluessel fuer die Hash-Chain (v4-Pass 3). Wenn None, keine
+    Chain — Backward-Compat mit aelteren Setups, die das Feature noch
+    nicht nutzen."""
 
     def __post_init__(self) -> None:
         self.db.executescript(_SCHEMA)
+        # Migrationen fuer bestehende DBs (Schema vor Hash-Chain).
+        # OperationalError "duplicate column name" ist hier OK — Spalte
+        # ist schon vorhanden.
+        for sql in _MIGRATIONS:
+            with contextlib.suppress(sqlite3.OperationalError):
+                self.db.executescript(sql)
 
     # ----- Schreiben -----
 
@@ -131,11 +156,23 @@ class SqliteAuditBackend:
             else None
         )
         with self.db.transaction() as conn:
+            # Hash-Chain (v4-Pass 3): nur wenn ein Secret konfiguriert ist.
+            prev_hash: str | None = None
+            this_hash: str | None = None
+            if self.chain_secret is not None:
+                row = conn.execute(
+                    "SELECT this_hash FROM audit ORDER BY id DESC LIMIT 1",
+                ).fetchone()
+                prev_hash = row["this_hash"] if row and row["this_hash"] else GENESIS_HASH
+                this_hash = compute_this_hash(
+                    self.chain_secret, prev_hash, record,
+                )
             conn.execute(
                 "INSERT INTO audit (timestamp_utc, actor, event, summary, action, "
                 "target_device_id, target_device_name, target_count, parameters_json, "
-                "status, error_kind, failed_phase, duration_ms, vault_path) VALUES "
-                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "status, error_kind, failed_phase, duration_ms, vault_path, "
+                "prev_hash, this_hash) VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     record.timestamp_utc,
                     record.actor,
@@ -151,9 +188,37 @@ class SqliteAuditBackend:
                     record.failed_phase,
                     record.duration_ms,
                     record.vault_path,
+                    prev_hash,
+                    this_hash,
                 ),
             )
         return record
+
+    # ----- Hash-Chain-Verifikation -----
+
+    def read_chain(self) -> list[ChainedRecord]:
+        """Liefert alle Eintraege mit prev_hash/this_hash fuer Verifikation.
+
+        Eintraege ohne Hash-Chain (legacy oder Backend ohne Secret)
+        werden ueberflogen — nur Eintraege mit gesetztem this_hash
+        landen im Ergebnis. Verify_chain wird dann nur die "gesicherten"
+        Eintraege pruefen.
+        """
+        with self.db.cursor() as cur:
+            rows = cur.execute(
+                "SELECT * FROM audit WHERE this_hash IS NOT NULL "
+                "ORDER BY timestamp_utc ASC, id ASC",
+            ).fetchall()
+        result: list[ChainedRecord] = []
+        for row in rows:
+            result.append(
+                ChainedRecord(
+                    record=_row_to_record(row),
+                    prev_hash=str(row["prev_hash"]),
+                    this_hash=str(row["this_hash"]),
+                ),
+            )
+        return result
 
     # ----- Lesen -----
 

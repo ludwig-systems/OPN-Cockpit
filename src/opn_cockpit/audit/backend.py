@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from opn_cockpit.audit.chain import load_or_generate_secret
 from opn_cockpit.audit.log import AuditLog, default_audit_path
 from opn_cockpit.audit.sqlite_backend import SqliteAuditBackend
 from opn_cockpit.config import AppSettings
@@ -63,13 +64,16 @@ def get_audit_backend() -> AuditBackend:
     """Liefert das aktuell konfigurierte Audit-Backend.
 
     File-Default oder SQLite je nach ``AppSettings.storage_backend``.
-    Die DB-Verbindung wird einmalig pro Prozess gecached, damit alle
-    Aufrufer dieselbe Connection teilen (WAL-Optimierung + weniger
-    File-Handles).
+    Im SQLite-Mode wird zudem die HMAC-Hash-Chain aktiviert
+    (v4-Pass 3) — das Secret kommt aus OPNCOCKPIT_AUDIT_SECRET oder
+    wird beim ersten Start in $OPNCOCKPIT_DATA_DIR/audit-secret erzeugt.
     """
     settings = AppSettings.load()
     if settings.storage_backend == "sqlite":
-        return SqliteAuditBackend(db=_shared_db())
+        return SqliteAuditBackend(
+            db=_shared_db(),
+            chain_secret=load_or_generate_secret(),
+        )
     return AuditLog(path=default_audit_path())
 
 

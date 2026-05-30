@@ -97,6 +97,37 @@ oder über den Inno-Uninstaller (führt das gleiche Skript aus).
 Vault-, Audit- und User-DB-Dateien bleiben erhalten — die liegen
 außerhalb der Installation.
 
+## Audit-Log-Integrity
+
+Im SQLite-Mode ist eine HMAC-Hash-Chain aktiv. Verifizieren:
+
+```powershell
+$token = "<dein-bearer-token>"
+Invoke-RestMethod -Uri "http://localhost:9876/api/audit/verify" `
+  -Headers @{Authorization = "Bearer $token"}
+```
+
+Liefert `status: ok` oder `status: broken` mit Indizes der manipulierten
+Einträge. Das Server-Secret liegt in `%ProgramData%\OPN-Cockpit\audit-secret`
+(ACL: LocalService Modify).
+
+## HSTS hinter Reverse-Proxy
+
+Wenn ein TLS-Proxy (IIS, nginx) vor OPN-Cockpit steht, kannst du HSTS
+serverseitig setzen:
+
+```powershell
+.\bundle\nssm.exe edit OPN-Cockpit
+# Im Environment-Tab ergänzen:
+# OPNCOCKPIT_HSTS_ENABLED=1
+# OPNCOCKPIT_HSTS_MAX_AGE=31536000
+Restart-Service -Name OPN-Cockpit
+```
+
+**Achtung**: HSTS wirkt persistent im Browser — nur einschalten, wenn du
+sicher bist, dass TLS dauerhaft verfügbar ist. Sonst sperrt sich der
+Browser auf https und du erreichst http nicht mehr.
+
 ## Reverse-Proxy davor
 
 Sobald der Server im Office-LAN erreichbar ist, gehört ein

@@ -70,6 +70,9 @@ docker run --rm -v opncockpit-data:/data -v $(pwd):/backup debian:12-slim \
 | `OPNCOCKPIT_AUTH_BACKEND` | `vault` | `vault` (Single-User) oder `user-db` (Multi-User) |
 | `OPNCOCKPIT_DEPLOYMENT_MODE` | `single-local` | `single-local` / `single-network` / `multi-server` |
 | `OPNCOCKPIT_VAULT_PATH` | _(leer)_ | Default-Pfad zum zentralen Vault im Setup-Wizard |
+| `OPNCOCKPIT_AUDIT_SECRET` | _(auto)_ | HMAC-Schlüssel für Audit-Log-Tamper-Evidence (Hex oder UTF-8). Wird beim ersten Start in `/data/audit-secret` generiert. |
+| `OPNCOCKPIT_HSTS_ENABLED` | _(off)_ | `1` aktivieren, wenn ein TLS-Reverse-Proxy davor steht. **Nicht** für http-only-Setups — sperrt sonst den Browser auf https. |
+| `OPNCOCKPIT_HSTS_MAX_AGE` | `31536000` | HSTS-Cache-Dauer in Sekunden (Default 1 Jahr) |
 | `TZ` | `Europe/Berlin` | Zeitzone für Audit-Timestamps |
 
 ## Setup-Flow
@@ -130,6 +133,21 @@ In `docker-compose.yml` die drei Env-Variablen
 (`OPNCOCKPIT_AUTH_BACKEND`, `OPNCOCKPIT_DEPLOYMENT_MODE`,
 `OPNCOCKPIT_VAULT_PATH`) auskommentieren, `docker compose up -d`.
 Der klassische Vault-Picker erscheint.
+
+## Audit-Log-Integrity prüfen
+
+Im SQLite-Mode (Default für Container) baut der Server eine HMAC-Hash-
+Chain über alle Audit-Einträge auf. Verifizieren kannst du das jederzeit:
+
+```
+GET /api/audit/verify
+```
+
+Liefert `{"status": "ok", "total": N, "broken": []}` bei intaktem Log,
+oder `"status": "broken"` mit Indizes der manipulierten Einträge.
+
+Das Server-Secret liegt in `/data/audit-secret` (0600). Wer das File hat,
+hat den Schlüssel — entsprechend backupen + schützen.
 
 ## Reverse-Proxy mit TLS
 

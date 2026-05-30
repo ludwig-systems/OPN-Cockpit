@@ -7,7 +7,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from opn_cockpit.audit.backend import get_audit_backend
+from opn_cockpit.audit.chain import load_or_generate_secret, verify_chain
 from opn_cockpit.audit.log import AuditEventKind
+from opn_cockpit.audit.sqlite_backend import SqliteAuditBackend
 from opn_cockpit.security.session import Session
 from opn_cockpit.web.api.schemas import (
     AuditEntryResponse,
@@ -89,6 +91,35 @@ def list_event_kinds(session: Session = Depends(require_session)) -> list[str]:
     """Liefert alle bekannten Event-Kinds als String-Liste — fuer Filter-UI."""
     session.touch()
     return [str(e) for e in AuditEventKind]
+
+
+@router.get("/verify")
+def verify_audit_chain(
+    session: Session = Depends(require_session),
+) -> dict[str, object]:
+    """Verifiziert die HMAC-Hash-Chain des Audit-Logs (v4-Pass 3).
+
+    Nur sinnvoll, wenn SQLite-Backend mit Hash-Chain aktiv ist. Liefert
+    Total + Anzahl geprüfter Eintraege + Liste der "broken" Indices
+    (Tampering-Verdacht). Bei File-Backend: status='not-available'.
+    """
+    session.touch()
+    backend = get_audit_backend()
+    if not isinstance(backend, SqliteAuditBackend):
+        return {
+            "status": "not-available",
+            "reason": "Hash-Chain ist nur im SQLite-Storage-Backend verfuegbar.",
+            "total": 0,
+            "broken": [],
+        }
+    chained = backend.read_chain()
+    secret = load_or_generate_secret()
+    broken = verify_chain(chained, secret)
+    return {
+        "status": "ok" if not broken else "broken",
+        "total": len(chained),
+        "broken": broken,
+    }
 
 
 __all__ = ["router"]
