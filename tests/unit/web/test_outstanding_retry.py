@@ -226,7 +226,7 @@ class TestRetry:
         assert len(called_plan.actions) == 1
         assert called_plan.actions[0].device.id == "dev-002"
 
-    def test_apply_with_empty_filter_400(
+    def test_apply_with_unknown_device_id_404(
         self,
         client: TestClient,
         token: str,
@@ -237,4 +237,7 @@ class TestRetry:
             json={"device_ids": ["nope-not-real"]},
             headers=_bearer(token),
         )
-        assert response.status_code == 400
+        # Seit v3.0 Iter 4 prueft das ACL-Modul die device_ids gegen das
+        # Inventar — unbekannte IDs liefern 404 (konsistent mit Inventar-
+        # Sicht), nicht 400.
+        assert response.status_code == 404

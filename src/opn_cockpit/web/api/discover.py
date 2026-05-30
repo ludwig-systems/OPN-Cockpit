@@ -17,6 +17,7 @@ from opn_cockpit.core.discovery import (
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.model import VaultDevice
+from opn_cockpit.web.acl import require_device_access
 from opn_cockpit.web.api.schemas import (
     AliasDiscoveryResponse,
     AliasSummaryResponse,
@@ -94,6 +95,7 @@ def discover_aliases(
 def _find_device(session: Session, device_id: str) -> VaultDevice:
     for d in session.opened.data.devices:
         if d.id == device_id:
+            require_device_access(d, session)
             return d
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,

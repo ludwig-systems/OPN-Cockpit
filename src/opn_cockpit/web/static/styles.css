@@ -1817,6 +1817,21 @@ a.card-open-link { text-decoration: none; }
   background: var(--border-strong);
 }
 
+.user-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  margin-left: 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-soft);
+}
+
 /* ===== v3.0 Iter 3: User-Verwaltung ===== */
 
 .users-toolbar {

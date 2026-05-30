@@ -18,6 +18,7 @@ from opn_cockpit.profiles.store import (
     ProfileStoreError,
 )
 from opn_cockpit.security.session import Session
+from opn_cockpit.web.acl import require_plan_role
 from opn_cockpit.web.api.schemas import (
     ProfileCreateRequest,
     ProfileListResponse,
@@ -61,7 +62,8 @@ def create_profile(
     payload: ProfileCreateRequest,
     session: Session = Depends(require_session),
 ) -> ProfileResponse:
-    """Legt ein neues Template an."""
+    """Legt ein neues Template an. Nur operator + admin."""
+    require_plan_role(session)
     session.touch()
     try:
         profile = _store().save_new(
@@ -100,7 +102,8 @@ def delete_profile(
     profile_id: str,
     session: Session = Depends(require_session),
 ) -> None:
-    """Entfernt ein Profil aus dem Store."""
+    """Entfernt ein Profil aus dem Store. Nur operator + admin."""
+    require_plan_role(session)
     session.touch()
     removed = _store().delete(profile_id)
     if not removed:

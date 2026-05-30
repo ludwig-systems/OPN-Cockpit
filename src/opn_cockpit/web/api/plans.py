@@ -21,6 +21,11 @@ from opn_cockpit.orchestration.plan_store import PlanStoreError
 from opn_cockpit.orchestration.planner import Plan, PlannedDeviceAction, Planner
 from opn_cockpit.orchestration.registry import get_binding
 from opn_cockpit.security.session import Session
+from opn_cockpit.web.acl import (
+    device_visible_to,
+    require_device_ids_accessible,
+    require_plan_role,
+)
 from opn_cockpit.web.api.schemas import (
     AliasPlanRequest,
     ApplyRequest,
@@ -54,6 +59,10 @@ def plan_route(
     session: Session = Depends(require_session),
 ) -> PlanResponse:
     """Erzeugt einen Plan fuer eine neue statische Route auf den gewaehlten Geraeten."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
     devices = _devices_or_404(session, payload.target_device_ids)
     spec = RouteSpec(
         network=payload.network,
@@ -86,6 +95,10 @@ def plan_alias(
     session: Session = Depends(require_session),
 ) -> PlanResponse:
     """Erzeugt einen Plan fuer einen Alias (create oder append)."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
     devices = _devices_or_404(session, payload.target_device_ids)
     spec = AliasSpec(
         name=payload.name,
@@ -117,14 +130,21 @@ def plan_alias(
 
 @router.get("", response_model=PlanListResponse)
 def list_plans(session: Session = Depends(require_session)) -> PlanListResponse:
-    """Listet alle aktuell gespeicherten Pläne."""
+    """Listet alle Plaene, deren Geraete fuer den User sichtbar sind."""
     session.touch()
     store = _plan_store()
     summaries: list[PlanSummary] = []
+    visible_ids = {
+        d.id for d in session.opened.data.devices if device_visible_to(d, session)
+    }
     for plan_id in store.list_ids():
         try:
             plan = store.load(plan_id)
         except PlanStoreError:
+            continue
+        plan_device_ids = {a.device.id for a in plan.actions}
+        if plan_device_ids and not plan_device_ids.issubset(visible_ids):
+            # Plan beruehrt Geraete ausserhalb des User-Scopes — verstecken.
             continue
         summaries.append(
             PlanSummary(
@@ -145,13 +165,16 @@ def list_plans(session: Session = Depends(require_session)) -> PlanListResponse:
 
 @router.get("/outstanding", response_model=OutstandingResponse)
 def outstanding(session: Session = Depends(require_session)) -> OutstandingResponse:
-    """Aggregiert pro Geraet die Anzahl noch nicht erfolgreich abgeschlossener Plaene."""
+    """Aggregiert pro sichtbarem Geraet die offenen Plaene."""
     session.touch()
     store = _plan_store()
     # device_id -> (count, [plan_ids in load-order], name)
     counts: dict[str, int] = {}
     plan_lists: dict[str, list[str]] = {}
     name_lookup = {d.id: d.name for d in session.opened.data.devices}
+    visible_ids = {
+        d.id for d in session.opened.data.devices if device_visible_to(d, session)
+    }
 
     for plan_id in store.list_ids():
         try:
@@ -175,6 +198,8 @@ def outstanding(session: Session = Depends(require_session)) -> OutstandingRespo
         for did in plan_devices:
             if did in success_ids:
                 continue
+            if did not in visible_ids:
+                continue  # Outstanding nur fuer sichtbare Geraete melden
             counts[did] = counts.get(did, 0) + 1
             plan_lists.setdefault(did, []).append(plan_id)
 
@@ -201,9 +226,20 @@ def get_plan(
     plan_id: str,
     session: Session = Depends(require_session),
 ) -> PlanResponse:
-    """Liefert die vollstaendige Vorschau eines gespeicherten Plans."""
+    """Liefert die Vorschau eines Plans — nur wenn alle Geraete sichtbar sind."""
     session.touch()
     plan = _load_plan_or_404(plan_id)
+    # Plan-Devices muessen alle im User-Scope liegen, sonst 404 (Existenz nicht
+    # verraten).
+    visible_ids = {
+        d.id for d in session.opened.data.devices if device_visible_to(d, session)
+    }
+    plan_device_ids = {a.device.id for a in plan.actions}
+    if plan_device_ids and not plan_device_ids.issubset(visible_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plan '{plan_id}' nicht gefunden.",
+        )
     return _plan_to_response(plan)
 
 
@@ -218,6 +254,7 @@ def delete_plan(
     session: Session = Depends(require_session),
 ) -> None:
     """Entfernt einen gespeicherten Plan (z. B. wenn der User abbricht)."""
+    require_plan_role(session)
     session.touch()
     store = _plan_store()
     try:
@@ -257,7 +294,15 @@ def apply_plan(
     will nur die fehlgeschlagenen nachziehen. Wenn ``device_ids`` leer
     oder ``None`` ist, wird der Plan auf allen seinen Geraeten ausgerollt.
     """
+    require_plan_role(session)
     device_ids = payload.device_ids if payload is not None else None
+    # ACL-Pruefung: alle Plan-Geraete (oder gefilterte device_ids) muessen im
+    # User-Scope liegen. Sonst 404 (Existenz nicht verraten).
+    plan = _load_plan_or_404(plan_id)
+    target_ids = device_ids if device_ids else [a.device.id for a in plan.actions]
+    require_device_ids_accessible(
+        target_ids, session.opened.data.devices, session,
+    )
     try:
         plan, full_report = run_apply(session, plan_id, device_ids=device_ids)
     except PlanStoreError as exc:

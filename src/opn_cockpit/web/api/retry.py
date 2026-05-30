@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from opn_cockpit.security.session import Session
+from opn_cockpit.web.acl import require_device_ids_accessible, require_plan_role
 from opn_cockpit.web.api.schemas import (
     RetryJobResponse,
     RetryScheduleRequest,
@@ -59,7 +60,11 @@ def schedule_retry(
     pair: tuple[Session, str] = Depends(require_session_with_token),
 ) -> RetryJobResponse:
     """Startet einen Auto-Retry-Job fuer den uebergebenen Plan + Geraete."""
-    _session, token = pair
+    session, token = pair
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.device_ids, session.opened.data.devices, session,
+    )
     watcher = _watcher(request)
     job = watcher.schedule(
         plan_id=payload.plan_id,

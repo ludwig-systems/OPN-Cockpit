@@ -32,6 +32,7 @@ from opn_cockpit.importers.json_devices import parse_devices_json
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.model import VaultDevice
+from opn_cockpit.web.acl import require_write_role
 from opn_cockpit.web.api.schemas import (
     DeviceImportResponse,
     DeviceResponse,
@@ -56,6 +57,7 @@ async def import_devices(
     session: Session = Depends(require_session),
 ) -> DeviceImportResponse:
     """Laedt Geraete aus einer Datei und fuegt sie dem Tresor hinzu."""
+    require_write_role(session)
     vault_path = session.vault_path
     if vault_path is None:
         raise HTTPException(

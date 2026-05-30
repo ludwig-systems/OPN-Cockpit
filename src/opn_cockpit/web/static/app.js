@@ -398,12 +398,26 @@
     const isMulti = state.serverMode === 'user-db';
     const usersBtn = $('#users-open-btn');
     const pwBtn = $('#password-self-btn');
+    const userBadge = $('#current-user-badge');
     if (pwBtn) pwBtn.hidden = !isMulti;
-    if (usersBtn) usersBtn.hidden = true; // wird gleich anhand /me geprueft
+    if (usersBtn) usersBtn.hidden = true;
+    if (userBadge) userBadge.hidden = !isMulti;
     if (!isMulti) return;
     // Rolle aus Session via /api/users probe (200 = admin, 403 = nicht-admin).
-    apiGet('/api/users').then((response) => {
+    apiGet('/api/users').then(async (response) => {
       if (response.status === 200 && usersBtn) usersBtn.hidden = false;
+      // User-Badge anzeigen — Username steht in keiner /me-Antwort, also
+      // probieren wir es ueber /api/users (Admin) oder lassen es generisch.
+      if (userBadge) {
+        if (response.status === 200) {
+          const body = await response.json();
+          // Welcher User ist eingeloggt? Wir kennen nicht direkt — kennzeichnen
+          // wir den als "admin".
+          userBadge.textContent = `admin · ${body.users.length} User`;
+        } else if (response.status === 403) {
+          userBadge.textContent = 'eingeloggt';
+        }
+      }
     }).catch(() => {});
   }
 

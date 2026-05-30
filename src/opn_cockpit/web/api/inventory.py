@@ -18,6 +18,11 @@ from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.model import VaultDevice
+from opn_cockpit.web.acl import (
+    filter_devices_for,
+    require_device_access,
+    require_write_role,
+)
 from opn_cockpit.web.api.schemas import (
     ConnectionTestResponse,
     DeviceCreateRequest,
@@ -44,8 +49,15 @@ HEARTBEAT_MAX_WORKERS = 16
 
 @router.get("", response_model=InventoryResponse)
 def list_inventory(session: Session = Depends(require_session)) -> InventoryResponse:
-    """Liefert alle Geraete (ohne Secrets) und eine Tag-Summary."""
-    devices = [Device.from_vault_device(d) for d in session.opened.data.devices]
+    """Liefert alle fuer den User sichtbaren Geraete + Tag-Summary.
+
+    Multi-User-Mode: allowed_tags-Whitelist greift; admins und
+    Single-Mode sehen alles. Die Tag-Summary basiert ausschliesslich
+    auf den sichtbaren Geraeten — der User soll keine Existenz von
+    Tags ausserhalb seines Scopes erfahren.
+    """
+    raw_devices = filter_devices_for(session.opened.data.devices, session)
+    devices = [Device.from_vault_device(d) for d in raw_devices]
     session.touch()
     return InventoryResponse(
         devices=[_to_device_response(d) for d in devices],
@@ -69,6 +81,7 @@ def add_device(
     session: Session = Depends(require_session),
 ) -> DeviceResponse:
     """Legt ein Geraet im Tresor an und persistiert."""
+    require_write_role(session)
     vault_path = _require_vault_path(session)
     if _name_exists(session, payload.name):
         raise HTTPException(
@@ -110,6 +123,7 @@ def update_device(
     session: Session = Depends(require_session),
 ) -> DeviceResponse:
     """Aktualisiert ausgewaehlte Felder eines Geraets und persistiert."""
+    require_write_role(session)
     vault_path = _require_vault_path(session)
     devices = session.opened.data.devices
     index = next((i for i, d in enumerate(devices) if d.id == device_id), -1)
@@ -120,6 +134,7 @@ def update_device(
         )
 
     current = devices[index]
+    require_device_access(current, session)
 
     # Namens-Eindeutigkeit pruefen, falls geaendert.
     if payload.name is not None and payload.name != current.name:
@@ -181,6 +196,7 @@ def remove_device(
     session: Session = Depends(require_session),
 ) -> None:
     """Entfernt ein Geraet aus dem Tresor."""
+    require_write_role(session)
     vault_path = _require_vault_path(session)
     devices = session.opened.data.devices
     index = next((i for i, d in enumerate(devices) if d.id == device_id), -1)
@@ -189,6 +205,7 @@ def remove_device(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
         )
+    require_device_access(devices[index], session)
     backup = devices.pop(index)
 
     def _rollback_remove() -> None:
@@ -207,17 +224,17 @@ def heartbeat(
     payload: HeartbeatRequest,
     session: Session = Depends(require_session),
 ) -> HeartbeatResponse:
-    """TCP-Probe gegen alle uebergebenen Geraete (oder alle im Tresor).
+    """TCP-Probe gegen alle sichtbaren Geraete (gefiltert per allowed_tags).
 
     Bewusst KEIN HTTP-Aufruf — der Heartbeat soll keine OPNsense-
     Auth-Logs erzeugen und keine Last verursachen.
     """
-    devices = session.opened.data.devices
+    visible_devices = filter_devices_for(session.opened.data.devices, session)
     if payload.device_ids:
         wanted = set(payload.device_ids)
-        targets = [d for d in devices if d.id in wanted]
+        targets = [d for d in visible_devices if d.id in wanted]
     else:
-        targets = list(devices)
+        targets = list(visible_devices)
 
     if not targets:
         return HeartbeatResponse(results=[])
@@ -256,6 +273,7 @@ def test_connection(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
         )
+    require_device_access(vault_device, session)
     target = HttpTarget(
         host=vault_device.host,
         port=vault_device.port,
