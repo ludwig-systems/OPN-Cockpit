@@ -1,19 +1,21 @@
 # Installer
 
-Inno-Setup-Skript für OPN-Cockpit v2.0. Erzeugt einen Windows-Installer
-mit Desktop-Verknüpfung und Start-Menü-Eintrag.
+Inno-Setup-Skript für OPN-Cockpit v3.2. Erzeugt einen Windows-Installer
+mit zwei Installations-Modi:
+
+- **Single-User**: Desktop-Verknüpfung, Aufruf via `start.bat`. Der
+  User entscheidet manuell wann der Server läuft.
+- **Multi-User-Server**: Windows-Dienst (NSSM-basiert) mit Autostart.
+  Im Netzwerk erreichbar (Standard-Port 9876), Single-File-Backup
+  möglich (SQLite-Backends via `OPNCOCKPIT_STORAGE_BACKEND=sqlite`).
 
 ## Voraussetzungen
 
 - **Inno Setup 6+** auf dem Build-Rechner — https://jrsoftware.org/isinfo.php
-- **Auf dem Ziel-System** (vor dem Installer-Lauf):
-  - Python 3.11+
-  - [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
-
-Der Installer prüft beim Start ob Python und uv da sind und bricht
-sonst mit klarer Fehlermeldung ab. Eine spätere Iteration kann Python
-als Embedded-Distribution mitliefern, um die Installation komplett
-in sich geschlossen zu machen.
+- **NSSM** (nur für Service-Mode): `nssm.exe` aus https://nssm.cc/
+  herunterladen und nach `installer\bundle\nssm.exe` legen. Public
+  Domain, etwa 350 KB. Ohne `nssm.exe` wird die Service-Komponente
+  trotzdem gebaut, schlägt aber bei der Service-Registrierung fehl.
 
 ## Bauen
 
@@ -24,28 +26,40 @@ ISCC opn-cockpit.iss
 
 Ergebnis: `installer\out\OPN-Cockpit-Setup-0.1.0.exe`.
 
-## Was der Installer tut
+## Auf dem Ziel-System
 
-1. Kopiert `src\`, `scripts\`, `docs\`, `start.bat`, `pyproject.toml`,
-   `README.md`, `CHANGELOG.md` nach `%ProgramFiles%\OPN-Cockpit\`.
-2. Ruft `scripts\setup-venv.ps1` auf — legt `.venv\` an und installiert
-   die Runtime-Dependencies.
-3. Legt eine Desktop-Verknüpfung „OPN-Cockpit" an (Aufruf `start.bat`).
-4. Legt Start-Menü-Einträge an: Starten, Quickstart öffnen,
-   Deinstallieren.
-5. Bietet am Ende „Jetzt starten" an.
+Der Installer prüft beim Start ob Python 3.11+ und `uv` installiert
+sind. Fehlen sie, bietet er **automatisch den Download an** (Python
+direkt von python.org, uv per `irm https://astral.sh/uv/install.ps1
+| iex`). Der User kann das auch ablehnen und manuell nachholen.
+
+## Mode-Wahl im Installer
+
+Während der Installation fragt der Setup-Wizard nach dem Modus:
+
+| Mode | Wann sinnvoll |
+|---|---|
+| Single-User | Du bist allein der Admin, eigene Workstation/PAW |
+| Multi-User-Server | Mehrere Admins, Server soll bei Systemstart hochkommen |
+
+Bei **Multi-User-Server**:
+1. NSSM registriert den Dienst `OPN-Cockpit` (Startup: Automatisch)
+2. Service läuft als `NT AUTHORITY\LocalService`
+3. Logs landen in `%ProgramData%\OPN-Cockpit\logs\`
+4. Vor dem ersten Setup-Wizard musst du `OPNCOCKPIT_AUTH_BACKEND=user-db`
+   in der Service-Env setzen (`nssm edit OPN-Cockpit` → Environment).
 
 ## Was nicht im Installer ist
 
-- **Tresor-Dateien** — die liegen in `%APPDATA%\OPN-Cockpit\` und werden
-  von der Deinstallation **nicht** angefasst. Der User behält seine
-  `.opnvault`-Dateien.
-- **Audit-Log und Plan-Store** — ebenfalls in `%APPDATA%\OPN-Cockpit\`.
+- **Tresor-Dateien** — die liegen in `%APPDATA%\OPN-Cockpit\` (oder
+  `%ProgramData%\OPN-Cockpit\` im Service-Mode) und werden von der
+  Deinstallation **nicht** angefasst.
+- **Audit-Log und Plan-Store** — ebenfalls.
+- **NSSM-Binary** — selbst herunterladen, siehe oben.
 
 ## Geplante Erweiterungen
 
-- Embedded-Python-Variante, damit der Installer ohne System-Python läuft.
-- Optional: Windows-Dienst-Modus (über `pywin32` oder `NSSM-Wrapper`),
-  damit der Server beim Systemstart hochkommt — siehe Memory-Notiz im
-  Projekt-Status.
-- Signing-Zertifikat sobald das Tool veröffentlicht wird.
+- Embedded-Python-Variante (komplett ohne System-Python).
+- Auto-Setzen der Service-Env-Variablen via Installer-Prompt (statt
+  manuelles `nssm edit`).
+- Code-Signing-Zertifikat sobald das Tool veröffentlicht wird.
