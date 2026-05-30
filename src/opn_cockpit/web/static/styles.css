@@ -1817,6 +1817,39 @@ a.card-open-link { text-decoration: none; }
   background: var(--border-strong);
 }
 
+.audit-integrity {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.audit-integrity.ok {
+  background: rgba(88, 106, 38, 0.08);
+  border-color: var(--accent-soft);
+  color: var(--accent);
+}
+
+.audit-integrity.broken {
+  background: rgba(220, 75, 75, 0.08);
+  border-color: rgba(220, 75, 75, 0.5);
+  color: #e35a5a;
+}
+
+.audit-integrity.na {
+  background: var(--bg-elevated);
+  color: var(--text-subtle);
+}
+
+.audit-integrity strong {
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
 .user-badge {
   display: inline-flex;
   align-items: center;

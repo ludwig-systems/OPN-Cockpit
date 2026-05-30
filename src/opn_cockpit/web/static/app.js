@@ -2567,6 +2567,66 @@
     }
   }
 
+  async function verifyAuditChain() {
+    const box = $('#au-integrity');
+    box.hidden = false;
+    box.className = 'audit-integrity na';
+    box.textContent = 'Pruefe Hash-Chain…';
+    try {
+      const response = await apiGet('/api/audit/verify');
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        box.className = 'audit-integrity broken';
+        box.textContent = `Verifikation fehlgeschlagen (${response.status}).`;
+        return;
+      }
+      const data = await response.json();
+      if (data.status === 'not-available') {
+        box.className = 'audit-integrity na';
+        box.textContent = `Hash-Chain im aktuellen Backend nicht verfuegbar (nur SQLite). ${data.total} Eintraege ungesichert.`;
+        return;
+      }
+      if (data.status === 'ok') {
+        box.className = 'audit-integrity ok';
+        box.innerHTML = `✓ Hash-Chain intakt. <strong>${data.total}</strong> Eintraege ueberprueft, keine Manipulation erkannt.`;
+        return;
+      }
+      box.className = 'audit-integrity broken';
+      const idx = (data.broken || []).join(', ');
+      box.innerHTML = `⚠ Manipulation erkannt! ${data.total} Eintraege geprueft, defekt: <strong>${idx}</strong>`;
+    } catch (err) {
+      box.className = 'audit-integrity broken';
+      box.textContent = err.message;
+    }
+  }
+
+  async function exportAuditCsv() {
+    const params = new URLSearchParams();
+    const event = $('#au-filter-event').value;
+    const action = $('#au-filter-action').value.trim();
+    const device = $('#au-filter-device').value.trim();
+    if (event) params.set('event', event);
+    if (action) params.set('action', action);
+    if (device) params.set('target_device_id', device);
+    const url = `/api/audit/export.csv?${params.toString()}`;
+    try {
+      const token = getToken();
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        showToast(`Audit-Export fehlgeschlagen (${response.status}).`, true);
+        return;
+      }
+      const blob = await response.blob();
+      triggerDownload(blob, 'opn-cockpit-audit.csv');
+      showToast('Audit-CSV heruntergeladen.');
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
   function formatAuditTime(iso) {
     // 2026-05-29T12:34:56.789Z -> "29.05. 12:34:56"
     const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
@@ -2768,6 +2828,10 @@
     $('#audit-modal-close').addEventListener('click', closeAuditModal);
     $('#audit-modal-cancel').addEventListener('click', closeAuditModal);
     $('#au-reload').addEventListener('click', reloadAudit);
+    const verifyBtn = $('#au-verify-btn');
+    if (verifyBtn) verifyBtn.addEventListener('click', verifyAuditChain);
+    const exportBtn = $('#au-export-btn');
+    if (exportBtn) exportBtn.addEventListener('click', exportAuditCsv);
     $('#audit-modal').addEventListener('click', (e) => {
       if (e.target.id === 'audit-modal') closeAuditModal();
     });

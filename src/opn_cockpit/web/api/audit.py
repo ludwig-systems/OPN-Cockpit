@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from opn_cockpit.audit.backend import get_audit_backend
 from opn_cockpit.audit.chain import load_or_generate_secret, verify_chain
@@ -91,6 +94,68 @@ def list_event_kinds(session: Session = Depends(require_session)) -> list[str]:
     """Liefert alle bekannten Event-Kinds als String-Liste — fuer Filter-UI."""
     session.touch()
     return [str(e) for e in AuditEventKind]
+
+
+@router.get("/export.csv")
+def export_audit_csv(
+    session: Session = Depends(require_session),
+    event: Annotated[str | None, Query()] = None,
+    action: Annotated[str | None, Query()] = None,
+    target_device_id: Annotated[str | None, Query()] = None,
+    actor: Annotated[str | None, Query()] = None,
+    since_iso: Annotated[str | None, Query(alias="since")] = None,
+    until_iso: Annotated[str | None, Query(alias="until")] = None,
+) -> StreamingResponse:
+    """Liefert das Audit-Log als CSV-Download.
+
+    Filter-Parameter sind identisch zur Liste. Reihenfolge: aelteste
+    zuerst (forensik-freundlich). Zeitstempel und Felder bleiben
+    unveraendert; Hash-Chain-Verifikation ist ein separater Aufruf.
+    """
+    session.touch()
+    audit = get_audit_backend()
+    event_enum: AuditEventKind | None = None
+    if event:
+        try:
+            event_enum = AuditEventKind(event)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unbekannter event-Wert: {event}",
+            ) from exc
+    records = audit.filter(
+        event=event_enum,
+        action=action,
+        target_device_id=target_device_id,
+        actor=actor,
+        since_iso=since_iso,
+        until_iso=until_iso,
+    )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow([
+        "timestamp_utc", "actor", "event", "summary", "action",
+        "target_device_id", "target_device_name", "target_count",
+        "status", "error_kind", "failed_phase", "duration_ms", "vault_path",
+    ])
+    for r in records:
+        writer.writerow([
+            r.timestamp_utc, r.actor, str(r.event), r.summary,
+            r.action or "", r.target_device_id or "", r.target_device_name or "",
+            r.target_count if r.target_count is not None else "",
+            r.status or "", r.error_kind or "", r.failed_phase or "",
+            r.duration_ms if r.duration_ms is not None else "",
+            r.vault_path or "",
+        ])
+    buffer.seek(0)
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="opn-cockpit-audit.csv"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/verify")
