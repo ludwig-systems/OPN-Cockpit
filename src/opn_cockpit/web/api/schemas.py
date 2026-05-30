@@ -29,6 +29,62 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1)
 
 
+# ---------------------------------------------------------------------------
+# User-Verwaltung (Multi-User-Mode)
+# ---------------------------------------------------------------------------
+
+
+class UserResponse(BaseModel):
+    """Read-only User-Sicht. Kein Passwort-Hash — niemals exponieren."""
+
+    id: int
+    username: str
+    role: str
+    allowed_tags: list[str]
+    created_at_iso: str
+    last_login_at_iso: str | None
+    disabled: bool
+
+
+class UserListResponse(BaseModel):
+    users: list[UserResponse]
+
+
+class UserCreateRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=120)
+    password: str = Field(..., min_length=12)
+    role: str = Field(..., pattern="^(viewer|operator|admin)$")
+    allowed_tags: list[str] = Field(default_factory=list)
+
+
+class UserUpdateRequest(BaseModel):
+    """Aenderung eines Users.
+
+    Felder sind optional — nur was uebergeben wird, wird aktualisiert.
+    Username ist absichtlich nicht aenderbar (zerstoert Audit-Spur).
+    """
+
+    role: str | None = Field(None, pattern="^(viewer|operator|admin)$")
+    allowed_tags: list[str] | None = None
+    disabled: bool | None = None
+
+
+class PasswordChangeRequest(BaseModel):
+    """Self-Service-Passwortwechsel des eingeloggten Users."""
+
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=12)
+
+
+class AdminPasswordResetRequest(BaseModel):
+    """Admin-Reset: setzt das Passwort eines anderen Users.
+
+    Kein ``current_password``-Feld — der Admin kennt das alte sowieso nicht.
+    """
+
+    new_password: str = Field(..., min_length=12)
+
+
 class UnlockResponse(BaseModel):
     token: str
     vault_path: str

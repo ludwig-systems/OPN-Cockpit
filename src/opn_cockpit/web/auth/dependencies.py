@@ -61,3 +61,30 @@ def require_session(
 ) -> Session:
     """Kurzform fuer Routen, die nur die Session brauchen — nicht das Token."""
     return pair[0]
+
+
+def require_admin(
+    session: Session = Depends(require_session),
+) -> Session:
+    """Routen-Guard fuer Admin-only-Endpunkte (Multi-User-Mode).
+
+    Verlangt eine Multi-User-Session (``session.user`` ist gesetzt) mit
+    Rolle ``admin``. Schlaegt sonst mit 403 fehl. Im Single-User-Mode ist
+    ``session.user`` immer None — User-Verwaltungs-Endpunkte sind dort
+    nicht aufrufbar.
+    """
+    user = session.user
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "User-Verwaltung ist nur im Multi-User-Mode verfuegbar. "
+                "Aktiviere OPNCOCKPIT_AUTH_BACKEND=user-db im Server."
+            ),
+        )
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Nur Admin-User duerfen diese Aktion ausfuehren.",
+        )
+    return session

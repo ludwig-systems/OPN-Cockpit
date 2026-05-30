@@ -1816,3 +1816,102 @@ a.card-open-link { text-decoration: none; }
 .modal-body::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
 }
+
+/* ===== v3.0 Iter 3: User-Verwaltung ===== */
+
+.users-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.user-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: 13px;
+}
+
+.user-row.disabled {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.user-row-name {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.user-row-meta {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
+.user-row-role {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.user-row-role.admin { color: var(--accent); border-color: var(--accent-soft); }
+.user-row-role.operator { color: var(--text); }
+.user-row-role.viewer { color: var(--text-subtle); }
+
+.user-row select.user-role-select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.user-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.user-row-actions .btn-link {
+  font-size: 12px;
+}
+
+.users-add-form {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.users-add-form h3 {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+}
+
+.users-add-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+}

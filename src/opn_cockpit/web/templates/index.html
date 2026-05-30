@@ -186,6 +186,21 @@
             </svg>
             <span class="retry-indicator-count" id="retry-indicator-count">0</span>
           </button>
+          <button class="icon-btn" id="users-open-btn" title="User-Verwaltung" hidden>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="5" r="2.3"/>
+              <path d="M2 13c0-2 2-3.5 4-3.5s4 1.5 4 3.5"/>
+              <circle cx="11.5" cy="5.5" r="1.8"/>
+              <path d="M10 9.5c1.5 0 4 1 4 3"/>
+            </svg>
+          </button>
+          <button class="icon-btn" id="password-self-btn" title="Eigenes Passwort aendern" hidden>
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="6.5" width="9" height="6" rx="1"/>
+              <path d="M5 6.5V4.5a2.5 2.5 0 015 0v2"/>
+              <circle cx="7.5" cy="9.5" r="0.6" fill="currentColor"/>
+            </svg>
+          </button>
           <button class="icon-btn" id="audit-open-btn" title="Audit-Log öffnen">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
               <line x1="3.5" y1="4.5" x2="12.5" y2="4.5"/>
@@ -515,6 +530,109 @@
         <div class="modal-footer">
           <button class="btn-link" id="bulk-modal-cancel">Abbrechen</button>
           <button class="btn-primary btn-primary-inline" id="bulk-submit-btn">Importieren</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: User-Verwaltung (admin-only) ================ -->
+    <div class="modal-backdrop" id="users-modal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="users-modal-title">
+        <div class="modal-header">
+          <h2 id="users-modal-title">User-Verwaltung</h2>
+          <button class="icon-btn modal-close" id="users-modal-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <div class="users-toolbar">
+            <button class="btn-primary btn-primary-inline" id="users-add-btn">Neuer User</button>
+          </div>
+
+          <div class="users-list" id="users-list">
+            <div class="audit-empty">Lade…</div>
+          </div>
+
+          <div class="form-divider"></div>
+
+          <!-- Add-User-Subform -->
+          <div class="users-add-form" id="users-add-form" hidden>
+            <h3 style="margin-top:0">User anlegen</h3>
+            <div class="form-row">
+              <div class="form-col flex-grow">
+                <label class="form-label" for="nu-username">Benutzername</label>
+                <input id="nu-username" class="form-input" type="text" autocomplete="off" />
+              </div>
+              <div class="form-col" style="flex:0 0 160px">
+                <label class="form-label" for="nu-role">Rolle</label>
+                <select id="nu-role" class="form-select">
+                  <option value="viewer">viewer (nur lesen)</option>
+                  <option value="operator" selected>operator (Plan + Apply)</option>
+                  <option value="admin">admin (alles)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-col">
+                <label class="form-label" for="nu-password">Passwort (min. 12)</label>
+                <input id="nu-password" class="form-input" type="password" autocomplete="new-password" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-col">
+                <label class="form-label" for="nu-tags">Erlaubte Tags (kommagetrennt, leer = alle)</label>
+                <input id="nu-tags" class="form-input" type="text" placeholder="branches, germany" />
+                <div class="form-hint">Bei v3.0 Iter 4 wird die ACL aktiv. Heute kosmetisch.</div>
+              </div>
+            </div>
+            <div class="form-error" id="users-add-error" hidden></div>
+            <div class="users-add-actions">
+              <button class="btn-link" id="users-add-cancel">Abbrechen</button>
+              <button class="btn-primary btn-primary-inline" id="users-add-submit">Anlegen</button>
+            </div>
+          </div>
+
+          <div class="form-error" id="users-modal-error" hidden></div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="users-modal-cancel">Schliessen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Eigenes Passwort aendern ================ -->
+    <div class="modal-backdrop" id="pwself-modal" hidden>
+      <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="pwself-title">
+        <div class="modal-header">
+          <h2 id="pwself-title">Eigenes Passwort aendern</h2>
+          <button class="icon-btn modal-close" id="pwself-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <label class="form-label" for="pwself-current">Aktuelles Passwort</label>
+          <input id="pwself-current" class="form-input" type="password" autocomplete="current-password" />
+
+          <label class="form-label" for="pwself-new1">Neues Passwort (min. 12)</label>
+          <input id="pwself-new1" class="form-input" type="password" autocomplete="new-password" />
+
+          <label class="form-label" for="pwself-new2">Wiederholen</label>
+          <input id="pwself-new2" class="form-input" type="password" autocomplete="new-password" />
+
+          <div class="form-error" id="pwself-error" hidden></div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="pwself-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="pwself-submit">Speichern</button>
         </div>
       </div>
     </div>

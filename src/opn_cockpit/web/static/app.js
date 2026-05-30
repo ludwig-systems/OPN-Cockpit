@@ -386,10 +386,25 @@
     $('#content-eyebrow').textContent = `Tresor · ${sessionInfo.vault_filename.replace(/\.opnvault$/i, '')}`;
     updateExpiry(sessionInfo.seconds_until_expiry);
     showScreen('main');
+    applyMultiUserVisibility();
     await loadInventory();
     startHeartbeat();
     startSessionTicker();
     startRetryPolling();
+  }
+
+  function applyMultiUserVisibility() {
+    // User-Mgmt-Button nur fuer Admins, Self-Service-PW fuer alle Multi-User.
+    const isMulti = state.serverMode === 'user-db';
+    const usersBtn = $('#users-open-btn');
+    const pwBtn = $('#password-self-btn');
+    if (pwBtn) pwBtn.hidden = !isMulti;
+    if (usersBtn) usersBtn.hidden = true; // wird gleich anhand /me geprueft
+    if (!isMulti) return;
+    // Rolle aus Session via /api/users probe (200 = admin, 403 = nicht-admin).
+    apiGet('/api/users').then((response) => {
+      if (response.status === 200 && usersBtn) usersBtn.hidden = false;
+    }).catch(() => {});
   }
 
   // -------------------- Main: Inventar laden --------------------
@@ -1939,6 +1954,265 @@
     }
   }
 
+  // -------------------- User-Verwaltung (admin-only) --------------------
+
+  async function openUsersModal() {
+    $('#users-modal').hidden = false;
+    $('#users-add-form').hidden = true;
+    $('#users-modal-error').hidden = true;
+    await reloadUsers();
+  }
+
+  function closeUsersModal() {
+    $('#users-modal').hidden = true;
+  }
+
+  async function reloadUsers() {
+    const list = $('#users-list');
+    list.innerHTML = '<div class="audit-empty">Lade…</div>';
+    try {
+      const response = await apiGet('/api/users');
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (response.status === 403) {
+        list.innerHTML = '<div class="audit-empty">Kein Zugriff (nur Admins).</div>';
+        return;
+      }
+      if (!response.ok) {
+        list.innerHTML = `<div class="audit-empty">Fehler ${response.status}</div>`;
+        return;
+      }
+      const data = await response.json();
+      renderUsersList(data.users || []);
+    } catch (err) {
+      list.innerHTML = `<div class="audit-empty">${err.message}</div>`;
+    }
+  }
+
+  function renderUsersList(users) {
+    const list = $('#users-list');
+    list.innerHTML = '';
+    if (!users.length) {
+      list.innerHTML = '<div class="audit-empty">Keine User angelegt.</div>';
+      return;
+    }
+    for (const u of users) {
+      const row = document.createElement('div');
+      row.className = 'user-row';
+      if (u.disabled) row.classList.add('disabled');
+
+      const nameBlock = document.createElement('div');
+      const name = document.createElement('div');
+      name.className = 'user-row-name';
+      name.textContent = u.username + (u.disabled ? ' (deaktiviert)' : '');
+      const meta = document.createElement('div');
+      meta.className = 'user-row-meta';
+      const lastLogin = u.last_login_at_iso
+        ? `letzter Login: ${formatAuditTime(u.last_login_at_iso)}`
+        : 'noch kein Login';
+      meta.textContent = `${lastLogin} · Tags: ${u.allowed_tags.length ? u.allowed_tags.join(', ') : 'alle'}`;
+      nameBlock.appendChild(name);
+      nameBlock.appendChild(meta);
+      row.appendChild(nameBlock);
+
+      // Rolle als Select
+      const roleSelect = document.createElement('select');
+      roleSelect.className = 'user-role-select form-select';
+      for (const r of ['viewer', 'operator', 'admin']) {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = r;
+        if (u.role === r) opt.selected = true;
+        roleSelect.appendChild(opt);
+      }
+      roleSelect.addEventListener('change', () => updateUserField(u.id, { role: roleSelect.value }));
+      row.appendChild(roleSelect);
+
+      const actions = document.createElement('div');
+      actions.className = 'user-row-actions';
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'btn-link';
+      toggleBtn.textContent = u.disabled ? 'aktivieren' : 'deaktivieren';
+      toggleBtn.addEventListener('click', () => updateUserField(u.id, { disabled: !u.disabled }));
+      actions.appendChild(toggleBtn);
+
+      const pwBtn = document.createElement('button');
+      pwBtn.className = 'btn-link';
+      pwBtn.textContent = 'PW reset';
+      pwBtn.addEventListener('click', () => adminResetPassword(u));
+      actions.appendChild(pwBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-link';
+      delBtn.textContent = 'loeschen';
+      delBtn.addEventListener('click', () => deleteUser(u));
+      actions.appendChild(delBtn);
+
+      row.appendChild(actions);
+      list.appendChild(row);
+    }
+  }
+
+  async function updateUserField(userId, body) {
+    try {
+      const response = await apiPatch(`/api/users/${userId}`, body);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const respBody = await response.json().catch(() => ({}));
+        showToast(respBody.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      await reloadUsers();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  async function adminResetPassword(user) {
+    const newPw = prompt(`Neues Passwort fuer "${user.username}" (min. 12 Zeichen):`);
+    if (newPw === null) return;
+    if (newPw.length < 12) {
+      showToast('Passwort muss mindestens 12 Zeichen haben.', true);
+      return;
+    }
+    try {
+      const response = await apiPost(
+        `/api/users/${user.id}/password`,
+        { new_password: newPw },
+      );
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (response.status !== 204 && !response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      showToast(`Passwort von "${user.username}" zurueckgesetzt.`);
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  async function deleteUser(user) {
+    if (!confirm(`User "${user.username}" wirklich loeschen?`)) return;
+    try {
+      const response = await apiDelete(`/api/users/${user.id}`);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (response.status !== 204 && !response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      showToast(`User "${user.username}" geloescht.`);
+      await reloadUsers();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  function openAddUserForm() {
+    $('#nu-username').value = '';
+    $('#nu-password').value = '';
+    $('#nu-tags').value = '';
+    $('#nu-role').value = 'operator';
+    $('#users-add-error').hidden = true;
+    $('#users-add-form').hidden = false;
+    setTimeout(() => $('#nu-username').focus(), 0);
+  }
+
+  function closeAddUserForm() {
+    $('#users-add-form').hidden = true;
+  }
+
+  async function submitAddUser() {
+    const username = $('#nu-username').value.trim();
+    const password = $('#nu-password').value;
+    const role = $('#nu-role').value;
+    const tagsRaw = $('#nu-tags').value.trim();
+    const allowed_tags = tagsRaw
+      ? tagsRaw.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+      : [];
+    const errorBox = $('#users-add-error');
+    errorBox.hidden = true;
+    if (!username) return showUserAddError('Benutzername fehlt.');
+    if (password.length < 12) return showUserAddError('Passwort muss mindestens 12 Zeichen haben.');
+    try {
+      const response = await apiPost('/api/users', {
+        username, password, role, allowed_tags,
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        return showUserAddError(body.detail || `Fehler ${response.status}`);
+      }
+      showToast(`User "${username}" angelegt.`);
+      closeAddUserForm();
+      await reloadUsers();
+    } catch (err) {
+      showUserAddError(err.message);
+    }
+  }
+
+  function showUserAddError(msg) {
+    const box = $('#users-add-error');
+    box.textContent = msg;
+    box.hidden = false;
+  }
+
+  // -------------------- Self-Service Passwort --------------------
+
+  function openSelfPasswordModal() {
+    $('#pwself-current').value = '';
+    $('#pwself-new1').value = '';
+    $('#pwself-new2').value = '';
+    $('#pwself-error').hidden = true;
+    $('#pwself-modal').hidden = false;
+    setTimeout(() => $('#pwself-current').focus(), 0);
+  }
+
+  function closeSelfPasswordModal() {
+    $('#pwself-modal').hidden = true;
+  }
+
+  async function submitSelfPassword() {
+    const current = $('#pwself-current').value;
+    const n1 = $('#pwself-new1').value;
+    const n2 = $('#pwself-new2').value;
+    const errorBox = $('#pwself-error');
+    errorBox.hidden = true;
+    if (n1.length < 12) {
+      errorBox.textContent = 'Neues Passwort muss mindestens 12 Zeichen haben.';
+      errorBox.hidden = false;
+      return;
+    }
+    if (n1 !== n2) {
+      errorBox.textContent = 'Die beiden Passwoerter stimmen nicht ueberein.';
+      errorBox.hidden = false;
+      return;
+    }
+    try {
+      const response = await apiPost('/api/users/me/password', {
+        current_password: current,
+        new_password: n1,
+      });
+      if (response.status === 401) {
+        errorBox.textContent = 'Aktuelles Passwort falsch.';
+        errorBox.hidden = false;
+        return;
+      }
+      if (response.status !== 204 && !response.ok) {
+        const body = await response.json().catch(() => ({}));
+        errorBox.textContent = body.detail || `Fehler ${response.status}`;
+        errorBox.hidden = false;
+        return;
+      }
+      closeSelfPasswordModal();
+      showToast('Passwort geaendert.');
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.hidden = false;
+    }
+  }
+
   // -------------------- Audit-Modal --------------------
 
   let auditEventKindsLoaded = false;
@@ -2177,6 +2451,37 @@
     $('#lock-btn').addEventListener('click', doLock);
     $('#audit-open-btn').addEventListener('click', openAuditModal);
     $('#retry-indicator-btn').addEventListener('click', showRetryStatus);
+    const usersBtn = $('#users-open-btn');
+    if (usersBtn) usersBtn.addEventListener('click', openUsersModal);
+    const pwSelfBtn = $('#password-self-btn');
+    if (pwSelfBtn) pwSelfBtn.addEventListener('click', openSelfPasswordModal);
+
+    // User-Verwaltungs-Modal
+    const umClose = $('#users-modal-close');
+    if (umClose) {
+      umClose.addEventListener('click', closeUsersModal);
+      $('#users-modal-cancel').addEventListener('click', closeUsersModal);
+      $('#users-add-btn').addEventListener('click', openAddUserForm);
+      $('#users-add-cancel').addEventListener('click', closeAddUserForm);
+      $('#users-add-submit').addEventListener('click', submitAddUser);
+      $('#users-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'users-modal') closeUsersModal();
+      });
+    }
+
+    // Self-Service-Passwort-Modal
+    const pwClose = $('#pwself-close');
+    if (pwClose) {
+      pwClose.addEventListener('click', closeSelfPasswordModal);
+      $('#pwself-cancel').addEventListener('click', closeSelfPasswordModal);
+      $('#pwself-submit').addEventListener('click', submitSelfPassword);
+      $('#pwself-new2').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitSelfPassword();
+      });
+      $('#pwself-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'pwself-modal') closeSelfPasswordModal();
+      });
+    }
 
     // Audit-Modal
     $('#audit-modal-close').addEventListener('click', closeAuditModal);
