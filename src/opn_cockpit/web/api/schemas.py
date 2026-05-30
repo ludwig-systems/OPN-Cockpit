@@ -181,6 +181,17 @@ class VaultImportRequest(BaseModel):
     source_password: str = Field(..., min_length=1, description="Master-Passwort des Quell-Vaults")
 
 
+class TemplateExportRequest(BaseModel):
+    """Template-Export: erstellt eine Vault-Kopie mit leeren Secret-Feldern.
+
+    ``template_password`` wird zur Verschluesselung des Templates genutzt
+    — typisch ein Passwort, das der Empfaenger spaeter kennt. Kann gleich
+    dem Master-Passwort sein.
+    """
+
+    template_password: str = Field(..., min_length=12)
+
+
 class DeviceCreateRequest(BaseModel):
     """Anlegen eines Geraets im Tresor.
 

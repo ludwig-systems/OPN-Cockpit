@@ -219,6 +219,13 @@
               <circle cx="7.5" cy="9.5" r="0.6" fill="currentColor"/>
             </svg>
           </button>
+          <button class="icon-btn" id="vault-export-btn" title="Tresor exportieren / Backup">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 9.5v2.5h9V9.5"/>
+              <line x1="7.5" y1="2.5" x2="7.5" y2="9"/>
+              <polyline points="5 6.5 7.5 9 10 6.5"/>
+            </svg>
+          </button>
           <button class="icon-btn" id="audit-open-btn" title="Audit-Log öffnen">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
               <line x1="3.5" y1="4.5" x2="12.5" y2="4.5"/>
@@ -675,6 +682,56 @@
         <div class="modal-footer">
           <button class="btn-link" id="pwself-cancel">Abbrechen</button>
           <button class="btn-primary btn-primary-inline" id="pwself-submit">Speichern</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Vault-Export (Backup + Template) ================ -->
+    <div class="modal-backdrop" id="export-modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="export-title">
+        <div class="modal-header">
+          <h2 id="export-title">Tresor exportieren</h2>
+          <button class="icon-btn modal-close" id="export-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <h3 style="margin-top:0">Backup-Download</h3>
+          <p class="form-hint">
+            Laedt die aktive .opnvault-Datei <strong>verschluesselt</strong>
+            herunter. Inhalt nur mit dem Master-Passwort lesbar. Geeignet
+            fuer Backups (Cloud-Storage, E-Mail an dich selbst, externer
+            Datentraeger).
+          </p>
+          <button class="btn-primary btn-primary-inline" id="export-backup-btn">Backup jetzt herunterladen</button>
+
+          <div class="form-divider"></div>
+
+          <h3>Template-Export</h3>
+          <p class="form-hint">
+            Erzeugt eine Kopie deines Tresors mit allen Firewall-Stammdaten,
+            aber <strong>leeren API-Credentials</strong>. Zum Weitergeben
+            an andere Admins, die ihre eigenen OPNsense-Keys einsetzen.
+          </p>
+
+          <label class="form-label" for="export-template-pw">Passwort fuer das Template (min. 12 Zeichen)</label>
+          <input id="export-template-pw" class="form-input" type="password" autocomplete="new-password" />
+          <div class="form-hint">
+            Der Empfaenger braucht dieses Passwort zum Oeffnen. Kann dasselbe
+            wie das aktuelle Master-PW sein, sollte es aber nicht.
+          </div>
+
+          <div class="form-error" id="export-error" hidden></div>
+
+          <button class="btn-primary btn-primary-inline" id="export-template-btn" style="margin-top:8px">Template herunterladen</button>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="export-cancel">Schliessen</button>
         </div>
       </div>
     </div>

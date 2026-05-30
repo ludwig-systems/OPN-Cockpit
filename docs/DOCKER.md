@@ -98,6 +98,21 @@ Erststart:
 Der Token rotiert nach jedem Schritt — schau für Step 2 nochmal in die
 Logs.
 
+## Vault-Backup ziehen
+
+Über die UI: **Tresor-Export**-Symbol in der Topbar (Download-Pfeil).
+Zwei Optionen:
+
+- **Backup** — kompletter Vault als-ist verschlüsselt, geeignet als
+  Offsite-Backup. Wird mit dem Master-Passwort wieder geöffnet.
+- **Template** — Kopie ohne API-Credentials, zum Weitergeben an
+  andere Admins. Eigenes Passwort fürs Template wählbar.
+
+Alternativ aus dem Container heraus (für automatisierte Backups):
+```powershell
+docker cp opn-cockpit:/data/firewalls.opnvault .\backup\
+```
+
 ## Firewalls aus anderem Tresor übernehmen
 
 Falls du schon einen `.opnvault` mit Firewalls hast und nicht alles

@@ -2305,6 +2305,105 @@
     }
   }
 
+  // -------------------- Vault-Export (Backup + Template) --------------------
+
+  function openExportModal() {
+    $('#export-template-pw').value = '';
+    $('#export-error').hidden = true;
+    $('#export-modal').hidden = false;
+  }
+
+  function closeExportModal() {
+    $('#export-modal').hidden = true;
+  }
+
+  async function doExportBackup() {
+    const btn = $('#export-backup-btn');
+    btn.disabled = true;
+    const originalLabel = btn.textContent;
+    btn.textContent = 'Lade…';
+    try {
+      const token = getToken();
+      const response = await fetch('/api/vaults/export/backup', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showExportError(body.detail || `Fehler ${response.status}`);
+        return;
+      }
+      const blob = await response.blob();
+      const cd = response.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename="?([^";]+)"?/i);
+      const filename = (m && m[1]) || (state.sessionInfo?.vault_filename) || 'backup.opnvault';
+      triggerDownload(blob, filename);
+      showToast(`Backup heruntergeladen: ${filename}`);
+    } catch (err) {
+      showExportError(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
+  }
+
+  async function doExportTemplate() {
+    const pw = $('#export-template-pw').value;
+    if (pw.length < 12) {
+      return showExportError('Template-Passwort muss mindestens 12 Zeichen haben.');
+    }
+    const btn = $('#export-template-btn');
+    btn.disabled = true;
+    const originalLabel = btn.textContent;
+    btn.textContent = 'Erzeuge…';
+    try {
+      const token = getToken();
+      const response = await fetch('/api/vaults/export/template', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ template_password: pw }),
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showExportError(body.detail || `Fehler ${response.status}`);
+        return;
+      }
+      const blob = await response.blob();
+      const cd = response.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename="?([^";]+)"?/i);
+      const filename = (m && m[1]) || 'template.opnvault';
+      triggerDownload(blob, filename);
+      showToast(`Template heruntergeladen: ${filename}`);
+      closeExportModal();
+    } catch (err) {
+      showExportError(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
+  }
+
+  function showExportError(msg) {
+    const box = $('#export-error');
+    box.textContent = msg;
+    box.hidden = false;
+  }
+
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   // -------------------- Audit-Modal --------------------
 
   let auditEventKindsLoaded = false;
@@ -2543,6 +2642,20 @@
     $('#lock-btn').addEventListener('click', doLock);
     $('#audit-open-btn').addEventListener('click', openAuditModal);
     $('#retry-indicator-btn').addEventListener('click', showRetryStatus);
+    const exportBtn = $('#vault-export-btn');
+    if (exportBtn) exportBtn.addEventListener('click', openExportModal);
+
+    // Export-Modal
+    const expClose = $('#export-close');
+    if (expClose) {
+      expClose.addEventListener('click', closeExportModal);
+      $('#export-cancel').addEventListener('click', closeExportModal);
+      $('#export-backup-btn').addEventListener('click', doExportBackup);
+      $('#export-template-btn').addEventListener('click', doExportTemplate);
+      $('#export-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'export-modal') closeExportModal();
+      });
+    }
     const usersBtn = $('#users-open-btn');
     if (usersBtn) usersBtn.addEventListener('click', openUsersModal);
     const pwSelfBtn = $('#password-self-btn');

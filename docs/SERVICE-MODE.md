@@ -52,6 +52,13 @@ Beim ersten Aufruf von `http://localhost:9876`:
 Token rotiert zwischen Step 1 und Step 2 — fürs zweite Mal nochmal in
 die Logs schauen.
 
+## Vault-Backup ziehen
+
+Über die UI: **Tresor-Export**-Symbol in der Topbar. Backup (komplett
+verschlüsselt) oder Template (ohne Credentials) als Download. Automatisch
+können Backups per Scheduled Task gezogen werden — die `.opnvault`-Datei
+liegt unter `%ProgramData%\OPN-Cockpit\firewalls.opnvault`.
+
 ## Firewalls aus anderem Tresor übernehmen
 
 Wenn du bereits einen `.opnvault` hast und nicht alles neu anlegen
