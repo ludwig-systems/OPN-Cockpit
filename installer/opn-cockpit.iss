@@ -36,7 +36,11 @@
 #define MyAppVersion    "0.6.0"
 #define MyAppPublisher  "Ludwig Systems"
 #define MyAppURL        "https://github.com/ludwig-systems/opn-cockpit"
-#define MyAppExeName    "python\Scripts\opn-cockpit.exe"
+; opn-cockpit.exe ist eine Kopie der Embedded-Python python.exe in derselben
+; Datei-Lage -- bundle-python.ps1 legt das an. Image-Name im Task-Manager =
+; opn-cockpit.exe, kein pip-Launcher mit Build-Zeit-Pfad-Shebang noetig.
+#define MyAppExeName    "python\opn-cockpit.exe"
+#define MyAppExeArgs    "-m opn_cockpit"
 
 [Setup]
 AppId={{B8F1A7C2-9D6E-4F3B-A1C0-OPNCOCKPITV20}}
@@ -101,11 +105,13 @@ Source: "bundle\nssm.exe";           DestDir: "{app}\bundle"; \
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
-  WorkingDir: "{app}"; Comment: "OPN-Cockpit starten"; Components: single
+  Parameters: "{#MyAppExeArgs}"; WorkingDir: "{app}\python"; \
+  Comment: "OPN-Cockpit starten"; Components: single
 Name: "{group}\Online-Hilfe"; Filename: "{#MyAppURL}"
 Name: "{group}\{#MyAppName} deinstallieren"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
-  WorkingDir: "{app}"; Tasks: desktopicon; Components: single
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
+  Parameters: "{#MyAppExeArgs}"; WorkingDir: "{app}\python"; \
+  Tasks: desktopicon; Components: single
 ; Service-Mode: kein Desktop-Shortcut, dafuer Browser-Verknuepfung zum lokalen Port.
 Name: "{group}\{#MyAppName} (Web-UI oeffnen)"; Filename: "http://localhost:9876"; Components: service
 
@@ -119,6 +125,8 @@ Filename: "powershell.exe"; \
 
 ; Single-Mode: optional jetzt starten.
 Filename: "{app}\{#MyAppExeName}"; \
+  Parameters: "{#MyAppExeArgs}"; \
+  WorkingDir: "{app}\python"; \
   Description: "OPN-Cockpit jetzt starten"; \
   Flags: nowait postinstall skipifsilent; Components: single
 

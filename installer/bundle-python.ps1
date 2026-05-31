@@ -184,6 +184,35 @@ $SanityResult = & $BundlePy -c "import opn_cockpit; print(opn_cockpit.__version_
 if ($LASTEXITCODE -ne 0) { throw "Bundle ist kaputt -- import opn_cockpit fehlgeschlagen." }
 Write-Host "==> Bundle-Version: $SanityResult" -ForegroundColor Green
 
+# --- Branded Launcher: python.exe -> opn-cockpit.exe ------------------------
+#
+# Pip's generierte console_scripts-Launcher (Scripts\opn-cockpit.exe) haben
+# einen absoluten Shebang auf die Build-Zeit-python.exe -- auf einer fremden
+# Maschine zeigt der ins Leere und ein Server-Start scheitert. Ausserdem
+# soll der Task-Manager-Eintrag "opn-cockpit.exe" heissen statt "python.exe".
+#
+# Embedded-Python-Trick: python.exe ist nicht an seinen eigenen Dateinamen
+# gebunden -- die python311.dll wird relativ zum Executable gesucht. Wir
+# duplizieren python.exe als opn-cockpit.exe und rufen sie spaeter mit
+# "-m opn_cockpit" auf. Image-Name im Task-Manager: opn-cockpit.exe.
+$BrandedLauncher = Join-Path $BundleDir "opn-cockpit.exe"
+Copy-Item -Force $BundlePy $BrandedLauncher
+Write-Host "==> Branded Launcher: $BrandedLauncher" -ForegroundColor Cyan
+$LauncherCheck = & $BrandedLauncher -c "import opn_cockpit; print('launcher ok:', opn_cockpit.__version__)"
+if ($LASTEXITCODE -ne 0) { throw "Branded Launcher startet kein Python (Bundle kaputt)." }
+Write-Host "==> $LauncherCheck" -ForegroundColor Green
+
+# Pip's Scripts/opn-cockpit.exe und opn-cockpit-cli.exe haben den kaputten
+# Absoluten-Pfad-Shebang -- die wollen wir definitiv NICHT mit ausliefern,
+# damit niemand sie versehentlich startet. Entfernen.
+foreach ($brokenLauncher in @("opn-cockpit.exe", "opn-cockpit-cli.exe")) {
+    $broken = Join-Path $BundleDir "Scripts\$brokenLauncher"
+    if (Test-Path $broken) {
+        Remove-Item -Force $broken
+        Write-Host "==> Entferne pip-Launcher mit Build-Zeit-Shebang: Scripts\$brokenLauncher" -ForegroundColor DarkGray
+    }
+}
+
 # --- Aufraeumen: pip-Cache + __pycache__ raus --------------------------------
 
 Write-Host "==> Raeume __pycache__ aus dem Bundle" -ForegroundColor Cyan

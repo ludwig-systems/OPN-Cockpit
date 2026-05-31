@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import os
 import string
+import sys
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -26,6 +28,10 @@ from pydantic import BaseModel
 from opn_cockpit.vault.discovery import VAULT_EXTENSION
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+# Native Folder-Picker (Windows): SHBrowseForFolderW darf nicht parallel
+# aufgerufen werden — sonst kollidieren mehrere offene Dialoge.
+_dialog_lock = threading.Lock()
 
 
 class BrowseEntry(BaseModel):
@@ -152,6 +158,125 @@ def browse(
         parent=parent_str,
         entries=_list_dir(resolved),
     )
+
+
+class PickFolderResponse(BaseModel):
+    path: str | None
+    cancelled: bool
+
+
+def _pick_folder_native_windows(title: str = "OPN-Cockpit — Ordner waehlen") -> str | None:
+    """Oeffnet den Windows-Shell-Folder-Picker (Vista-Style).
+
+    Blockiert den aufrufenden Thread bis der User waehlt oder abbricht.
+    Liefert den absoluten Pfad als String oder ``None`` bei Abbruch.
+    Nur unter Windows; auf anderen Plattformen ``OSError``.
+
+    Nutzt SHBrowseForFolderW (immer verfuegbar, ab XP). Per
+    ``BIF_USENEWUI`` bekommen wir den modernen Vista+-Look mit Resize
+    und Edit-Feld. ``GetForegroundWindow()`` als ``hwndOwner`` sorgt
+    dafuer dass der Dialog vor dem Browser auftaucht statt im
+    Hintergrund zu verschwinden.
+    """
+    if sys.platform != "win32":
+        raise OSError("Native folder picker only on Windows")
+
+    import ctypes  # noqa: PLC0415 — Windows-only, vermeidet Import auf Linux
+    from ctypes import wintypes  # noqa: PLC0415
+
+    bif_returnonlyfsdirs = 0x00000001
+    bif_usenewui = 0x00000040 | 0x00000010  # NEWDIALOGSTYLE | EDITBOX
+    coinit_apartmentthreaded = 0x2
+
+    class BROWSEINFOW(ctypes.Structure):
+        _fields_ = (
+            ("hwndOwner", wintypes.HWND),
+            ("pidlRoot", ctypes.c_void_p),
+            ("pszDisplayName", wintypes.LPWSTR),
+            ("lpszTitle", wintypes.LPCWSTR),
+            ("ulFlags", wintypes.UINT),
+            ("lpfn", ctypes.c_void_p),
+            ("lParam", wintypes.LPARAM),
+            ("iImage", ctypes.c_int),
+        )
+
+    shell32 = ctypes.windll.shell32
+    ole32 = ctypes.windll.ole32
+    user32 = ctypes.windll.user32
+
+    sh_browse = shell32.SHBrowseForFolderW
+    sh_browse.argtypes = (ctypes.POINTER(BROWSEINFOW),)
+    sh_browse.restype = ctypes.c_void_p
+
+    sh_get_path = shell32.SHGetPathFromIDListW
+    sh_get_path.argtypes = (ctypes.c_void_p, wintypes.LPWSTR)
+    sh_get_path.restype = wintypes.BOOL
+
+    co_task_mem_free = ole32.CoTaskMemFree
+    co_task_mem_free.argtypes = (ctypes.c_void_p,)
+
+    ole32.CoInitializeEx(None, coinit_apartmentthreaded)
+    try:
+        display_buf = ctypes.create_unicode_buffer(260)
+        bi = BROWSEINFOW()
+        bi.hwndOwner = user32.GetForegroundWindow()
+        bi.pidlRoot = None
+        bi.pszDisplayName = ctypes.cast(display_buf, wintypes.LPWSTR)
+        bi.lpszTitle = title
+        bi.ulFlags = bif_returnonlyfsdirs | bif_usenewui
+        bi.lpfn = None
+        bi.lParam = 0
+        bi.iImage = 0
+
+        pidl = sh_browse(ctypes.byref(bi))
+        if not pidl:
+            return None
+        try:
+            path_buf = ctypes.create_unicode_buffer(1024)
+            if not sh_get_path(pidl, path_buf):
+                return None
+            return path_buf.value
+        finally:
+            co_task_mem_free(pidl)
+    finally:
+        ole32.CoUninitialize()
+
+
+@router.get("/pick-folder", response_model=PickFolderResponse)
+def pick_folder_native(request: Request) -> PickFolderResponse:
+    """Oeffnet den nativen OS-Folder-Picker auf dem Server.
+
+    Nur sinnvoll wenn Server und Browser auf demselben Geraet laufen
+    (Single-User-Mode lokal). Im Multi-User-Server-Mode wird der Web-
+    Browser-Picker (``/api/files/browse``) verwendet.
+
+    Auf Nicht-Windows-Systemen wird ``501 Not Implemented`` geliefert —
+    das Frontend soll dann auf den Web-Picker fallback machen.
+    """
+    server_state = request.app.state.server_state
+    if not server_state.is_single_user_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Native Picker ist nur im Single-User-Mode verfuegbar.",
+        )
+    if sys.platform != "win32":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Native Picker derzeit nur unter Windows verfuegbar.",
+        )
+
+    with _dialog_lock:
+        try:
+            picked = _pick_folder_native_windows()
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Folder-Picker fehlgeschlagen: {exc}",
+            ) from exc
+
+    if picked is None:
+        return PickFolderResponse(path=None, cancelled=True)
+    return PickFolderResponse(path=picked, cancelled=False)
 
 
 __all__ = ["router"]

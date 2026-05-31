@@ -361,8 +361,35 @@
 
   let fbState = { current: '', parent: null };
 
-  async function openFolderBrowser() {
-    // Startpfad: aktueller Wert im Speicherort-Feld (= Verzeichnis).
+  async function openFolderPicker() {
+    // Versuche zuerst den nativen OS-Picker (Single-User + Windows).
+    // Bei 501/403/Netzwerkfehler fallback auf den Web-Picker.
+    try {
+      const response = await fetch('/api/files/pick-folder');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.cancelled || !data.path) return;
+        const dirInput = $('#new-vault-directory');
+        if (dirInput) dirInput.value = data.path;
+        updateVaultTargetPreview();
+        return;
+      }
+      // 501 (nicht-Windows) oder 403 (Multi-User) -> Fallback ohne Toast.
+      if (response.status === 501 || response.status === 403) {
+        await openWebFolderBrowser();
+        return;
+      }
+      // Andere Fehler: Toast + Fallback.
+      const body = await response.json().catch(() => ({}));
+      showToast(body.detail || `Native Picker Fehler ${response.status}`, true);
+      await openWebFolderBrowser();
+    } catch (_err) {
+      // Netzwerkproblem (sehr unwahrscheinlich auf localhost) -> Web-Picker.
+      await openWebFolderBrowser();
+    }
+  }
+
+  async function openWebFolderBrowser() {
     const dirInput = $('#new-vault-directory');
     const startPath = dirInput ? dirInput.value.trim() : '';
     $('#fb-error').hidden = true;
@@ -3221,9 +3248,9 @@
     const updateDismiss = $('#update-banner-dismiss');
     if (updateDismiss) updateDismiss.addEventListener('click', dismissUpdateBanner);
 
-    // Folder-Browser-Modal
+    // Folder-Picker (native primary, web fallback)
     const fbBtn = $('#new-vault-browse-btn');
-    if (fbBtn) fbBtn.addEventListener('click', openFolderBrowser);
+    if (fbBtn) fbBtn.addEventListener('click', openFolderPicker);
     const fbClose = $('#fb-close');
     if (fbClose) {
       fbClose.addEventListener('click', closeFolderBrowser);
