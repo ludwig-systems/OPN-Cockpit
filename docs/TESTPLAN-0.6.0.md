@@ -1,7 +1,22 @@
 # Testplan OPN-Cockpit 0.6.0
 
 End-to-End-Test der drei Deployment-Varianten, wie sie ein Endnutzer erleben würde.
-Schreib bitte mit, was funktioniert und was hakt — die Ergebnisse helfen für v6-Pass 3.
+Schreib bitte mit, was funktioniert und was hakt.
+
+**Stand 2026-05-31 nach Debug-Session.** Wesentliche Architektur-Änderungen die in
+diesem Testplan reflektiert sind — Details siehe
+[SESSION-NOTES-0.6.0.md](SESSION-NOTES-0.6.0.md):
+
+- Launcher: pip-generierte `Scripts\opn-cockpit.exe` ist tot, stattdessen
+  läuft alles über `python\opn-cockpit.exe -m opn_cockpit` (Kopie der
+  Embedded-`python.exe`, Task-Manager zeigt korrekten Namen)
+- Folder-Picker: nativer Windows-Shell-Dialog statt Web-Picker
+- Vault-Pfad: User-Home (Documents, Desktop) ist im Single-User-Mode erlaubt
+- Tresor-Anlage-UI: Name + Speicherort getrennt, Live-Preview
+- Cache-Buster: mtime-basiert, kein Strg+Shift+R nach Patch nötig
+- About-Mail: `info@ludwig-systems.de`
+- Server **niemals** aus einer Admin-PowerShell starten — sonst landen Tresor
+  + Settings im Administrator-Profil statt im Nutzerprofil
 
 ## Vorbedingungen
 
@@ -55,11 +70,30 @@ Standardbrowser `http://localhost:9876` erscheint.
 
 - Anmeldebildschirm zeigt Vault-Picker.
 - "Neuen Tresor anlegen" wählen.
-- Speicherort: Default akzeptieren oder z. B. `%APPDATA%\OPN-Cockpit\firewalls.opnvault`.
+- **Tresor-Name**-Feld: Default `main`, kannst du wie du willst ändern
+  (z. B. `firewalls-2026`).
+- **Speicherort**-Feld: zeigt einen vorgeschlagenen Ordner. Drei Wege das zu setzen:
+  1. **Button "Ordner waehlen"** → öffnet den **nativen Windows-Folder-Picker**
+     (gleiche Optik wie in Word "Speichern unter"). Pick → Pfad steht im Feld.
+  2. **Schnellauswahl-Chips** unter dem Feld: "Eigene Dokumente",
+     "Desktop", "Anwendungsdaten". Click → Pfad gesetzt.
+  3. **Direkt tippen** im Feld.
+- **Live-Preview** "Wird gespeichert als: …" zeigt den finalen Pfad
+  (Verzeichnis + Name + `.opnvault`).
 - Master-Passwort min. 12 Zeichen, zweimal eingeben.
 - "Tresor anlegen" klicken.
 
-**Pass**, wenn die Hauptansicht (Inventar) erscheint, leerer Zustand mit "Noch keine Geräte".
+**Pass**, wenn die Hauptansicht (Inventar) erscheint, leerer Zustand mit
+"Noch keine Geräte". Die `.opnvault`-Datei sollte unter dem gewählten
+Pfad existieren (mit Explorer prüfen).
+
+Pfade die akzeptiert sind:
+- alles unter `%APPDATA%\OPN-Cockpit\` (Default)
+- alles unter `%USERPROFILE%\` (Documents, Desktop, eigene Unterordner)
+- alles unter `OPNCOCKPIT_VAULT_DIR` (Env-Override für Custom-Pfade)
+
+Pfade die **abgelehnt** werden mit 400 "ausserhalb der erlaubten Basen":
+alles andere (z. B. `C:\Windows\…`, `D:\Sonstwas\…` ohne Env-Override).
 
 ### A.4 Smoke-Tests
 
@@ -69,7 +103,7 @@ Klicke der Reihe nach:
    - Name: OPN-Cockpit
    - Version: 0.6.0
    - Entwickler: Ludwig Systems
-   - Kontakt: google@ludwig-systems.de
+   - Kontakt: info@ludwig-systems.de
    - GitHub: ludwig-systems/opn-cockpit (Link klickbar)
    - Lizenz: Proprietary
 2. **Audit-Log**: Topbar-Icon → Modal mit mindestens dem `VAULT_CREATED` und `VAULT_OPENED` Event.
@@ -87,7 +121,7 @@ Klicke der Reihe nach:
 ### A.5 Migrations-Smoke (No-Op heute)
 
 ```powershell
-# Im Installations-Verzeichnis (Admin-PowerShell):
+# Normale PowerShell (nicht Admin):
 & "$env:ProgramFiles\OPN-Cockpit\python\python.exe" -m opn_cockpit.cli migrate
 ```
 
@@ -324,10 +358,19 @@ und kein Banner erscheinen.
   Verhalten bis ein Signing-Cert da ist.
 - **Embedded-Python ist x64-only** — kein ARM64-Build dabei.
 - **Frontend-Inline-Validierung** beim Tippen fehlt noch (Server-Antwort
-  reicht heute) — v6-Pass 4.
+  reicht heute).
 - **Update-Check fragt GitHub anonym** — 60 Requests/h/IP. Reicht für ~24h-
   Cache und mehrere Browser-Tabs, aber bei sehr aggressivem manuellem
-  `?force=true`-Aufruf kann das Rate-Limit greifen.
+  `?force=true`-Aufruf kann das Rate-Limit greifen. Solange das Repo
+  `ludwig-systems/opn-cockpit` noch kein Release auf GitHub hat, liefert
+  der Check ohnehin "unknown" und der Banner bleibt weg.
+- **Konsole bleibt im Single-Mode offen** — pip-Console-Subsystem,
+  Schliessen = Server stoppen. Wechsel auf `gui_scripts` (windowless)
+  ist Polish-Item für nächste Iteration.
+- **Native Folder-Picker nur unter Windows** — auf Linux/Mac würde der
+  Web-Picker als Fallback greifen (501 von /api/files/pick-folder).
+- **Server-Stop = Konsole zu**. Wechsel zu Tray-Icon-Bedienung oder
+  "Sperren = Stop"-Logik kommt später.
 
 ## G) Wenn etwas nicht passt
 

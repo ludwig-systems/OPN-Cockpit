@@ -149,6 +149,7 @@ src/opn_cockpit/
 - [docs/DOCKER.md](docs/DOCKER.md) — Linux/Docker-Deployment
 - [docs/RELEASING.md](docs/RELEASING.md) — Release-Prozess für Maintainer
 - [docs/TESTPLAN-0.6.0.md](docs/TESTPLAN-0.6.0.md) — End-to-End-Tests für v0.6.0
+- [docs/SESSION-NOTES-0.6.0.md](docs/SESSION-NOTES-0.6.0.md) — Debug-Session-Journal + Architektur-Entscheidungen
 - [installer/README.md](installer/README.md) — Inno-Setup-Build
 - [installer/winget/README.md](installer/winget/README.md) — winget-Manifeste
 - [CHANGELOG.md](CHANGELOG.md)
