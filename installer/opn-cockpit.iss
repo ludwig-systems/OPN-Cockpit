@@ -82,7 +82,11 @@ Source: "bundle\python\*"; DestDir: "{app}\python"; \
 ; Lese-Referenzen fuer den User
 Source: "..\README.md";              DestDir: "{app}"; Flags: ignoreversion
 Source: "..\CHANGELOG.md";           DestDir: "{app}"; Flags: ignoreversion
-Source: "..\docs\*";                 DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs
+; docs\: Word-/Office-Notizen und temporaere Sperrdateien werden bewusst
+; ausgeschlossen — sie gehoeren nicht in die Auslieferung.
+Source: "..\docs\*"; DestDir: "{app}\docs"; \
+  Flags: ignoreversion recursesubdirs; \
+  Excludes: "*.docx,*.doc,*.docm,~$*,*.tmp,*.bak"
 
 ; Service-Mode Helfer
 Source: "..\scripts\install-service.ps1";   DestDir: "{app}\scripts"; Flags: ignoreversion; Components: service
