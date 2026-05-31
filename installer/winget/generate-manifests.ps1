@@ -17,7 +17,7 @@
     Vollstaendige Download-URL der Installer-EXE auf GitHub-Releases.
 
 .PARAMETER InstallerSha256
-    SHA256-Hash der EXE (Hex, untere oder grosse Schreibweise — wird
+    SHA256-Hash der EXE (Hex, untere oder grosse Schreibweise -- wird
     normalisiert auf Grossbuchstaben fuer winget-Schema-Konformitaet).
 
 .PARAMETER ReleaseDate
@@ -43,7 +43,7 @@ param(
     [Parameter(Mandatory)]
     [string]$InstallerSha256,
 
-    [string]$ReleaseDate = (Get-Date -AsUTC).ToString("yyyy-MM-dd")
+    [string]$ReleaseDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
 )
 
 $ErrorActionPreference = "Stop"
@@ -85,7 +85,7 @@ foreach ($template in Get-ChildItem -Path $TemplateDir -Filter "*.yaml") {
 }
 
 Write-Host ""
-Write-Host "Fertig — $($generated.Count) Manifest(e) in $OutRoot." -ForegroundColor Green
+Write-Host "Fertig -- $($generated.Count) Manifest(e) in $OutRoot." -ForegroundColor Green
 Write-Host "Naechste Schritte:" -ForegroundColor Green
 Write-Host "  1. Fork von microsoft/winget-pkgs auschecken"
 Write-Host "  2. Ordner nach <Fork>/manifests/l/ludwig-systems/opn-cockpit/$Version/ kopieren"

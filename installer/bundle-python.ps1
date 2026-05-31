@@ -3,8 +3,8 @@
     Erzeugt eine Embedded-Python-Distribution unter installer\bundle\python\.
 
 .DESCRIPTION
-    Lädt die offizielle Windows-Embeddable-Distribution von python.org,
-    aktiviert die site-packages-Auflösung, bootstrapt pip und installiert
+    Laedt die offizielle Windows-Embeddable-Distribution von python.org,
+    aktiviert die site-packages-Aufloesung, bootstrapt pip und installiert
     alle Runtime-Dependencies des Projekts + das Projekt selbst hinein.
 
     Ziel: Der Inno-Setup-Installer kann den Ordner als kompletten,
@@ -17,7 +17,7 @@
     aktualisierten Dependencies neu bespielt (pip install --upgrade).
 
 .PARAMETER PythonVersion
-    Python-Patch-Version (3.11.x). Default 3.11.9 — passt zum Cockpit-
+    Python-Patch-Version (3.11.x). Default 3.11.9 -- passt zum Cockpit-
     Requirement Python 3.11+ und ist die letzte 3.11.x mit publishten
     embeddable-Builds zum Zeitpunkt des Releases.
 
@@ -25,13 +25,16 @@
     Verwirft eine vorhandene Bundle-Distribution und baut von Grund auf neu.
 
 .NOTES
-    Ausführen aus dem Repo-Root (oder aus installer\). Greift nur lesend
-    auf den Source-Tree zu — alle Änderungen landen in
+    Ausfuehren aus dem Repo-Root (oder aus installer\). Greift nur lesend
+    auf den Source-Tree zu -- alle Aenderungen landen in
     installer\bundle\python\.
 
     Voraussetzungen: PowerShell 5.1+, Internet-Zugriff. Kein System-
-    Python notwendig (das Embedded-Python wird über sich selbst
+    Python notwendig (das Embedded-Python wird ueber sich selbst
     bootstrapped).
+
+    ASCII-only: Windows PowerShell 5.1 liest .ps1 als CP-1252; UTF-8-
+    Sonderzeichen wuerden den Parser stoeren.
 #>
 
 #requires -Version 5.1
@@ -89,13 +92,13 @@ if (-not (Test-Path $BundlePy)) {
 #
 # Die Default-Distribution hat eine Zeile "# import site" (auskommentiert),
 # was bewirkt, dass site-packages NICHT durchsucht werden und pip somit
-# nichts installieren kann. Wir kommentieren das ein und ergänzen den
+# nichts installieren kann. Wir kommentieren das ein und ergaenzen den
 # Lib\site-packages-Pfad explizit, damit das Layout wie bei einer normalen
 # Python-Installation aussieht.
 
 $PthFile = Get-ChildItem -Path $BundleDir -Filter "python*._pth" | Select-Object -First 1
 if ($null -eq $PthFile) {
-    throw "Konnte python*._pth nicht finden in $BundleDir — Distribution wirkt unvollständig."
+    throw "Konnte python*._pth nicht finden in $BundleDir -- Distribution wirkt unvollstaendig."
 }
 
 $PthContent = Get-Content $PthFile.FullName
@@ -123,7 +126,7 @@ if ($NeedsPatch) {
     }
     Set-Content -Path $PthFile.FullName -Value $NewContent -Encoding ASCII
 } else {
-    Write-Host "==> _pth ist schon gepatcht — site ist aktiv" -ForegroundColor DarkGray
+    Write-Host "==> _pth ist schon gepatcht -- site ist aktiv" -ForegroundColor DarkGray
 }
 
 # --- pip bootstrappen -------------------------------------------------------
@@ -147,8 +150,8 @@ if (-not (Test-Path $PipModule)) {
 # --- Projekt-Dependencies installieren --------------------------------------
 #
 # Wir installieren das Paket selbst (aus dem Repo-Root) im "wheel"-Modus,
-# damit das Bundle vom Source-Tree unabhängig ist. Editable-Install wäre
-# falsch, weil es einen Pfad zurück ins Repo benötigt.
+# damit das Bundle vom Source-Tree unabhaengig ist. Editable-Install waere
+# falsch, weil es einen Pfad zurueck ins Repo benoetigt.
 
 Write-Host "==> Installiere opn-cockpit + Runtime-Dependencies" -ForegroundColor Cyan
 $EnvForPip = @{ "PIP_DISABLE_PIP_VERSION_CHECK" = "1" }
@@ -171,16 +174,16 @@ try {
 
 Write-Host "==> Sanity-Check: import opn_cockpit" -ForegroundColor Cyan
 $SanityResult = & $BundlePy -c "import opn_cockpit; print(opn_cockpit.__version__)"
-if ($LASTEXITCODE -ne 0) { throw "Bundle ist kaputt — import opn_cockpit fehlgeschlagen." }
+if ($LASTEXITCODE -ne 0) { throw "Bundle ist kaputt -- import opn_cockpit fehlgeschlagen." }
 Write-Host "==> Bundle-Version: $SanityResult" -ForegroundColor Green
 
 # --- Aufraeumen: pip-Cache + __pycache__ raus --------------------------------
 
-Write-Host "==> Räume __pycache__ aus dem Bundle" -ForegroundColor Cyan
+Write-Host "==> Raeume __pycache__ aus dem Bundle" -ForegroundColor Cyan
 Get-ChildItem -Path $BundleDir -Recurse -Directory -Filter "__pycache__" |
     ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
 
-# Bundle-Größe ausgeben
+# Bundle-Groesse ausgeben
 $Size = (Get-ChildItem $BundleDir -Recurse -File | Measure-Object Length -Sum).Sum
 $SizeMb = [math]::Round($Size / 1MB, 1)
 Write-Host ""
