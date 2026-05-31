@@ -22,6 +22,11 @@ Alle Tests dürfen parallel laufen (Windows-VM + Docker-Container nebeneinander)
 
 ```powershell
 cd g:\OPN-Deploy
+
+# Einmalig pro Session: Execution-Policy fuer dieses PowerShell-Fenster
+# lockern, sonst lehnt PowerShell das unsignierte Bundle-Skript ab.
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+
 .\installer\bundle-python.ps1
 # Erwartung: lädt Python 3.11.9-embed-amd64.zip + get-pip.py von python.org,
 # entpackt nach installer\bundle\python\, installiert opn-cockpit + alle Deps.

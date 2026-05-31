@@ -25,6 +25,10 @@ installiert sein.
 ## Bauen
 
 ```powershell
+# 0. Einmalig pro Session: Execution-Policy lockern, sonst weigert sich
+#    PowerShell unsignierte Skripte zu starten.
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+
 # 1. Embedded-Python + alle Dependencies in installer\bundle\python\ legen.
 #    Lädt python-3.11.x-embed-amd64.zip + get-pip.py von python.org und
 #    bestueckt das Bundle. Dauert je nach Internet ~1-2 Min, danach hat
@@ -34,6 +38,12 @@ installiert sein.
 # 2. Inno-Setup-Compiler aufrufen.
 ISCC installer\opn-cockpit.iss
 ```
+
+> **Tipp**: wenn du das öfter machst, einmalig
+> `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
+> setzen — erlaubt lokale Skripte dauerhaft, blockt aber weiterhin
+> unsignierte Skripte aus dem Internet. Alternativ direkt:
+> `powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\bundle-python.ps1`
 
 Ergebnis: `installer\out\OPN-Cockpit-Setup-0.6.0.exe` (typische Größe
 ~80-100 MB; alles ist drin).
