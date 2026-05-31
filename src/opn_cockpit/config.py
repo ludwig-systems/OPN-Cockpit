@@ -37,6 +37,8 @@ STORAGE_BACKENDS = ("filesystem", "sqlite")
 AUTH_BACKEND_ENV = "OPNCOCKPIT_AUTH_BACKEND"
 DEPLOYMENT_MODE_ENV = "OPNCOCKPIT_DEPLOYMENT_MODE"
 STORAGE_BACKEND_ENV = "OPNCOCKPIT_STORAGE_BACKEND"
+UPDATE_CHECK_ENABLED_ENV = "OPNCOCKPIT_UPDATE_CHECK_ENABLED"
+UPDATE_CHECK_INTERVAL_ENV = "OPNCOCKPIT_UPDATE_CHECK_INTERVAL_HOURS"
 
 
 def get_app_data_dir() -> Path:
@@ -93,6 +95,11 @@ class AppSettings:
     auth_backend: str = "vault"
     storage_backend: str = "filesystem"
 
+    # v6-Pass 3: Update-Check via GitHub-Releases-API. Default an, kann
+    # fuer Air-gapped-Installationen per Env oder JSON deaktiviert werden.
+    update_check_enabled: bool = True
+    update_check_interval_hours: int = 24
+
     # ----- Persistenz -----
 
     @classmethod
@@ -130,6 +137,19 @@ class AppSettings:
         storage = os.environ.get(STORAGE_BACKEND_ENV, "").strip()
         if storage and storage in STORAGE_BACKENDS:
             self.storage_backend = storage
+        update_enabled = os.environ.get(UPDATE_CHECK_ENABLED_ENV, "").strip().lower()
+        if update_enabled in {"0", "false", "no", "off"}:
+            self.update_check_enabled = False
+        elif update_enabled in {"1", "true", "yes", "on"}:
+            self.update_check_enabled = True
+        interval_raw = os.environ.get(UPDATE_CHECK_INTERVAL_ENV, "").strip()
+        if interval_raw:
+            try:
+                interval = int(interval_raw)
+            except ValueError:
+                interval = -1
+            if interval > 0:
+                self.update_check_interval_hours = interval
 
     def save(self, path: Path | None = None) -> None:
         """Schreibt Settings nach ``path`` oder Default-Pfad (atomar)."""
@@ -183,6 +203,16 @@ class AppSettings:
         storage_backend = str(raw.get("storage_backend", "filesystem"))
         if storage_backend not in STORAGE_BACKENDS:
             storage_backend = "filesystem"
+        update_enabled_raw = raw.get("update_check_enabled", True)
+        update_enabled = bool(update_enabled_raw) if isinstance(
+            update_enabled_raw, bool,
+        ) else True
+        try:
+            interval = int(raw.get("update_check_interval_hours", 24))
+        except (TypeError, ValueError):
+            interval = 24
+        if interval <= 0:
+            interval = 24
         return cls(
             recent_vaults=recent[:limit],
             default_vault=default_str,
@@ -190,4 +220,6 @@ class AppSettings:
             deployment_mode=deployment_mode,
             auth_backend=auth_backend,
             storage_backend=storage_backend,
+            update_check_enabled=update_enabled,
+            update_check_interval_hours=interval,
         )

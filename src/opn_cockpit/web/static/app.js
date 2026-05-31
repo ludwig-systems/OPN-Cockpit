@@ -408,6 +408,7 @@
     startHeartbeat();
     startSessionTicker();
     startRetryPolling();
+    checkForUpdate();
   }
 
   function applyMultiUserVisibility() {
@@ -2612,6 +2613,55 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  // -------------------- Update-Banner --------------------
+
+  const UPDATE_DISMISS_KEY = 'opnc.update.dismissedVersion';
+
+  async function checkForUpdate() {
+    const banner = $('#update-banner');
+    if (!banner) return;
+    try {
+      const response = await fetch('/api/updates/check', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.status !== 'available' || !data.latest_version) {
+        banner.hidden = true;
+        return;
+      }
+      // Wenn der User diese Version schon weggeklickt hat, nicht erneut zeigen.
+      let dismissed = null;
+      try { dismissed = sessionStorage.getItem(UPDATE_DISMISS_KEY); } catch (_e) {}
+      if (dismissed === data.latest_version) {
+        banner.hidden = true;
+        return;
+      }
+      $('#update-banner-version').textContent = data.latest_version;
+      const link = $('#update-banner-link');
+      if (data.html_url) {
+        link.href = data.html_url;
+        link.hidden = false;
+      } else {
+        link.hidden = true;
+      }
+      banner.hidden = false;
+      banner.dataset.version = data.latest_version;
+    } catch (_err) {
+      /* still no banner — silent */
+    }
+  }
+
+  function dismissUpdateBanner() {
+    const banner = $('#update-banner');
+    if (!banner) return;
+    const version = banner.dataset.version;
+    if (version) {
+      try { sessionStorage.setItem(UPDATE_DISMISS_KEY, version); } catch (_e) {}
+    }
+    banner.hidden = true;
+  }
+
   // -------------------- About-Modal --------------------
 
   let aboutLoaded = false;
@@ -2986,6 +3036,10 @@
         if (e.target.id === 'about-modal') closeAboutModal();
       });
     }
+
+    // Update-Banner-Dismiss
+    const updateDismiss = $('#update-banner-dismiss');
+    if (updateDismiss) updateDismiss.addEventListener('click', dismissUpdateBanner);
     const usersBtn = $('#users-open-btn');
     if (usersBtn) usersBtn.addEventListener('click', openUsersModal);
     const pwSelfBtn = $('#password-self-btn');

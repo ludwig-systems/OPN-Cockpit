@@ -189,3 +189,42 @@ class TestEnvOverrides:
         with patch.dict(os.environ, {"OPNCOCKPIT_AUTH_BACKEND": ""}):
             loaded = AppSettings.load(path)
         assert loaded.auth_backend == "user-db"
+
+
+class TestUpdateCheckSettings:
+    def test_default_enabled_24h(self) -> None:
+        s = AppSettings()
+        assert s.update_check_enabled is True
+        assert s.update_check_interval_hours == 24
+
+    def test_env_disables(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        with patch.dict(os.environ, {"OPNCOCKPIT_UPDATE_CHECK_ENABLED": "0"}):
+            loaded = AppSettings.load(path)
+        assert loaded.update_check_enabled is False
+
+    def test_env_overrides_interval(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        with patch.dict(
+            os.environ, {"OPNCOCKPIT_UPDATE_CHECK_INTERVAL_HOURS": "6"},
+        ):
+            loaded = AppSettings.load(path)
+        assert loaded.update_check_interval_hours == 6
+
+    def test_invalid_interval_keeps_default(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        with patch.dict(
+            os.environ, {"OPNCOCKPIT_UPDATE_CHECK_INTERVAL_HOURS": "abc"},
+        ):
+            loaded = AppSettings.load(path)
+        assert loaded.update_check_interval_hours == 24
+
+    def test_json_roundtrip(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        AppSettings(
+            update_check_enabled=False,
+            update_check_interval_hours=12,
+        ).save(path)
+        loaded = AppSettings.load(path)
+        assert loaded.update_check_enabled is False
+        assert loaded.update_check_interval_hours == 12

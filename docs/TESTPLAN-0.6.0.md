@@ -265,17 +265,66 @@ Der Test gilt als **bestanden**, wenn:
 - Deinstall/down löscht Code, lässt Daten stehen
 - `cli migrate` läuft als No-Op (heute) und legt korrekt `migrations.json` an
 
-## E) Bekannte Limitierungen v0.6.0
+## E) Update-Check (v6-Pass 3)
 
-- **Update-Check fehlt noch** — kommt mit v6-Pass 3 (GitHub-Releases-API + Banner).
+Beim ersten Anzeigen der Inventar-Ansicht ruft das Frontend `/api/updates/check`
+auf. Wenn GitHub-Releases eine neuere Version meldet, erscheint am oberen Rand
+ein dezenter Banner mit "Version X.Y verfügbar — Release-Notes" und einem
+Dismiss-Button. Cache-Dauer: 24 h (per Env steuerbar).
+
+### E.1 Banner-Smoke
+
+- Nach Login mit der Inventar-Ansicht: F12 → Network-Tab → Reload.
+- Erwartung: ein `GET /api/updates/check` mit Status 200.
+- Body sollte `current_version: "0.6.0"` und `update_available: false` enthalten,
+  solange GitHub keine `> 0.6.0`-Release fuer `ludwig-systems/opn-cockpit` hat.
+
+### E.2 Cache-Datei
+
+- Datei `<app_data>/update_check.json` sollte nach dem ersten Aufruf
+  existieren — bei `update_available=false` enthaelt sie nur einen
+  Zeitstempel + ETag, sonst auch `latest_version`.
+
+### E.3 Opt-out für Offline-Installationen
+
+```powershell
+# Windows-Service-Mode:
+& "$env:ProgramFiles\OPN-Cockpit\bundle\nssm.exe" set OPN-Cockpit AppEnvironmentExtra `
+  "OPNCOCKPIT_UPDATE_CHECK_ENABLED=0"
+Restart-Service -Name OPN-Cockpit
+```
+
+```bash
+# Docker:
+# in docker-compose.yml unter environment:
+#   OPNCOCKPIT_UPDATE_CHECK_ENABLED: "0"
+docker compose up -d --force-recreate
+```
+
+Nach einem Reload muss `/api/updates/check` mit `status: "disabled"` antworten
+und kein Banner erscheinen.
+
+### E.4 Dismiss-Verhalten
+
+- Banner wegklicken (X).
+- Browser-Tab neu laden.
+- Erwartung: Banner bleibt weg, weil die abgewiesene Version in
+  `sessionStorage` gespeichert ist. Nach Tab-Schließen + Wieder-Öffnen
+  zeigt der Banner sich wieder.
+
+## F) Bekannte Limitierungen v0.6.0
+
 - **Code-Signing fehlt** — Windows SmartScreen warnt bei der Setup-EXE
   ("App schützen: Weitere Informationen → Trotzdem ausführen"). Erwartetes
   Verhalten bis ein Signing-Cert da ist.
 - **Embedded-Python ist x64-only** — kein ARM64-Build dabei.
 - **Frontend-Inline-Validierung** beim Tippen fehlt noch (Server-Antwort
   reicht heute) — v6-Pass 4.
+- **Update-Check fragt GitHub anonym** — 60 Requests/h/IP. Reicht für ~24h-
+  Cache und mehrere Browser-Tabs, aber bei sehr aggressivem manuellem
+  `?force=true`-Aufruf kann das Rate-Limit greifen.
 
-## F) Wenn etwas nicht passt
+## G) Wenn etwas nicht passt
 
 Bitte das Problem als kurze Notiz festhalten und beim nächsten Sync zeigen.
 Wenn der Server gar nicht hochkommt:
