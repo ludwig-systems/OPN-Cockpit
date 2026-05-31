@@ -164,7 +164,14 @@ try {
     & $BundlePy -m pip install --upgrade pip --no-warn-script-location
     if ($LASTEXITCODE -ne 0) { throw "pip self-upgrade fehlgeschlagen." }
 
-    & $BundlePy -m pip install --upgrade . --no-warn-script-location
+    # Embedded-Python + _pth: pip's Build-Isolation funktioniert nicht,
+    # weil PYTHONPATH im _pth-Modus ignoriert wird. Wir installieren das
+    # Build-Backend (hatchling) explizit ins Bundle und nutzen dann
+    # --no-build-isolation fuer den Projekt-Install.
+    & $BundlePy -m pip install --upgrade hatchling --no-warn-script-location
+    if ($LASTEXITCODE -ne 0) { throw "hatchling-Install fehlgeschlagen." }
+
+    & $BundlePy -m pip install --upgrade --no-build-isolation . --no-warn-script-location
     if ($LASTEXITCODE -ne 0) { throw "Projekt-Install fehlgeschlagen." }
 } finally {
     Pop-Location
