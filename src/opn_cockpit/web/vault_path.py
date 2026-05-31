@@ -18,6 +18,7 @@ verglichen.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
 
@@ -37,6 +38,12 @@ def allowed_vault_bases() -> list[Path]:
     Reihenfolge:
     1. ``OPNCOCKPIT_VAULT_DIR`` falls gesetzt — Override fuer Custom-Pfade
     2. ``get_app_data_dir()`` — Default-Pfad (XDG / APPDATA)
+    3. ``Path.home()`` — User-Profil. Im Single-User-Mode soll der Admin
+       seinen Tresor selbst frei legen koennen (Documents, Desktop, eigene
+       Unterordner). Im Multi-User-Server-Mode laeuft der Server als
+       LocalService o.ae.; deren Home enthaelt keine User-Daten und ist
+       fuer einen Angreifer uninteressant -- die Erweiterung schadet
+       hier nicht.
 
     Pfade, die nicht existieren, werden weiterhin aufgenommen — die
     Validierung prueft Path-Prefixes, nicht Existenz. Das vermeidet
@@ -47,6 +54,9 @@ def allowed_vault_bases() -> list[Path]:
     if override:
         bases.append(Path(override).resolve())
     bases.append(get_app_data_dir().resolve())
+    # Path.home() kann auf manchen Systemen scheitern -- best-effort.
+    with contextlib.suppress(OSError, RuntimeError):
+        bases.append(Path.home().resolve())
     # Deduplizieren bei gleichem resolve.
     seen: set[str] = set()
     unique: list[Path] = []

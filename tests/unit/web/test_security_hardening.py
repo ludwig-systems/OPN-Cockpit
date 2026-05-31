@@ -90,8 +90,19 @@ class TestVaultPathValidation:
     def test_traversal_attempt_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Pfad ausserhalb der erlaubten Basen → 400."""
-        # Sehr restriktive Basis: nur ein subdir
+        """Pfad ausserhalb der erlaubten Basen → 400.
+
+        Seit v0.6.0 zaehlt ``Path.home()`` zu den erlaubten Basen
+        (Single-User soll seinen Tresor in Documents/Desktop ablegen
+        koennen). Damit dieser Test scharf bleibt, wird HOME und
+        USERPROFILE auf ein isoliertes Verzeichnis umgebogen, sodass
+        ``tmp_path`` weder unter HOME noch unter dem konfigurierten
+        VAULT_DIR liegt.
+        """
+        fake_home = tmp_path / "fake-home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setenv("USERPROFILE", str(fake_home))
         monkeypatch.setenv(
             "OPNCOCKPIT_VAULT_DIR", str(tmp_path / "vaults-only"),
         )
