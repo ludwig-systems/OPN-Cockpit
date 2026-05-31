@@ -6,6 +6,7 @@ die App via ``create_app()`` und fahren sie ueber ``TestClient`` ab.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -92,15 +93,47 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def index(request: Request) -> HTMLResponse:
-        """Single-Page-Entry. JS uebernimmt Login-State und View-Switching."""
-        return templates.TemplateResponse(
-            request, "index.html", {"version": __version__}
+        """Single-Page-Entry. JS uebernimmt Login-State und View-Switching.
+
+        Response erhaelt ``Cache-Control: no-cache, must-revalidate`` —
+        sonst behaelt der Browser die HTML zaeh und kommt nicht an neue
+        Asset-URLs (die wir per mtime-Hash invalidieren).
+        """
+        response = templates.TemplateResponse(
+            request,
+            "index.html",
+            {
+                "version": __version__,
+                "asset_version": _asset_version(),
+            },
         )
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
 
     # API-Routen einhaengen (in Iteration 2+ befuellt).
     register_api_routes(app)
 
     return app
+
+
+def _asset_version() -> str:
+    """Cache-Buster fuer ``/static/*``-URLs (mtime der Frontend-Assets).
+
+    Jede Patch-Aenderung an ``app.js`` oder ``styles.css`` verschiebt
+    den Hash automatisch — der Browser muss neu laden, ohne dass der
+    User Strg+Shift+R druecken oder Cookies leeren muss. Bei
+    Build-Artefakten (Bundle/Installer) bleibt der Hash stabil solange
+    die Asset-Dateien nicht angefasst werden.
+    """
+    parts: list[str] = [__version__]
+    for asset in ("static/app.js", "static/styles.css"):
+        path = WEB_DIR / asset
+        try:
+            parts.append(str(path.stat().st_mtime_ns))
+        except OSError:
+            parts.append("0")
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:10]
+    return f"{__version__}-{digest}"
 
 
 def _install_security_middleware(app: FastAPI) -> None:
