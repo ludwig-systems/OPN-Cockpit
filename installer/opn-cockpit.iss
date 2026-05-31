@@ -12,7 +12,7 @@
 ; Was der Installer macht:
 ;   - Kopiert das Bundle (Embedded-Python + alle Dependencies) nach
 ;     %ProgramFiles%\OPN-Cockpit\python\
-;   - Kopiert Docs nach %ProgramFiles%\OPN-Cockpit\docs\
+;   - Legt eine minimale README.md im Programm-Ordner ab (kurzer Kontext)
 ;   - Single-User-Mode: Desktop-Verknuepfung auf opn-cockpit.exe
 ;     (kein start.bat — die EXE legt pip aus dem entry_point an)
 ;   - Service-Mode: Registriert NSSM-Dienst, auto-startet
@@ -22,10 +22,14 @@
 ; Aus dem Source-Tree kommen mit:
 ;   bundle\python\  (vom Build-Skript erzeugt, ~100 MB — enthaelt auch
 ;                    Scripts\opn-cockpit.exe als Launcher)
-;   docs\, README.md, CHANGELOG.md
+;   README.md       (einziges Doku-Asset)
 ;   bundle\nssm.exe (nur Service-Mode, public domain)
 ;
 ; Nicht mit:
+;   docs\           (Maintainer-Material — Roadmap, Releasing, TestPlan etc.
+;                    liegt auf GitHub, Endnutzer kommt ueber About-Modal +
+;                    Startmenue-Link "Online-Hilfe" dran)
+;   CHANGELOG.md    (Versionshistorie auf GitHub, Version steht im UI)
 ;   .venv\, .git\, tests\, src\, start.bat, __pycache__\, .ruff_cache\
 
 #define MyAppName       "OPN-Cockpit"
@@ -79,14 +83,11 @@ Name: "desktopicon"; Description: "Desktop-Verknuepfung anlegen"; \
 Source: "bundle\python\*"; DestDir: "{app}\python"; \
   Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Lese-Referenzen fuer den User
+; Einziges Doku-Asset: README — kurzer Was-ist-das-Kontext im Install-Ordner.
+; Alles weitere (Roadmap, Releasing, TestPlan, Security-Audit, ...) bleibt
+; auf GitHub, der Endnutzer kommt darueber den Start-Menue-Link "Online-Hilfe"
+; oder das About-Modal hin.
 Source: "..\README.md";              DestDir: "{app}"; Flags: ignoreversion
-Source: "..\CHANGELOG.md";           DestDir: "{app}"; Flags: ignoreversion
-; docs\: Word-/Office-Notizen und temporaere Sperrdateien werden bewusst
-; ausgeschlossen — sie gehoeren nicht in die Auslieferung.
-Source: "..\docs\*"; DestDir: "{app}\docs"; \
-  Flags: ignoreversion recursesubdirs; \
-  Excludes: "*.docx,*.doc,*.docm,~$*,*.tmp,*.bak"
 
 ; Service-Mode Helfer
 Source: "..\scripts\install-service.ps1";   DestDir: "{app}\scripts"; Flags: ignoreversion; Components: service
@@ -101,7 +102,7 @@ Source: "bundle\nssm.exe";           DestDir: "{app}\bundle"; \
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
   WorkingDir: "{app}"; Comment: "OPN-Cockpit starten"; Components: single
-Name: "{group}\Quickstart oeffnen"; Filename: "{app}\docs\QUICKSTART.md"
+Name: "{group}\Online-Hilfe"; Filename: "{#MyAppURL}"
 Name: "{group}\{#MyAppName} deinstallieren"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
   WorkingDir: "{app}"; Tasks: desktopicon; Components: single
