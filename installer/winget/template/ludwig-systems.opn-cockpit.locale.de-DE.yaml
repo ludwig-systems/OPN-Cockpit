@@ -1,0 +1,29 @@
+# Created with manifests-generate.ps1
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+
+PackageIdentifier: ludwig-systems.opn-cockpit
+PackageVersion: {{VERSION}}
+PackageLocale: de-DE
+Publisher: Ludwig Systems
+PublisherUrl: https://github.com/ludwig-systems
+PublisherSupportUrl: https://github.com/ludwig-systems/opn-cockpit/issues
+PackageName: OPN-Cockpit
+PackageUrl: https://github.com/ludwig-systems/opn-cockpit
+License: Proprietary
+ShortDescription: Multi-Site-Management fuer OPNsense-Firewalls per REST-API.
+Description: |-
+  OPN-Cockpit verwaltet bis zu 25 OPNsense-Firewalls aus einem Browser-Fenster
+  heraus. Statische Routen und Aliase werden mit Plan-vor-Apply-Vorschau
+  parallel auf 1..n Geraete ausgerollt und per Read-back gegen die OPNsense-
+  API verifiziert. Audit-Log mit HMAC-Hash-Chain (Tamper-Evidence), Multi-
+  User-Modus mit Rollen (viewer/operator/admin), verschluesselter Tresor
+  (Argon2id + AES-256-GCM) fuer Geraete-Stammdaten und API-Credentials.
+Moniker: opn-cockpit
+Tags:
+  - opnsense
+  - firewall
+  - networking
+  - admin-tool
+ReleaseNotesUrl: https://github.com/ludwig-systems/opn-cockpit/releases/tag/v{{VERSION}}
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

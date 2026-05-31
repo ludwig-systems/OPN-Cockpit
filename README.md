@@ -143,7 +143,14 @@ src/opn_cockpit/
 
 ## Referenz
 
-- [docs/QUICKSTART.md](docs/QUICKSTART.md)
+- [docs/QUICKSTART.md](docs/QUICKSTART.md) — Dev-Walkthrough
+- [docs/INSTALLATION-WINDOWS.md](docs/INSTALLATION-WINDOWS.md) — Endnutzer-Installation (SmartScreen, Updates)
+- [docs/SERVICE-MODE.md](docs/SERVICE-MODE.md) — Multi-User-Server unter Windows
+- [docs/DOCKER.md](docs/DOCKER.md) — Linux/Docker-Deployment
+- [docs/RELEASING.md](docs/RELEASING.md) — Release-Prozess für Maintainer
+- [docs/TESTPLAN-0.6.0.md](docs/TESTPLAN-0.6.0.md) — End-to-End-Tests für v0.6.0
+- [installer/README.md](installer/README.md) — Inno-Setup-Build
+- [installer/winget/README.md](installer/winget/README.md) — winget-Manifeste
 - [CHANGELOG.md](CHANGELOG.md)
 - [docs/opnsense-api-26.1.md](docs/opnsense-api-26.1.md) — API-Endpoint-Notizen
 - [Anforderungen](Anforderungen) — Anforderungskatalog v1.0

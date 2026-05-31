@@ -1,0 +1,197 @@
+name: Release
+
+# Baut automatisch einen Windows-Installer + GitHub-Release sobald ein
+# Tag der Form v*.*.* gepusht wird (z. B. `git tag v0.7.0 && git push --tags`).
+#
+# Manueller Trigger via workflow_dispatch ist ebenfalls moeglich — dann
+# muss die Version als Input mitgegeben werden.
+#
+# Ergebnis im Release:
+#   OPN-Cockpit-Setup-<Version>.exe          (~100 MB, Embedded-Python)
+#   OPN-Cockpit-Setup-<Version>.exe.sha256   (Checksum-Datei, fuer winget)
+#
+# Sobald der Release veroeffentlicht ist, schaltet der In-App-Update-Check
+# (v6-Pass 3) bei allen Installationen den "Version verfuegbar"-Banner.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (z. B. 0.7.0) — ohne v-Praefix'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Version aus Tag oder Input extrahieren
+        id: version
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $version = '${{ inputs.version }}'
+          } else {
+            $version = '${{ github.ref_name }}' -replace '^v', ''
+          }
+          if (-not $version) {
+            throw 'Konnte Version nicht ermitteln.'
+          }
+          Write-Host "Build-Version: $version"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=v$version"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: __version__ in __init__.py auf Tag synchronisieren
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $file = 'src/opn_cockpit/__init__.py'
+          $v = '${{ steps.version.outputs.version }}'
+          (Get-Content $file) `
+            -replace '__version__\s*=\s*"[^"]+"', "__version__ = ""$v""" `
+            | Set-Content $file -Encoding utf8
+          Get-Content $file
+
+      - name: pyproject.toml-Version synchronisieren
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $file = 'pyproject.toml'
+          $v = '${{ steps.version.outputs.version }}'
+          $content = Get-Content $file -Raw
+          $patched = $content -replace '(?ms)^(\[project\][^\[]*?version\s*=\s*)"[^"]+"', "`$1""$v"""
+          Set-Content $file -Value $patched -Encoding utf8
+          Select-String -Path $file -Pattern '^version'
+
+      - name: .iss-Version synchronisieren
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $file = 'installer/opn-cockpit.iss'
+          $v = '${{ steps.version.outputs.version }}'
+          (Get-Content $file) `
+            -replace '#define MyAppVersion\s+"[^"]+"', "#define MyAppVersion   ""$v""" `
+            | Set-Content $file -Encoding utf8
+          Select-String -Path $file -Pattern 'MyAppVersion'
+
+      - name: NSSM herunterladen (fuer Service-Mode)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = "$env:RUNNER_TEMP/nssm.zip"
+          $extract = "$env:RUNNER_TEMP/nssm"
+          Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          New-Item -ItemType Directory -Path "installer/bundle" -Force | Out-Null
+          Copy-Item -Path "$extract/nssm-2.24/win64/nssm.exe" -Destination "installer/bundle/nssm.exe" -Force
+          Get-Item "installer/bundle/nssm.exe" | Select-Object FullName, Length
+
+      - name: Inno Setup installieren
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install -y innosetup --no-progress
+          $isccPath = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $isccPath)) { throw "ISCC.exe nicht gefunden unter $isccPath" }
+          Write-Host "ISCC verfuegbar: $isccPath"
+
+      - name: Embedded-Python-Bundle bauen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\installer\bundle-python.ps1
+
+      - name: Installer compilen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          & $iscc 'installer/opn-cockpit.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC fehlgeschlagen (Exit $LASTEXITCODE)" }
+          $v = '${{ steps.version.outputs.version }}'
+          $exe = "installer/out/OPN-Cockpit-Setup-$v.exe"
+          if (-not (Test-Path $exe)) { throw "Erwartetes Artefakt fehlt: $exe" }
+          Get-Item $exe | Select-Object FullName, Length
+
+      - name: SHA256-Pruefsumme berechnen
+        id: hash
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $v = '${{ steps.version.outputs.version }}'
+          $exe = "installer/out/OPN-Cockpit-Setup-$v.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          Write-Host "SHA256: $hash"
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $sumFile = "$exe.sha256"
+          "$hash *$(Split-Path $exe -Leaf)" | Out-File $sumFile -Encoding ascii
+          Get-Content $sumFile
+
+      - name: Release-Notes-Snippet bauen
+        id: notes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $v = '${{ steps.version.outputs.version }}'
+          $sha = '${{ steps.hash.outputs.sha256 }}'
+          $changelogSnippet = ''
+          if (Test-Path CHANGELOG.md) {
+            $changelog = Get-Content CHANGELOG.md -Raw
+            $marker = "## v$v"
+            $idx = $changelog.IndexOf($marker)
+            if ($idx -ge 0) {
+              $remaining = $changelog.Substring($idx)
+              $next = $remaining.IndexOf("`n## ", 1)
+              $section = if ($next -gt 0) { $remaining.Substring(0, $next) } else { $remaining }
+              $changelogSnippet = "`n### Changelog-Auszug`n`n$section`n"
+            }
+          }
+          $body = @"
+## OPN-Cockpit $v
+
+Embedded-Python-Setup für Windows. Keine separate Python-Installation auf dem Zielsystem notwendig.
+
+### Installation
+
+1. ``OPN-Cockpit-Setup-$v.exe`` herunterladen.
+2. Doppelklick. Windows SmartScreen zeigt eine Warnung (Tool ist nicht code-signiert).
+3. **„Weitere Informationen" → „Trotzdem ausführen"**.
+4. Setup-Wizard folgen (Single-User oder Multi-User-Server wählen).
+
+Mehr dazu in [docs/INSTALLATION-WINDOWS.md](https://github.com/${{ github.repository }}/blob/v$v/docs/INSTALLATION-WINDOWS.md).
+
+### Checksum
+
+``````
+SHA256 ($v): $sha
+``````
+$changelogSnippet
+---
+🤖 Automatisch via GitHub Actions gebaut.
+"@
+          $bodyFile = "$env:RUNNER_TEMP/release-body.md"
+          Set-Content -Path $bodyFile -Value $body -Encoding utf8
+          "path=$bodyFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Get-Content $bodyFile
+
+      - name: GitHub-Release veroeffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: OPN-Cockpit ${{ steps.version.outputs.version }}
+          body_path: ${{ steps.notes.outputs.path }}
+          draft: false
+          prerelease: false
+          files: |
+            installer/out/OPN-Cockpit-Setup-${{ steps.version.outputs.version }}.exe
+            installer/out/OPN-Cockpit-Setup-${{ steps.version.outputs.version }}.exe.sha256
