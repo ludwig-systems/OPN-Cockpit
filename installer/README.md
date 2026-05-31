@@ -3,8 +3,8 @@
 Inno-Setup-Skript für OPN-Cockpit (v6 — Embedded-Python-Variante).
 Erzeugt einen Windows-Installer mit zwei Installations-Modi:
 
-- **Single-User**: Desktop-Verknüpfung, Aufruf via `start.bat`. Der User
-  entscheidet manuell wann der Server läuft.
+- **Single-User**: Desktop-Verknüpfung, manueller Start per Doppelklick.
+  Der User entscheidet wann der Server läuft.
 - **Multi-User-Server**: Windows-Dienst (NSSM-basiert) mit Autostart. Im
   Netzwerk erreichbar (Standard-Port 9876), Single-File-Backup möglich
   (SQLite-Backends via `OPNCOCKPIT_STORAGE_BACKEND=sqlite`).
@@ -45,7 +45,7 @@ ISCC installer\opn-cockpit.iss
 > unsignierte Skripte aus dem Internet. Alternativ direkt:
 > `powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\bundle-python.ps1`
 
-Ergebnis: `installer\out\OPN-Cockpit-Setup-0.6.0.exe` (typische Größe
+Ergebnis: `installer\out\Install-OPN-Cockpit-0.6.0.exe` (typische Größe
 ~80-100 MB; alles ist drin).
 
 Re-Build mit aktualisierten Dependencies:
@@ -59,7 +59,10 @@ ISCC installer\opn-cockpit.iss
 
 Der Installer kopiert das Embedded-Python nach
 `%ProgramFiles%\OPN-Cockpit\python\` und das Source-Tree daneben.
-`start.bat` erkennt das Bundle automatisch und nutzt es vor einer
+Der Setup-Launcher (`Scripts\opn-cockpit.exe`) wird beim Install via
+pip aus dem entry_point in `pyproject.toml` erzeugt und ist ein echter
+Windows-Launcher mit Datei-Properties. `start.bat` ist nur noch fuer den
+Dev-Mode da und erkennt das Bundle automatisch und nutzt es vor einer
 eventuell vorhandenen `.venv` (Dev-Modus).
 
 **Updates ohne Datenverlust**: Beim ersten Boot nach einem Update

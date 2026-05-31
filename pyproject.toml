@@ -29,6 +29,7 @@ dev = [
 
 [project.scripts]
 opn-cockpit-cli = "opn_cockpit.cli.main:main"
+opn-cockpit = "opn_cockpit.__main__:main"
 
 [build-system]
 requires = ["hatchling>=1.24"]

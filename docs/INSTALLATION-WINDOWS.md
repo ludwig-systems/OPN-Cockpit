@@ -8,7 +8,7 @@ Login. Wenn du das Tool selbst bauen willst, siehe stattdessen
 
 Den aktuellen Release findest du unter
 [Releases](https://github.com/ludwig-systems/opn-cockpit/releases/latest).
-Lade `OPN-Cockpit-Setup-<Version>.exe` herunter (~100 MB).
+Lade `Install-OPN-Cockpit-<Version>.exe` herunter (~100 MB).
 
 Die Datei enthält das komplette Tool inklusive Python-Interpreter und
 allen Abhängigkeiten — es muss kein System-Python vorinstalliert sein.
@@ -30,7 +30,7 @@ siehe [Roadmap](../installer/README.md#geplante-erweiterungen)).
 So bekommst du den Installer trotzdem durch:
 
 1. Im Warnfenster auf **„Weitere Informationen"** klicken.
-2. Es erscheint die Zeile **„App: OPN-Cockpit-Setup-<Version>.exe"**
+2. Es erscheint die Zeile **„App: Install-OPN-Cockpit-<Version>.exe"**
    sowie **„Herausgeber: Unbekannter Herausgeber"**.
 3. Auf **„Trotzdem ausführen"** klicken.
 
@@ -39,15 +39,15 @@ Das musst du nur einmal pro Download tun.
 ## Integrität prüfen (optional, empfohlen)
 
 Jeder Release wird mit einer SHA256-Pruefsumme verteilt
-(`OPN-Cockpit-Setup-<Version>.exe.sha256`). Damit kannst du verifizieren,
+(`Install-OPN-Cockpit-<Version>.exe.sha256`). Damit kannst du verifizieren,
 dass die heruntergeladene Datei tatsächlich vom offiziellen Build kommt
 und nicht beim Download manipuliert wurde:
 
 ```powershell
 # Im Download-Ordner:
-Get-FileHash OPN-Cockpit-Setup-0.6.0.exe -Algorithm SHA256
+Get-FileHash Install-OPN-Cockpit-0.6.0.exe -Algorithm SHA256
 # Den Hash mit der Zeile in der .sha256-Datei vergleichen
-Get-Content OPN-Cockpit-Setup-0.6.0.exe.sha256
+Get-Content Install-OPN-Cockpit-0.6.0.exe.sha256
 ```
 
 Stimmen die Hashes überein, ist die Datei intakt.
@@ -136,6 +136,6 @@ erscheint nicht mehr.
   Service neu starten — der Setup-Wizard kommt dann erneut. (Achtung:
   vorher Tresor sichern!)
 - **Logs Service-Mode**: `%ProgramData%\OPN-Cockpit\logs\stderr.log`
-- **Logs Single-Mode**: Konsolen-Fenster von `start.bat` zeigt den Trace.
+- **Logs Single-Mode**: Konsolen-Fenster des Launchers zeigt den Trace.
 - **Issues melden**:
   [github.com/ludwig-systems/opn-cockpit/issues](https://github.com/ludwig-systems/opn-cockpit/issues)

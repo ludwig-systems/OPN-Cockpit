@@ -1,6 +1,7 @@
 # Windows-Service-Mode (v3.2)
 
-Statt OPN-Cockpit jedes Mal manuell via `start.bat` zu starten, kannst
+Statt OPN-Cockpit jedes Mal manuell ueber die Desktop-Verknuepfung zu
+starten, kannst
 du es als Windows-Dienst registrieren. Der Server läuft dann ab dem
 Systemstart, kommt nach jedem Reboot automatisch hoch und ist über
 Netzwerk erreichbar (Standard: `http://<host>:9876`).

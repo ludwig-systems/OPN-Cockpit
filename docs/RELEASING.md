@@ -103,12 +103,12 @@ Nach erfolgreichem GitHub-Release:
 
 ```powershell
 # SHA256 aus dem Release-Asset holen:
-$sha = (Invoke-WebRequest "https://github.com/ludwig-systems/opn-cockpit/releases/download/v0.7.0/OPN-Cockpit-Setup-0.7.0.exe.sha256").Content.Split(" ")[0]
+$sha = (Invoke-WebRequest "https://github.com/ludwig-systems/opn-cockpit/releases/download/v0.7.0/Install-OPN-Cockpit-0.7.0.exe.sha256").Content.Split(" ")[0]
 
 # Manifeste generieren:
 .\installer\winget\generate-manifests.ps1 `
   -Version 0.7.0 `
-  -InstallerUrl "https://github.com/ludwig-systems/opn-cockpit/releases/download/v0.7.0/OPN-Cockpit-Setup-0.7.0.exe" `
+  -InstallerUrl "https://github.com/ludwig-systems/opn-cockpit/releases/download/v0.7.0/Install-OPN-Cockpit-0.7.0.exe" `
   -InstallerSha256 $sha
 ```
 

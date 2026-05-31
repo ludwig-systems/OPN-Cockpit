@@ -33,7 +33,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 # Ergebnis: "Bundle fertig: ... (~100 MB)".
 
 ISCC installer\opn-cockpit.iss
-# Ergebnis: installer\out\OPN-Cockpit-Setup-0.6.0.exe (~80–100 MB)
+# Ergebnis: installer\out\Install-OPN-Cockpit-0.6.0.exe (~80–100 MB)
 ```
 
 **Pass**, wenn beide Schritte ohne Fehler durchlaufen und die Setup-EXE im `installer\out\`-Ordner liegt.
@@ -48,8 +48,8 @@ ISCC installer\opn-cockpit.iss
 - Setup-Wizard läuft durch.
 - Am Ende den Haken "OPN-Cockpit jetzt starten" lassen.
 
-**Pass**, wenn nach Abschluss `start.bat` aufgeht und im Standardbrowser
-`http://localhost:9876` erscheint.
+**Pass**, wenn nach Abschluss die OPN-Cockpit-Konsole aufgeht und im
+Standardbrowser `http://localhost:9876` erscheint.
 
 ### A.3 Erstes Entsperren / Vault anlegen
 
@@ -97,7 +97,7 @@ Optional: `migrations.json` unter `%APPDATA%\OPN-Cockpit\` öffnen. Sollte `last
 
 ### A.6 Restart-Persistenz
 
-- Browser-Tab schliessen, `start.bat` beenden (Strg+C oder Fenster zu).
+- Browser-Tab schliessen, Launcher-Konsole beenden (Strg+C oder Fenster zu).
 - Desktop-Verknüpfung erneut starten.
 - Login-Maske erscheint, mit demselben Master-Passwort entsperren.
 
@@ -334,7 +334,7 @@ und kein Banner erscheinen.
 Bitte das Problem als kurze Notiz festhalten und beim nächsten Sync zeigen.
 Wenn der Server gar nicht hochkommt:
 
-- Windows Single-Mode: `start.bat`-Konsole zeigt den Stack-Trace
+- Windows Single-Mode: Launcher-Konsole zeigt den Stack-Trace
 - Windows Service-Mode: `%ProgramData%\OPN-Cockpit\logs\stderr.log`
 - Docker: `docker compose logs --tail=50 opn-cockpit`
 

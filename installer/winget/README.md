@@ -29,7 +29,7 @@ Das Hilfsskript `generate-manifests.ps1` füllt die Templates aus
 ```powershell
 .\installer\winget\generate-manifests.ps1 `
   -Version 0.7.0 `
-  -InstallerUrl "https://github.com/ludwig-systems/opn-cockpit/releases/download/v0.7.0/OPN-Cockpit-Setup-0.7.0.exe" `
+  -InstallerUrl "https://github.com/ludwig-systems/opn-cockpit/releases/download/v0.7.0/Install-OPN-Cockpit-0.7.0.exe" `
   -InstallerSha256 abc123...  # aus *.exe.sha256
 ```
 
