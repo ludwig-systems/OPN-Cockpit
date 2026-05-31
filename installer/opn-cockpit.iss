@@ -131,4 +131,4 @@ Filename: "powershell.exe"; \
 [UninstallDelete]
 ; Embedded-Python-Bundle wird mit deinstalliert. AppData/ProgramData bleibt
 ; bewusst stehen (Tresor, Audit, Settings).
-Type: filesandordners; Name: "{app}\python"
+Type: filesandordirs; Name: "{app}\python"
