@@ -15,7 +15,11 @@ from opn_cockpit.audit.backend import audit_actor, get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.config import AppSettings
 from opn_cockpit.security.session import Session
-from opn_cockpit.vault.discovery import default_new_vault_path, discover_vaults
+from opn_cockpit.vault.discovery import (
+    default_new_vault_path,
+    discover_vaults,
+    suggested_vault_locations,
+)
 from opn_cockpit.vault.errors import (
     CorruptVaultError,
     InvalidPasswordError,
@@ -30,6 +34,7 @@ from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     CreateVaultRequest,
     CreateVaultResponse,
+    PathSuggestion,
     TemplateExportRequest,
     VaultEntry,
     VaultListResponse,
@@ -63,9 +68,14 @@ def list_vaults() -> VaultListResponse:
                 is_default=(default is not None and str(p) == default),
             )
         )
+    suggestions = [
+        PathSuggestion(label=label, path=str(path))
+        for label, path in suggested_vault_locations()
+    ]
     return VaultListResponse(
         vaults=entries,
         suggested_new_path=str(default_new_vault_path()),
+        path_suggestions=suggestions,
     )
 
 
@@ -124,8 +134,8 @@ def create_new_vault(
         summary=f"Tresor angelegt (Web): {path}",
     )
     return CreateVaultResponse(
-        path=str(path),
-        filename=path.name,
+        vault_path=str(path),
+        vault_filename=path.name,
         token=token,
         inactivity_timeout_s=int(session.inactivity_timeout_s),
         seconds_until_expiry=int(session.seconds_until_expiry()),

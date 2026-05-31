@@ -276,6 +276,46 @@ body {
   line-height: 1.5;
 }
 
+/* Quick-Pick fuer Vault-Speicherort — Browser kann keinen nativen
+   Save-Dialog. Stattdessen kleine Chips fuer Documents/Desktop/AppData. */
+.path-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.path-suggestions[hidden] { display: none !important; }
+
+.path-suggestions-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  margin-right: 2px;
+}
+
+.path-suggestion-chip {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.path-suggestion-chip:hover {
+  border-color: var(--accent-soft);
+  color: var(--accent);
+  background: rgba(132, 158, 76, 0.08);
+}
+
 .form-checkbox {
   display: inline-flex;
   align-items: center;

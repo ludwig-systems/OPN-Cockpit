@@ -111,9 +111,15 @@ class VaultEntry(BaseModel):
     is_default: bool
 
 
+class PathSuggestion(BaseModel):
+    label: str
+    path: str
+
+
 class VaultListResponse(BaseModel):
     vaults: list[VaultEntry]
     suggested_new_path: str
+    path_suggestions: list[PathSuggestion] = []
 
 
 class CreateVaultRequest(BaseModel):
@@ -122,8 +128,8 @@ class CreateVaultRequest(BaseModel):
 
 
 class CreateVaultResponse(BaseModel):
-    path: str
-    filename: str
+    vault_path: str
+    vault_filename: str
     token: str  # auto-unlock nach Anlegen
     inactivity_timeout_s: int
     seconds_until_expiry: int

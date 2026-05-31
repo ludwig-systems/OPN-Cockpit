@@ -79,7 +79,7 @@ class TestCreateVault:
             )
         assert response.status_code == 201
         body = response.json()
-        assert body["filename"] == "neu.opnvault"
+        assert body["vault_filename"] == "neu.opnvault"
         assert body["token"]
         # Tresor auf Platte angelegt
         assert target.exists()

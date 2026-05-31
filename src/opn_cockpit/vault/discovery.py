@@ -70,6 +70,30 @@ def default_new_vault_path() -> Path:
     return get_app_data_dir() / f"main{VAULT_EXTENSION}"
 
 
+def suggested_vault_locations() -> list[tuple[str, Path]]:
+    """Liefert eine Liste ``(Label, Pfad)`` fuer den Speicherort-Quick-Pick.
+
+    Browser koennen keinen nativen Save-File-Dialog ausloesen, deshalb
+    bekommt der User stattdessen drei klickbare Default-Ziele unter dem
+    Textfeld. Reihenfolge ist user-orientiert: zuerst der typische
+    "Eigene Dokumente"-Speicherort, danach der Desktop, am Ende die
+    Anwendungsdaten (versteckter Ordner, fuer Power-User).
+    """
+    home = Path.home()
+    locations: list[tuple[str, Path]] = []
+
+    documents = home / "Documents"
+    if documents.exists():
+        locations.append(("Eigene Dokumente", documents / f"main{VAULT_EXTENSION}"))
+
+    desktop = home / "Desktop"
+    if desktop.exists():
+        locations.append(("Desktop", desktop / f"main{VAULT_EXTENSION}"))
+
+    locations.append(("Anwendungsdaten", get_app_data_dir() / f"main{VAULT_EXTENSION}"))
+    return locations
+
+
 def _resolve(path: Path) -> Path:
     """Resolved Pfad fuer Vergleichszwecke; fallback auf den Original-Pfad."""
     try:

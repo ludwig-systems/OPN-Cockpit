@@ -325,6 +325,34 @@
 
     const newPath = $('#new-vault-path');
     if (newPath && !newPath.value) newPath.value = data.suggested_new_path;
+    renderPathSuggestions(data.path_suggestions || []);
+  }
+
+  function renderPathSuggestions(suggestions) {
+    const container = $('#new-vault-path-suggestions');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!suggestions.length) {
+      container.hidden = true;
+      return;
+    }
+    container.hidden = false;
+    const label = document.createElement('span');
+    label.className = 'path-suggestions-label';
+    label.textContent = 'Schnellauswahl:';
+    container.appendChild(label);
+    const input = $('#new-vault-path');
+    suggestions.forEach((s) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'path-suggestion-chip';
+      chip.textContent = s.label;
+      chip.title = s.path;
+      chip.addEventListener('click', () => {
+        if (input) input.value = s.path;
+      });
+      container.appendChild(chip);
+    });
   }
 
   async function doUnlock() {
