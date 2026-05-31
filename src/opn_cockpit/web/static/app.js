@@ -416,9 +416,12 @@
     const usersBtn = $('#users-open-btn');
     const pwBtn = $('#password-self-btn');
     const userBadge = $('#current-user-badge');
+    const singleSwitchBtn = $('#single-switch-btn');
     if (pwBtn) pwBtn.hidden = !isMulti;
     if (usersBtn) usersBtn.hidden = true;
     if (userBadge) userBadge.hidden = !isMulti;
+    // Single-Mode-Switch-Button nur im Single-Mode sichtbar
+    if (singleSwitchBtn) singleSwitchBtn.hidden = isMulti;
     if (!isMulti) return;
     // Rolle aus Session via /api/users probe (200 = admin, 403 = nicht-admin).
     apiGet('/api/users').then(async (response) => {
@@ -2366,6 +2369,150 @@
     }
   }
 
+  // -------------------- Single-Mode Vault wechseln --------------------
+
+  async function openSingleSwitchModal() {
+    $('#ssw-pw').value = '';
+    $('#ssw-new-path').value = '';
+    $('#ssw-new-pw1').value = '';
+    $('#ssw-new-pw2').value = '';
+    $('#ssw-create-block').hidden = true;
+    $('#ssw-error').hidden = true;
+    $('#ssw-toggle-create').textContent = 'Stattdessen neuen Tresor anlegen…';
+    $('#single-switch-modal').hidden = false;
+    // Bekannte Tresore laden
+    try {
+      const response = await apiGet('/api/vaults');
+      if (!response.ok) throw new Error('Vault-Liste nicht erreichbar.');
+      const data = await response.json();
+      const select = $('#ssw-vault-select');
+      select.innerHTML = '';
+      const currentName = state.sessionInfo?.vault_filename;
+      let hasOther = false;
+      for (const v of data.vaults || []) {
+        if (v.filename === currentName) continue;
+        const opt = document.createElement('option');
+        opt.value = v.path;
+        opt.textContent = `${v.filename} — ${v.path}`;
+        select.appendChild(opt);
+        hasOther = true;
+      }
+      if (!hasOther) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '(keine weiteren Tresore gefunden)';
+        select.appendChild(opt);
+        select.disabled = true;
+      } else {
+        select.disabled = false;
+      }
+      $('#ssw-new-path').value = data.suggested_new_path || '';
+    } catch (err) {
+      showSswError(err.message);
+    }
+    setTimeout(() => $('#ssw-pw').focus(), 0);
+  }
+
+  function closeSingleSwitchModal() {
+    $('#single-switch-modal').hidden = true;
+  }
+
+  function toggleSswCreate() {
+    const block = $('#ssw-create-block');
+    block.hidden = !block.hidden;
+    $('#ssw-toggle-create').textContent = block.hidden
+      ? 'Stattdessen neuen Tresor anlegen…'
+      : '← Zurueck zur Tresor-Auswahl';
+  }
+
+  async function submitSingleSwitch() {
+    const errorBox = $('#ssw-error');
+    errorBox.hidden = true;
+    const createMode = !$('#ssw-create-block').hidden;
+    if (createMode) {
+      const newPath = $('#ssw-new-path').value.trim();
+      const pw1 = $('#ssw-new-pw1').value;
+      const pw2 = $('#ssw-new-pw2').value;
+      if (!newPath) return showSswError('Pfad zum neuen Tresor fehlt.');
+      if (pw1.length < 12) return showSswError('Passwort muss mindestens 12 Zeichen haben.');
+      if (pw1 !== pw2) return showSswError('Die beiden Passwoerter stimmen nicht ueberein.');
+      await doSingleSwitchCreate(newPath, pw1);
+    } else {
+      const path = $('#ssw-vault-select').value;
+      const pw = $('#ssw-pw').value;
+      if (!path) return showSswError('Bitte einen Tresor auswaehlen oder einen neuen anlegen.');
+      if (!pw) return showSswError('Master-Passwort fehlt.');
+      await doSingleSwitchUnlock(path, pw);
+    }
+  }
+
+  async function doSingleSwitchUnlock(path, pw) {
+    const errorBox = $('#ssw-error');
+    try {
+      // Erst alten Tresor sperren
+      await apiPost('/api/auth/lock').catch(() => {});
+      clearToken();
+      // Neuen Tresor entsperren
+      const response = await apiPost('/api/auth/unlock', {
+        vault_path: path,
+        password: pw,
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        // Token war schon weg — kein handleSessionLost noetig
+        showSswError(body.detail || `Fehler ${response.status}`);
+        return;
+      }
+      const data = await response.json();
+      setToken(data.token);
+      closeSingleSwitchModal();
+      stopHeartbeat();
+      stopSessionTicker();
+      stopRetryPolling();
+      await enterMain(data);
+      showToast(`Tresor gewechselt: ${data.vault_filename}`);
+    } catch (err) {
+      showSswError(err.message);
+    }
+  }
+
+  async function doSingleSwitchCreate(path, pw) {
+    const errorBox = $('#ssw-error');
+    try {
+      await apiPost('/api/auth/lock').catch(() => {});
+      clearToken();
+      const response = await apiPost('/api/vaults', { path, password: pw });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showSswError(body.detail || `Fehler ${response.status}`);
+        return;
+      }
+      const data = await response.json();
+      setToken(data.token);
+      closeSingleSwitchModal();
+      stopHeartbeat();
+      stopSessionTicker();
+      stopRetryPolling();
+      // Vault-Anlegen-Response hat kein vault_filename — selber bauen
+      await enterMain({
+        vault_filename: data.filename,
+        vault_path: data.path,
+        token: data.token,
+        inactivity_timeout_s: data.inactivity_timeout_s,
+        seconds_until_expiry: data.seconds_until_expiry,
+      });
+      showToast(`Neuer Tresor angelegt: ${data.filename}`);
+    } catch (err) {
+      showSswError(err.message);
+    }
+  }
+
+  function showSswError(msg) {
+    const box = $('#ssw-error');
+    box.textContent = msg;
+    box.hidden = false;
+  }
+
   // -------------------- Vault-Export (Backup + Template) --------------------
 
   function openExportModal() {
@@ -2765,6 +2912,20 @@
     $('#retry-indicator-btn').addEventListener('click', showRetryStatus);
     const exportBtn = $('#vault-export-btn');
     if (exportBtn) exportBtn.addEventListener('click', openExportModal);
+
+    // Single-Mode Vault-Switch
+    const sswBtn = $('#single-switch-btn');
+    if (sswBtn) sswBtn.addEventListener('click', openSingleSwitchModal);
+    const sswClose = $('#ssw-close');
+    if (sswClose) {
+      sswClose.addEventListener('click', closeSingleSwitchModal);
+      $('#ssw-cancel').addEventListener('click', closeSingleSwitchModal);
+      $('#ssw-toggle-create').addEventListener('click', toggleSswCreate);
+      $('#ssw-submit').addEventListener('click', submitSingleSwitch);
+      $('#single-switch-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'single-switch-modal') closeSingleSwitchModal();
+      });
+    }
 
     // Export-Modal
     const expClose = $('#export-close');

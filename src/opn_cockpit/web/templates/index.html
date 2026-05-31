@@ -219,6 +219,12 @@
               <circle cx="7.5" cy="9.5" r="0.6" fill="currentColor"/>
             </svg>
           </button>
+          <button class="icon-btn" id="single-switch-btn" title="Anderen Tresor entsperren" hidden>
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 5h8l-2-2"/>
+              <path d="M13 10H5l2 2"/>
+            </svg>
+          </button>
           <button class="icon-btn" id="vault-export-btn" title="Tresor exportieren / Backup">
             <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 9.5v2.5h9V9.5"/>
@@ -725,6 +731,56 @@
         <div class="modal-footer">
           <button class="btn-link" id="vault-switch-cancel">Abbrechen</button>
           <button class="btn-danger" id="vault-switch-submit">Wechseln</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Single-Mode Vault wechseln ================ -->
+    <div class="modal-backdrop" id="single-switch-modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="ssw-title">
+        <div class="modal-header">
+          <h2 id="ssw-title">Anderen Tresor laden</h2>
+          <button class="icon-btn modal-close" id="ssw-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <p class="form-hint">
+            Sperrt deine aktuelle Session und oeffnet stattdessen einen
+            anderen oder neu angelegten Tresor.
+          </p>
+
+          <label class="form-label" for="ssw-vault-select">Bekannter Tresor</label>
+          <select id="ssw-vault-select" class="form-select"></select>
+
+          <label class="form-label" for="ssw-pw">Master-Passwort</label>
+          <input id="ssw-pw" class="form-input" type="password" autocomplete="current-password" />
+
+          <div class="form-divider"></div>
+
+          <button class="btn-link" id="ssw-toggle-create">Stattdessen neuen Tresor anlegen…</button>
+
+          <div id="ssw-create-block" hidden>
+            <label class="form-label" for="ssw-new-path">Pfad zum neuen Tresor</label>
+            <input id="ssw-new-path" class="form-input" type="text" placeholder="z. B. C:\\Vaults\\zweittresor.opnvault" />
+
+            <label class="form-label" for="ssw-new-pw1">Neues Master-Passwort (min. 12)</label>
+            <input id="ssw-new-pw1" class="form-input" type="password" autocomplete="new-password" />
+
+            <label class="form-label" for="ssw-new-pw2">Wiederholen</label>
+            <input id="ssw-new-pw2" class="form-input" type="password" autocomplete="new-password" />
+          </div>
+
+          <div class="form-error" id="ssw-error" hidden></div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="ssw-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="ssw-submit">Wechseln</button>
         </div>
       </div>
     </div>
