@@ -44,9 +44,17 @@ if (-not (Test-Path $nssm)) {
     exit 1
 }
 
-$python = Join-Path $InstallDir ".venv\Scripts\python.exe"
-if (-not (Test-Path $python)) {
-    Write-Error "venv-Python nicht gefunden: $python. Erst setup-venv.ps1 ausfuehren."
+$bundlePython = Join-Path $InstallDir "python\python.exe"
+$devPython    = Join-Path $InstallDir ".venv\Scripts\python.exe"
+if (Test-Path $bundlePython) {
+    $python = $bundlePython
+    Write-Host "Verwende Embedded-Python-Bundle: $python"
+} elseif (Test-Path $devPython) {
+    $python = $devPython
+    Write-Host "Verwende Dev-venv: $python"
+} else {
+    Write-Error ("Kein Python gefunden — weder Bundle ($bundlePython) " +
+                 "noch venv ($devPython). Installation defekt.")
     exit 1
 }
 

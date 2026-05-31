@@ -36,6 +36,11 @@ coverage.xml
 Thumbs.db
 .DS_Store
 
+# Installer-Bundle (Embedded-Python + Dependencies, ca. 100 MB).
+# Wird via installer\bundle-python.ps1 frisch erzeugt — nicht commiten.
+installer/bundle/python/
+installer/out/
+
 # OPN-Cockpit runtime data (Sicherheits-Schutz)
 # Auch wenn devices.json absichtlich Klartext-Struktur hat (R-NFR-5),
 # wird Laufzeit-Datenverzeichnis nie ins Repo geschoben.
