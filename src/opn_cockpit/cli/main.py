@@ -288,6 +288,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument("--until", dest="until_iso")
     p_audit.add_argument("--limit", type=int, default=50)
 
+    # ----- Migrations / Updates -----
+
+    p_migrate = sub.add_parser(
+        "migrate",
+        help="Offene Datenmigrationen anzeigen oder anwenden",
+    )
+    p_migrate.add_argument(
+        "--apply", action="store_true",
+        help="Pending Migrationen anwenden (Default: nur Status anzeigen)",
+    )
+    p_migrate.add_argument(
+        "--skip-backup", action="store_true",
+        help="Pre-Update-Backup ueberspringen (NICHT empfohlen, nur fuer Tests)",
+    )
+
     return parser
 
 
@@ -316,6 +331,7 @@ def _dispatch(args: argparse.Namespace, settings: AppSettings) -> int:
     handlers_without_settings: dict[str, Callable[[argparse.Namespace], int]] = {
         "create-vault": cmd_create_vault,
         "audit": cmd_audit,
+        "migrate": cmd_migrate,
     }
     handlers_with_settings: dict[str, Callable[[argparse.Namespace, AppSettings], int]] = {
         "change-password": cmd_change_password,
@@ -1008,6 +1024,63 @@ def _profile_apply(
         devices_by_id={d.id: d.name for d in devices},
     ))
     return EXIT_OK if report.failures == 0 else EXIT_NETWORK_ERROR
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    """Zeigt oder wendet offene Datenmigrationen an.
+
+    Default ist der Read-Only-Modus: Pending-Migrationen und letzte
+    angewandte werden aufgelistet, nichts wird angefasst. Mit ``--apply``
+    laeuft der Runner inkl. Pre-Update-Backup. Exit-Codes:
+
+    * 0: nichts zu tun bzw. Apply erfolgreich
+    * 1: Pending-Migrationen vorhanden (Status-Mode)
+    * 78 (EX_CONFIG): Migration ist fehlgeschlagen
+    """
+    # Lazy-Import: vermeidet, dass jeder CLI-Aufruf das Migration-Modul lädt.
+    from opn_cockpit.migrations import (  # noqa: PLC0415
+        MIGRATIONS,
+        MigrationError,
+        MigrationState,
+        pending_migrations,
+        run_pending_migrations,
+    )
+
+    state = MigrationState.load()
+    pending = pending_migrations(state)
+
+    if not args.apply:
+        emit(f"Bekannt: {len(MIGRATIONS)} Migration(en), {len(pending)} offen.")
+        if state.last_app_version:
+            emit(f"Letzte App-Version laut migrations.json: {state.last_app_version}")
+        if state.applied:
+            emit("Bereits angewandt:")
+            for applied in state.applied:
+                emit(
+                    f"  - {applied.id}  "
+                    f"({applied.applied_at_iso}, v{applied.app_version})",
+                )
+        if pending:
+            emit("Offen:")
+            for migration in pending:
+                emit(f"  - {migration.id}  {migration.description}")
+            emit("Mit '--apply' anwenden (Pre-Update-Backup wird automatisch erzeugt).")
+            return EXIT_GENERAL_ERROR
+        emit("Keine Migration ausstehend.")
+        return EXIT_OK
+
+    try:
+        result = run_pending_migrations(skip_backup=args.skip_backup)
+    except MigrationError as exc:
+        emit(f"Migration fehlgeschlagen: {exc}", err=True)
+        return 78
+    if result.skipped:
+        emit("Keine Migration ausstehend.")
+        return EXIT_OK
+    emit(f"Migration(en) angewandt: {', '.join(result.applied_ids)}")
+    if result.backup is not None:
+        emit(f"Pre-Update-Backup: {result.backup.path}")
+    return EXIT_OK
 
 
 def cmd_audit(args: argparse.Namespace) -> int:

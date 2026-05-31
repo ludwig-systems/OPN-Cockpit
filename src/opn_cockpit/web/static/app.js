@@ -2612,6 +2612,42 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  // -------------------- About-Modal --------------------
+
+  let aboutLoaded = false;
+
+  async function openAboutModal() {
+    const modal = $('#about-modal');
+    modal.hidden = false;
+    if (aboutLoaded) return;
+    try {
+      const response = await fetch('/api/about');
+      if (!response.ok) return;
+      const data = await response.json();
+      $('#about-name').textContent = data.name || 'OPN-Cockpit';
+      $('#about-version').textContent = data.version || '—';
+      $('#about-author').textContent = data.author || '—';
+      const email = $('#about-email');
+      if (data.author_email) {
+        email.textContent = data.author_email;
+        email.href = `mailto:${data.author_email}`;
+      }
+      const repo = $('#about-github');
+      if (data.github_url) {
+        repo.textContent = data.github_url;
+        repo.href = data.github_url;
+      }
+      $('#about-license').textContent = data.license || '—';
+      aboutLoaded = true;
+    } catch (_err) {
+      /* still show what's in the markup; nothing fatal */
+    }
+  }
+
+  function closeAboutModal() {
+    $('#about-modal').hidden = true;
+  }
+
   // -------------------- Audit-Modal --------------------
 
   let auditEventKindsLoaded = false;
@@ -2936,6 +2972,18 @@
       $('#export-template-btn').addEventListener('click', doExportTemplate);
       $('#export-modal').addEventListener('click', (e) => {
         if (e.target.id === 'export-modal') closeExportModal();
+      });
+    }
+
+    // About-Modal
+    const aboutBtn = $('#about-open-btn');
+    if (aboutBtn) aboutBtn.addEventListener('click', openAboutModal);
+    const aboutClose = $('#about-close');
+    if (aboutClose) {
+      aboutClose.addEventListener('click', closeAboutModal);
+      $('#about-cancel').addEventListener('click', closeAboutModal);
+      $('#about-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'about-modal') closeAboutModal();
       });
     }
     const usersBtn = $('#users-open-btn');

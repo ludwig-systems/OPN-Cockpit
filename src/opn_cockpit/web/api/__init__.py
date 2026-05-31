@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, FastAPI
 
 from opn_cockpit import __version__
+from opn_cockpit.web.api import about as about_routes
 from opn_cockpit.web.api import audit as audit_routes
 from opn_cockpit.web.api import auth as auth_routes
 from opn_cockpit.web.api import bootstrap as bootstrap_routes
@@ -33,6 +34,7 @@ def version() -> dict[str, str]:
 
 def register_api_routes(app: FastAPI) -> None:
     app.include_router(api_router)
+    app.include_router(about_routes.router)
     app.include_router(bootstrap_routes.router)
     app.include_router(auth_routes.router)
     app.include_router(vaults_routes.router)

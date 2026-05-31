@@ -239,6 +239,13 @@
               <line x1="3.5" y1="11.5" x2="9" y2="11.5"/>
             </svg>
           </button>
+          <button class="icon-btn" id="about-open-btn" title="Über OPN-Cockpit">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="7.5" cy="7.5" r="5.5"/>
+              <line x1="7.5" y1="6.7" x2="7.5" y2="10.5"/>
+              <circle cx="7.5" cy="4.6" r="0.6" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
           <button class="icon-btn" id="theme-toggle-main" title="Theme wechseln">
             <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
               <circle cx="7.5" cy="7.5" r="2.5" />
@@ -831,6 +838,52 @@
 
         <div class="modal-footer">
           <button class="btn-link" id="export-cancel">Schliessen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: About / Über ================ -->
+    <div class="modal-backdrop" id="about-modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="about-title">
+        <div class="modal-header">
+          <h2 id="about-title">Über OPN-Cockpit</h2>
+          <button class="icon-btn modal-close" id="about-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body about-body">
+          <div class="about-brand">
+            <h3 id="about-name">OPN-Cockpit</h3>
+            <div class="about-version">Version <span id="about-version">—</span></div>
+            <div class="about-tagline">Multi-Site-Management für OPNsense</div>
+          </div>
+
+          <dl class="about-meta">
+            <dt>Entwickler</dt>
+            <dd id="about-author">—</dd>
+
+            <dt>Kontakt</dt>
+            <dd><a id="about-email" href="#">—</a></dd>
+
+            <dt>Quellcode</dt>
+            <dd><a id="about-github" href="#" target="_blank" rel="noopener noreferrer">—</a></dd>
+
+            <dt>Lizenz</dt>
+            <dd id="about-license">—</dd>
+          </dl>
+
+          <p class="form-hint">
+            Dieses Tool ist ein Side-Project und wird laufend weiterentwickelt.
+            Issues und Verbesserungsvorschläge gehören in das GitHub-Repository.
+          </p>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="about-cancel">Schliessen</button>
         </div>
       </div>
     </div>

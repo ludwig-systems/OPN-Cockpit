@@ -4,17 +4,24 @@
 bis zum Beenden (Ctrl+C oder OS-Signal). Der Browser-Start passiert in
 einem Daemon-Thread mit kleinem Delay, damit der Server zur Begruessung
 schon antwortet.
+
+Vor dem Server-Start laeuft das Migrations-Framework: ist eine offene
+Migration vorhanden, wird vorher ein Pre-Update-Backup erzeugt und die
+Migration angewandt. Schlaegt das fehl, bricht der Boot ab — Datenintegritaet
+geht vor.
 """
 
 from __future__ import annotations
 
 import contextlib
+import sys
 import threading
 import time
 import webbrowser
 
 import uvicorn
 
+from opn_cockpit.migrations import MigrationError, run_pending_migrations
 from opn_cockpit.web.server import create_app
 from opn_cockpit.web.settings import WebSettings
 
@@ -30,6 +37,26 @@ def run(settings: WebSettings | None = None) -> int:
     falls der Server noch im Startup ist.
     """
     settings = settings or WebSettings.from_env()
+
+    try:
+        result = run_pending_migrations()
+    except MigrationError as exc:
+        sys.stderr.write(
+            "\n[opn-cockpit] Migration fehlgeschlagen — Boot abgebrochen.\n"
+            f"  Fehler: {exc}\n"
+            "  Backup liegt in <app_data>/backups/. Server NICHT gestartet.\n\n",
+        )
+        sys.stderr.flush()
+        return 78  # EX_CONFIG
+    if not result.skipped:
+        sys.stderr.write(
+            f"\n[opn-cockpit] {len(result.applied_ids)} Migration(en) angewandt: "
+            f"{', '.join(result.applied_ids)}\n",
+        )
+        if result.backup is not None:
+            sys.stderr.write(f"  Backup: {result.backup.path}\n")
+        sys.stderr.flush()
+
     app = create_app()
 
     if settings.auto_open_browser:

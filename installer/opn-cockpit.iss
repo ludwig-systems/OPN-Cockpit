@@ -19,9 +19,9 @@
 ;   .venv\, .git\, tests\, __pycache__\, .ruff_cache\, .mypy_cache\
 
 #define MyAppName      "OPN-Cockpit"
-#define MyAppVersion   "0.1.0"
-#define MyAppPublisher "OPN-Cockpit Maintainers"
-#define MyAppURL       "https://github.com/your-org/opn-cockpit"
+#define MyAppVersion   "0.6.0"
+#define MyAppPublisher "Ludwig Systems"
+#define MyAppURL       "https://github.com/ludwig-systems/opn-cockpit"
 #define MyAppExeName   "start.bat"
 
 [Setup]

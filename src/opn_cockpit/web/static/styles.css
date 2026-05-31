@@ -1964,3 +1964,77 @@ a.card-open-link { text-decoration: none; }
   gap: 12px;
   margin-top: 10px;
 }
+
+/* ===== About-Modal ===== */
+
+.about-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.about-brand {
+  text-align: center;
+  padding: 18px 0 8px;
+}
+
+.about-brand h3 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  margin: 0 0 6px;
+}
+
+.about-version {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-subtle);
+}
+
+.about-version span {
+  color: var(--accent);
+}
+
+.about-tagline {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-subtle);
+  letter-spacing: 0.03em;
+}
+
+.about-meta {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px 18px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.about-meta dt {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
+  align-self: center;
+}
+
+.about-meta dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.about-meta a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent-soft);
+}
+
+.about-meta a:hover {
+  border-bottom-style: solid;
+}

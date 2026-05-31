@@ -37,7 +37,7 @@ def test_package_importable(module: str) -> None:
 
 
 def test_version_string() -> None:
-    assert opn_cockpit.__version__ == "0.1.0"
+    assert opn_cockpit.__version__ == "0.6.0"
 
 
 def test_cli_parser_lists_planned_subcommands() -> None:
