@@ -3093,8 +3093,8 @@
     $('#au-reload').addEventListener('click', reloadAudit);
     const verifyBtn = $('#au-verify-btn');
     if (verifyBtn) verifyBtn.addEventListener('click', verifyAuditChain);
-    const exportBtn = $('#au-export-btn');
-    if (exportBtn) exportBtn.addEventListener('click', exportAuditCsv);
+    const auExportBtn = $('#au-export-btn');
+    if (auExportBtn) auExportBtn.addEventListener('click', exportAuditCsv);
     $('#audit-modal').addEventListener('click', (e) => {
       if (e.target.id === 'audit-modal') closeAuditModal();
     });
