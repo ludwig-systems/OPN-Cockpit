@@ -323,9 +323,150 @@
       $('#password-input').focus();
     }
 
-    const newPath = $('#new-vault-path');
-    if (newPath && !newPath.value) newPath.value = data.suggested_new_path;
+    const nameInput = $('#new-vault-name');
+    const dirInput = $('#new-vault-directory');
+    if (nameInput && !nameInput.value) nameInput.value = data.suggested_new_name || 'main';
+    if (dirInput && !dirInput.value) dirInput.value = data.suggested_new_directory || '';
     renderPathSuggestions(data.path_suggestions || []);
+    updateVaultTargetPreview();
+  }
+
+  function joinPath(dir, filename) {
+    if (!dir) return filename;
+    const trimmed = dir.replace(/[\\\/]+$/g, '');
+    return `${trimmed}\\${filename}`;
+  }
+
+  function ensureVaultSuffix(name) {
+    if (!name) return '';
+    return /\.opnvault$/i.test(name) ? name : `${name}.opnvault`;
+  }
+
+  function updateVaultTargetPreview() {
+    const nameRaw = ($('#new-vault-name')?.value || '').trim();
+    const dirRaw = ($('#new-vault-directory')?.value || '').trim();
+    const preview = $('#new-vault-target-preview');
+    const hidden = $('#new-vault-path');
+    if (!nameRaw || !dirRaw) {
+      if (preview) preview.textContent = '—';
+      if (hidden) hidden.value = '';
+      return;
+    }
+    const target = joinPath(dirRaw, ensureVaultSuffix(nameRaw));
+    if (preview) preview.textContent = target;
+    if (hidden) hidden.value = target;
+  }
+
+  // -------------------- Folder-Browser-Modal --------------------
+
+  let fbState = { current: '', parent: null };
+
+  async function openFolderBrowser() {
+    // Startpfad: aktueller Wert im Speicherort-Feld (= Verzeichnis).
+    const dirInput = $('#new-vault-directory');
+    const startPath = dirInput ? dirInput.value.trim() : '';
+    $('#fb-error').hidden = true;
+    $('#folder-browser-modal').hidden = false;
+    await loadFolderBrowser(startPath);
+  }
+
+  function closeFolderBrowser() {
+    $('#folder-browser-modal').hidden = true;
+  }
+
+  function deriveParentDir(raw) {
+    if (!raw) return '';
+    const s = raw.replace(/\//g, '\\');
+    const idx = s.lastIndexOf('\\');
+    return idx >= 0 ? s.substring(0, idx) : '';
+  }
+
+  function deriveFilename(raw) {
+    if (!raw) return '';
+    const s = raw.replace(/\//g, '\\');
+    const idx = s.lastIndexOf('\\');
+    return idx >= 0 ? s.substring(idx + 1) : s;
+  }
+
+  async function loadFolderBrowser(path) {
+    const list = $('#fb-list');
+    list.innerHTML = '<div class="fb-loading">Lade…</div>';
+    $('#fb-error').hidden = true;
+    try {
+      const url = '/api/files/browse' + (path ? `?path=${encodeURIComponent(path)}` : '');
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Fehler ${response.status}`);
+      }
+      const data = await response.json();
+      fbState = { current: data.current || '', parent: data.parent };
+      $('#fb-current').textContent = data.current || 'Laufwerke';
+      $('#fb-up-btn').disabled = data.parent === null;
+      renderFolderBrowserList(data.entries || []);
+    } catch (err) {
+      list.innerHTML = '';
+      const errBox = $('#fb-error');
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+    }
+  }
+
+  function renderFolderBrowserList(entries) {
+    const list = $('#fb-list');
+    list.innerHTML = '';
+    if (!entries.length) {
+      list.innerHTML = '<div class="fb-empty">(leer)</div>';
+      return;
+    }
+    entries.forEach((e) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `fb-row fb-row-${e.kind}`;
+      const icon = e.kind === 'vault' ? '🔐' : (e.kind === 'drive' ? '💽' : '📁');
+      row.innerHTML = `<span class="fb-row-icon">${icon}</span><span class="fb-row-name">${escapeHtml(e.name)}</span>`;
+      row.addEventListener('click', () => {
+        if (e.kind === 'vault') {
+          // Bestehende Vault-Datei angeklickt: Name (ohne Endung) ins
+          // Name-Feld uebernehmen, Modal schliessen, Verzeichnis = aktueller.
+          const baseName = e.name.replace(/\.opnvault$/i, '');
+          const nameInput = $('#new-vault-name');
+          if (nameInput) nameInput.value = baseName;
+          const dirInput = $('#new-vault-directory');
+          if (dirInput) dirInput.value = fbState.current;
+          updateVaultTargetPreview();
+          closeFolderBrowser();
+        } else {
+          // Ordner / Drive: hineinwechseln.
+          loadFolderBrowser(e.path);
+        }
+      });
+      list.appendChild(row);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function folderBrowserUp() {
+    if (fbState.parent === null) return;
+    loadFolderBrowser(fbState.parent || '');
+  }
+
+  function acceptFolderBrowser() {
+    if (!fbState.current) {
+      const errBox = $('#fb-error');
+      errBox.textContent = 'Bitte einen Ordner waehlen (in ein Laufwerk wechseln).';
+      errBox.hidden = false;
+      return;
+    }
+    const dirInput = $('#new-vault-directory');
+    if (dirInput) dirInput.value = fbState.current;
+    updateVaultTargetPreview();
+    closeFolderBrowser();
   }
 
   function renderPathSuggestions(suggestions) {
@@ -341,7 +482,7 @@
     label.className = 'path-suggestions-label';
     label.textContent = 'Schnellauswahl:';
     container.appendChild(label);
-    const input = $('#new-vault-path');
+    const dirInput = $('#new-vault-directory');
     suggestions.forEach((s) => {
       const chip = document.createElement('button');
       chip.type = 'button';
@@ -349,7 +490,8 @@
       chip.textContent = s.label;
       chip.title = s.path;
       chip.addEventListener('click', () => {
-        if (input) input.value = s.path;
+        if (dirInput) dirInput.value = s.path;
+        updateVaultTargetPreview();
       });
       container.appendChild(chip);
     });
@@ -387,13 +529,19 @@
   }
 
   async function doCreateVault() {
-    const path = $('#new-vault-path').value.trim();
+    // Hidden Pfad-Feld wird per updateVaultTargetPreview gefuettert.
+    updateVaultTargetPreview();
+    const name = ($('#new-vault-name').value || '').trim();
+    const dir = ($('#new-vault-directory').value || '').trim();
+    const path = ($('#new-vault-path').value || '').trim();
     const pw1 = $('#new-vault-pw1').value;
     const pw2 = $('#new-vault-pw2').value;
     const errorBox = $('#create-error');
     errorBox.hidden = true;
 
-    if (!path) return showCreateError('Pfad fehlt.');
+    if (!name) return showCreateError('Tresor-Name fehlt.');
+    if (!dir) return showCreateError('Speicherort fehlt — bitte einen Ordner waehlen.');
+    if (!path) return showCreateError('Pfad konnte nicht gebildet werden.');
     if (pw1.length < 12) return showCreateError('Passwort muss mindestens 12 Zeichen haben.');
     if (pw1 !== pw2) return showCreateError('Die beiden Passwörter stimmen nicht überein.');
 
@@ -2987,6 +3135,10 @@
     });
     $('#create-back-btn').addEventListener('click', () => showLoginView('picker'));
     $('#create-confirm-btn').addEventListener('click', doCreateVault);
+    const newNameInput = $('#new-vault-name');
+    const newDirInput = $('#new-vault-directory');
+    if (newNameInput) newNameInput.addEventListener('input', updateVaultTargetPreview);
+    if (newDirInput) newDirInput.addEventListener('input', updateVaultTargetPreview);
     $('#theme-toggle-login').addEventListener('click', toggleTheme);
 
     // Multi-User-Login
@@ -3068,6 +3220,20 @@
     // Update-Banner-Dismiss
     const updateDismiss = $('#update-banner-dismiss');
     if (updateDismiss) updateDismiss.addEventListener('click', dismissUpdateBanner);
+
+    // Folder-Browser-Modal
+    const fbBtn = $('#new-vault-browse-btn');
+    if (fbBtn) fbBtn.addEventListener('click', openFolderBrowser);
+    const fbClose = $('#fb-close');
+    if (fbClose) {
+      fbClose.addEventListener('click', closeFolderBrowser);
+      $('#fb-cancel').addEventListener('click', closeFolderBrowser);
+      $('#fb-up-btn').addEventListener('click', folderBrowserUp);
+      $('#fb-accept').addEventListener('click', acceptFolderBrowser);
+      $('#folder-browser-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'folder-browser-modal') closeFolderBrowser();
+      });
+    }
     const usersBtn = $('#users-open-btn');
     if (usersBtn) usersBtn.addEventListener('click', openUsersModal);
     const pwSelfBtn = $('#password-self-btn');

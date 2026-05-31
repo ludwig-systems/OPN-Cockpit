@@ -17,6 +17,7 @@ from opn_cockpit.config import AppSettings
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.discovery import (
     default_new_vault_path,
+    default_vault_basename,
     discover_vaults,
     suggested_vault_locations,
 )
@@ -69,12 +70,15 @@ def list_vaults() -> VaultListResponse:
             )
         )
     suggestions = [
-        PathSuggestion(label=label, path=str(path))
-        for label, path in suggested_vault_locations()
+        PathSuggestion(label=label, path=str(directory))
+        for label, directory in suggested_vault_locations()
     ]
+    default_full = default_new_vault_path()
     return VaultListResponse(
         vaults=entries,
-        suggested_new_path=str(default_new_vault_path()),
+        suggested_new_path=str(default_full),
+        suggested_new_directory=str(default_full.parent),
+        suggested_new_name=default_vault_basename(),
         path_suggestions=suggestions,
     )
 

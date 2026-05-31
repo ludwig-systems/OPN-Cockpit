@@ -119,6 +119,8 @@ class PathSuggestion(BaseModel):
 class VaultListResponse(BaseModel):
     vaults: list[VaultEntry]
     suggested_new_path: str
+    suggested_new_directory: str = ""
+    suggested_new_name: str = ""
     path_suggestions: list[PathSuggestion] = []
 
 

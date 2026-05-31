@@ -15,6 +15,7 @@ from opn_cockpit.web.api import audit as audit_routes
 from opn_cockpit.web.api import auth as auth_routes
 from opn_cockpit.web.api import bootstrap as bootstrap_routes
 from opn_cockpit.web.api import discover as discover_routes
+from opn_cockpit.web.api import files as files_routes
 from opn_cockpit.web.api import imports as imports_routes
 from opn_cockpit.web.api import inventory as inventory_routes
 from opn_cockpit.web.api import plans as plans_routes
@@ -43,6 +44,7 @@ def register_api_routes(app: FastAPI) -> None:
     app.include_router(plans_routes.router)
     app.include_router(audit_routes.router)
     app.include_router(discover_routes.router)
+    app.include_router(files_routes.router)
     app.include_router(profiles_routes.router)
     app.include_router(imports_routes.router)
     app.include_router(retry_routes.router)

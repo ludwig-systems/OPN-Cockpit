@@ -152,9 +152,28 @@
             Geräte-Daten und API-Schlüssel. Es lässt sich später ändern.
           </p>
 
-          <label class="form-label" for="new-vault-path">Speicherort</label>
-          <input id="new-vault-path" class="form-input" type="text" />
+          <label class="form-label" for="new-vault-name">Tresor-Name</label>
+          <input id="new-vault-name" class="form-input" type="text" placeholder="z. B. main" />
+          <div class="form-hint">
+            Endung <code>.opnvault</code> wird automatisch ergaenzt.
+          </div>
+
+          <label class="form-label" for="new-vault-directory" style="margin-top:14px">Speicherort</label>
+          <div class="form-input-with-button">
+            <input id="new-vault-directory" class="form-input" type="text" />
+            <button class="btn-input-adornment" id="new-vault-browse-btn" type="button" title="Ordner waehlen">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1.5 4.5 L1.5 11.5 L12.5 11.5 L12.5 5 L7.5 5 L6 3.5 L1.5 3.5 Z"/>
+              </svg>
+              <span>Ordner waehlen</span>
+            </button>
+          </div>
           <div class="path-suggestions" id="new-vault-path-suggestions"></div>
+          <div class="form-hint vault-target-preview">
+            Wird gespeichert als: <code id="new-vault-target-preview">—</code>
+          </div>
+          <!-- Hidden: kombinierter Full-Path fuer doCreateVault — wird live aus name + dir gebaut. -->
+          <input id="new-vault-path" type="hidden" />
 
           <label class="form-label" for="new-vault-pw1">Master-Passwort (min. 12 Zeichen)</label>
           <input id="new-vault-pw1" class="form-input" type="password" autocomplete="new-password" />
@@ -861,6 +880,48 @@
 
         <div class="modal-footer">
           <button class="btn-link" id="export-cancel">Schliessen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Folder-Browser fuer Vault-Pfad ================ -->
+    <div class="modal-backdrop" id="folder-browser-modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="fb-title">
+        <div class="modal-header">
+          <h2 id="fb-title">Ordner waehlen</h2>
+          <button class="icon-btn modal-close" id="fb-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <div class="fb-toolbar">
+            <button class="btn-secondary fb-up-btn" id="fb-up-btn" type="button" title="Eine Ebene hoch">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 7 6 4 9 7"/>
+                <line x1="6" y1="4" x2="6" y2="10"/>
+              </svg>
+              <span>Hoeher</span>
+            </button>
+            <div class="fb-current" id="fb-current">—</div>
+          </div>
+
+          <div class="fb-list" id="fb-list"></div>
+          <div class="form-error" id="fb-error" hidden></div>
+          <div class="form-hint">
+            Klicke auf einen Unterordner um hinein zu wechseln. Bestehende
+            Tresor-Dateien (<code>.opnvault</code>) werden in der Liste
+            angezeigt — wenn du eine anklickst, wird ihr Name fuer den
+            neuen Tresor uebernommen.
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="fb-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="fb-accept">Diesen Ordner uebernehmen</button>
         </div>
       </div>
     </div>

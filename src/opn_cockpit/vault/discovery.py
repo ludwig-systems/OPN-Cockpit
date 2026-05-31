@@ -71,27 +71,35 @@ def default_new_vault_path() -> Path:
 
 
 def suggested_vault_locations() -> list[tuple[str, Path]]:
-    """Liefert eine Liste ``(Label, Pfad)`` fuer den Speicherort-Quick-Pick.
+    """Liefert eine Liste ``(Label, Verzeichnis)`` fuer den Speicherort-Quick-Pick.
 
     Browser koennen keinen nativen Save-File-Dialog ausloesen, deshalb
-    bekommt der User stattdessen drei klickbare Default-Ziele unter dem
-    Textfeld. Reihenfolge ist user-orientiert: zuerst der typische
-    "Eigene Dokumente"-Speicherort, danach der Desktop, am Ende die
-    Anwendungsdaten (versteckter Ordner, fuer Power-User).
+    bekommt der User stattdessen drei klickbare Default-Verzeichnisse
+    unter dem Speicherort-Feld. Reihenfolge ist user-orientiert: zuerst
+    der typische "Eigene Dokumente"-Speicherort (mit OPN-Cockpit-
+    Unterordner), danach der Desktop, am Ende die Anwendungsdaten.
+
+    Es werden **Verzeichnisse** zurueckgegeben, nicht ganze Datei-Pfade —
+    der Dateiname kommt aus einem separaten Eingabefeld im Frontend.
     """
     home = Path.home()
     locations: list[tuple[str, Path]] = []
 
     documents = home / "Documents"
     if documents.exists():
-        locations.append(("Eigene Dokumente", documents / f"main{VAULT_EXTENSION}"))
+        locations.append(("Eigene Dokumente", documents / "OPN-Cockpit"))
 
     desktop = home / "Desktop"
     if desktop.exists():
-        locations.append(("Desktop", desktop / f"main{VAULT_EXTENSION}"))
+        locations.append(("Desktop", desktop / "OPN-Cockpit"))
 
-    locations.append(("Anwendungsdaten", get_app_data_dir() / f"main{VAULT_EXTENSION}"))
+    locations.append(("Anwendungsdaten", get_app_data_dir()))
     return locations
+
+
+def default_vault_basename() -> str:
+    """Default-Stem fuer einen neu angelegten Tresor (ohne .opnvault-Endung)."""
+    return "main"
 
 
 def _resolve(path: Path) -> Path:
