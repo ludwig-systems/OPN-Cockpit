@@ -105,14 +105,18 @@ ASK "Hostname" "Hostname / CT-Name" "$CT_HOSTNAME_DEFAULT"
 CT_HOSTNAME="$REPLY"
 
 # ----- Storage-Pool -----
+# pvesm status-Spalten (stable seit Proxmox 6.x):
+#   $1=Name $2=Type $3=Status $4=Total(KiB) $5=Used(KiB) $6=Available(KiB) $7=%
 STORAGE_ITEMS=()
 while IFS= read -r line; do
     name=$(echo "$line" | awk '{print $1}')
     type=$(echo "$line" | awk '{print $2}')
-    avail_kib=$(echo "$line" | awk '{print $5}')
-    if [[ "$avail_kib" =~ ^[0-9]+$ ]]; then
+    total_kib=$(echo "$line" | awk '{print $4}')
+    avail_kib=$(echo "$line" | awk '{print $6}')
+    if [[ "$avail_kib" =~ ^[0-9]+$ && "$total_kib" =~ ^[0-9]+$ ]]; then
         avail_gb=$((avail_kib / 1024 / 1024))
-        descr="$type | ~${avail_gb} GB frei"
+        total_gb=$((total_kib / 1024 / 1024))
+        descr="$type | ${avail_gb} GB frei / ${total_gb} GB total"
     else
         descr="$type"
     fi
@@ -236,17 +240,40 @@ whiptail --backtitle "$BACKTITLE" --title "Zusammenfassung" \
 # ---------------------------------------------------------------------------
 # Debian-12-Template sicherstellen
 # ---------------------------------------------------------------------------
-log "Debian-12-Template sicherstellen..."
+# pveam-Katalog frisch ziehen — sonst zeigt 'pveam available' eine alte
+# Version, deren tar.zst-URL bei Proxmox laengst weg ist (404 beim Download).
+log "Template-Katalog aktualisieren..."
+pveam update >/dev/null 2>&1 || warn "pveam update fehlgeschlagen — alter Katalog wird verwendet."
+
+log "Aktuelles Debian-12-Template ermitteln..."
 TEMPLATE=$(pveam available --section system | awk '/debian-12-standard/{print $2}' | tail -1)
 [[ -n "$TEMPLATE" ]] || err "Kein Debian-12-Template im pveam-Katalog."
 
-mapfile -t TPL_STORAGES < <(pvesm status -content vztmpl | awk 'NR>1 {print $1}')
-TPL_STORAGE="${TPL_STORAGES[0]:-local}"
+# Template-Storage waehlen: bevorzugt 'local' (Standard-Proxmox-Setup), sonst
+# der erste vztmpl-faehige Pool. Verhindert dass das Template auf einer
+# USB-Backup-Platte landet die der User nur fuer Backups eingebunden hat.
+log "Template-Storage auswaehlen..."
+mapfile -t TPL_STORAGES < <(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 {print $1}')
+if [[ ${#TPL_STORAGES[@]} -eq 0 ]]; then
+    err "Kein Storage mit Content 'CT Templates' verfuegbar."
+fi
 
-LOCAL_TPL="/var/lib/vz/template/cache/$TEMPLATE"
-if [[ ! -f "$LOCAL_TPL" ]]; then
-    log "Template herunterladen: $TEMPLATE..."
+TPL_STORAGE=""
+for candidate in "${TPL_STORAGES[@]}"; do
+    [[ "$candidate" == "local" ]] && { TPL_STORAGE="local"; break; }
+done
+# Wenn 'local' nicht in der Liste war, nimm den ersten Eintrag.
+: "${TPL_STORAGE:=${TPL_STORAGES[0]}}"
+
+log "Template-Storage: $TPL_STORAGE"
+
+# Template prueft pveam list — pfad-basierter Check funktionierte nur fuer
+# 'local' (/var/lib/vz/template/cache). pveam list ist Storage-agnostisch.
+if ! pveam list "$TPL_STORAGE" 2>/dev/null | awk '{print $1}' | grep -qF "$TEMPLATE"; then
+    log "Template herunterladen: $TEMPLATE -> $TPL_STORAGE..."
     pveam download "$TPL_STORAGE" "$TEMPLATE"
+else
+    log "Template bereits vorhanden auf $TPL_STORAGE."
 fi
 
 # ---------------------------------------------------------------------------
