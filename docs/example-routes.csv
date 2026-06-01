@@ -1,7 +1,0 @@
-network,gateway,descr,disabled
-# Beispiel-CSV für `bulk-import routes`.
-# Pflichtspalten: network, gateway. Optional: descr, disabled.
-# Leere Zeilen und mit '#' beginnende Zeilen werden übersprungen.
-10.99.0.0/24,WAN_GW,Pilot-Tunnel Berlin,0
-10.99.1.0/24,WAN_GW,Pilot-Tunnel München,0
-10.99.2.0/24,WAN_GW,Backup-Pfad Hamburg,1
