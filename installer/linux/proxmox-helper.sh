@@ -64,7 +64,7 @@ err() {
 # ---------------------------------------------------------------------------
 # Voraussetzungen + Mode-Detection
 # ---------------------------------------------------------------------------
-[[ $EUID -eq 0 ]] || err "Skript braucht root (auf Proxmox-Host oder im Container via 'sudo')."
+[[ $EUID -eq 0 ]] || err "Skript braucht root (im Container 'pct enter <CT-ID>' vom PVE-Host nutzen, das gibt direkt Root-Shell)."
 
 # Mode: CREATE = auf Proxmox-Host (pveam existiert), UPDATE = im Container
 # mit existierender Installation (kein pveam, /opt/opn-cockpit existiert)
@@ -131,11 +131,13 @@ Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
     systemctl stop opn-cockpit.service
 
     log "Code aktualisieren (git fetch + reset)..."
-    sudo -u opncockpit git -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH"
-    sudo -u opncockpit git -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH"
+    # runuser statt sudo -u: sudo ist in LXC-Minimal-Templates nicht
+    # installiert, runuser ist Teil von util-linux und immer da.
+    runuser -u opncockpit -- git -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+    runuser -u opncockpit -- git -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH"
 
     log "Python-Dependencies aktualisieren..."
-    sudo -u opncockpit "$INSTALL_DIR/.venv/bin/pip" install --quiet --upgrade -e "$INSTALL_DIR"
+    runuser -u opncockpit -- "$INSTALL_DIR/.venv/bin/pip" install --quiet --upgrade -e "$INSTALL_DIR"
 
     log "Service starten (Migrations laufen automatisch)..."
     systemctl start opn-cockpit.service
