@@ -36,9 +36,9 @@ coverage.xml
 Thumbs.db
 .DS_Store
 
-# Installer-Bundle (Embedded-Python + Dependencies, ca. 100 MB).
-# Wird via installer\bundle-python.ps1 frisch erzeugt — nicht commiten.
-installer/bundle/python/
+# Installer-Build-Artefakte. Werden bei jedem Build neu erzeugt
+# (Embedded-Python ~100 MB, nssm.exe ~400 KB, fertige .exe ~18 MB).
+installer/bundle/
 installer/out/
 installer/winget/out/
 
@@ -52,4 +52,9 @@ audit.log
 audit.jsonl
 settings.local.json
 
-docs/
+# Docs: standardmaessig privat (Arbeitsmaterial, Roadmap, Audit,
+# Design-Guide, Test-Plaene, Session-Notes, ...). Nur die zwei
+# Endnutzer-Dokumente werden im Public Repo ausgeliefert.
+docs/*
+!docs/INSTALLATION-WINDOWS.md
+!docs/QUICKSTART.md
