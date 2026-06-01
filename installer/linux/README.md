@@ -59,24 +59,31 @@ OPNCOCKPIT_REPO_BRANCH=feature/xyz \
 bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"
 ```
 
-Interaktive Abfrage (Enter = Default übernehmen):
+**TUI-Wizard (whiptail)** im Stil von community-scripts.org. Storage
+und Bridge werden als echte Menüs angezeigt — du wählst per Pfeil-
+tasten + Enter, kein Frei-Text. Eingabefelder mit sinnvollen Defaults,
+Esc = Abbruch.
 
-| Feld | Default | Bemerkung |
-|---|---|---|
-| Container-ID | nächste freie | aus `pvesh get /cluster/nextid` |
-| Hostname | `opn-cockpit` | per Env `CT_HOSTNAME` vorbelegbar |
-| Storage | erster verfügbarer rootdir-Pool | `pvesm status` |
-| Disk-Größe | 2 GB | OPN-Cockpit braucht ~200 MB, 2 GB Reserve für Logs/DB |
-| CPUs | 1 | reicht für Single-Box bis ~25 Firewalls |
-| RAM | 512 MB | ausreichend für Single-Box-Setup |
-| Netzwerk-Bridge | `vmbr0` | |
-| IP-Modus | DHCP (`d`) | `s` für statisch |
-| IPv4 + CIDR | — | nur bei statisch, z.B. `192.168.1.100/24` |
-| Gateway | — | nur bei statisch |
-| VLAN-Tag | leer | optional, kein VLAN |
-| MAC-Adresse | leer | Proxmox vergibt automatisch |
-| DNS-Server | leer | leer = vom Host übernehmen; sonst kommagetrennt |
-| DNS-Search-Domain | leer | optional |
+| Schritt | Typ | Default | Bemerkung |
+|---|---|---|---|
+| Container-ID | Eingabe | nächste freie | `pvesh get /cluster/nextid` |
+| Hostname | Eingabe | `opn-cockpit` | per Env `CT_HOSTNAME` vorbelegbar |
+| Storage-Pool | **Menü** | — | nur Pools mit Content=Container (sortiert nach Größe) |
+| Disk-Größe (GB) | Eingabe | 2 | OPN-Cockpit ~200 MB, Rest für Logs/DB |
+| CPUs | Eingabe | 1 | reicht bis ~25 Firewalls |
+| RAM (MB) | Eingabe | 512 | |
+| Bridge | **Menü** | — | alle vmbr* auf dem Host |
+| IP-Konfiguration | **Menü** | DHCP | DHCP oder Statisch |
+| IPv4 + CIDR | Eingabe | — | nur bei Statisch, z.B. `192.168.1.100/24` |
+| Gateway | Eingabe | — | nur bei Statisch |
+| VLAN-Tag | Eingabe | leer | optional |
+| MAC-Adresse | Eingabe | leer | leer = Proxmox vergibt |
+| DNS-Server | Eingabe | leer | leer = vom Host; sonst kommagetrennt |
+| DNS-Search-Domain | Eingabe | leer | optional |
+| Zusammenfassung | **Ja/Nein** | — | letzte Bestätigung vor `pct create` |
+
+Am Ende: Whiptail-Msgbox mit Container-Daten + Default-Login,
+zusätzlich auf der Konsole damit Browser-URL anklickbar bleibt.
 
 Was passiert:
 - Debian-12-Standard-Template wird (falls nötig) heruntergeladen
