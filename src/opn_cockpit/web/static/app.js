@@ -12,6 +12,59 @@
 (function () {
   'use strict';
 
+  // -------------------- LastPass-Modal-Killer (Holzhammer) --------------------
+  //
+  // LastPass injiziert sein Save-Popup direkt in <body>, unabhaengig von
+  // data-lpignore-Hints auf den Eingabefeldern (Verhalten seit LP 4.130).
+  // Auch die statische CSS-Regel display:none reicht in manchen LP-Versionen
+  // nicht weil LP via inline-style oder Shadow-DOM ueberschreibt.
+  // Workaround: MutationObserver auf document.body, jedes neu angefuegte
+  // Element mit [data-lastpass-root]/[data-lastpass-icon-root] und einer
+  // tatsaechlichen visuellen Groesse wird sofort aus dem DOM entfernt.
+  // 0x0-Indikatoren (LP-internes Auto-Fill-Marker) lassen wir in Ruhe
+  // damit LP nicht permanent re-injiziert.
+  function killLastPassModals(root) {
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    const sels = [
+      '[data-lastpass-root]',
+      '[data-lastpass-icon-root]',
+      '[data-bitwarden-watching]',
+      '[data-onepassword-overlay-root]',
+      '[data-dashlane-rid]',
+    ];
+    for (const sel of sels) {
+      root.querySelectorAll(sel).forEach((el) => {
+        try {
+          const r = el.getBoundingClientRect();
+          // Nur sichtbare Modal-Container entfernen (Breite ODER Hoehe > 4 px).
+          // 0x0-Hilfsmarker bleiben drin.
+          if (r.width > 4 || r.height > 4) {
+            el.remove();
+          }
+        } catch (_e) {
+          /* ignore */
+        }
+      });
+    }
+  }
+  function setupLastPassKiller() {
+    if (!document.body || typeof MutationObserver === 'undefined') return;
+    killLastPassModals(document.body);
+    const obs = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType === 1) killLastPassModals(node);
+        }
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupLastPassKiller, { once: true });
+  } else {
+    setupLastPassKiller();
+  }
+
   const STATE_KEY = 'opn-cockpit-token';
   const THEME_KEY = 'opn-cockpit-theme';
   const HEARTBEAT_INTERVAL_MS = 30000;
