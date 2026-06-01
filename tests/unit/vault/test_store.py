@@ -89,6 +89,16 @@ class TestCreateAndOpen:
         with pytest.raises(WeakPasswordError):
             create_vault(path, "kurz")
 
+    def test_creates_missing_parent_directory(
+        self, tmp_path: Path, valid_password: str
+    ) -> None:
+        # User picks a target like Desktop\OPN-Cockpit\TEST.opnvault where the
+        # OPN-Cockpit subfolder does not exist yet — _atomic_write must mkdir.
+        path = tmp_path / "neuer-ordner" / "weiter-tief" / "v.opnvault"
+        create_vault(path, valid_password)
+        assert path.exists()
+        assert path.parent.is_dir()
+
 
 # ---------------------------------------------------------------------------
 # Open-Fehlerfälle

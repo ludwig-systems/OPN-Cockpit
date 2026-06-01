@@ -223,6 +223,9 @@ def _read_file(path: Path) -> bytes:
 def _atomic_write(path: Path, payload: bytes) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
+        # Parent-Verzeichnis on-demand anlegen — der Pfad ist zu diesem Zeitpunkt
+        # bereits durch web/vault_path.py oder den CLI-Caller validiert.
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_bytes(payload)
         os.replace(tmp, path)
     except OSError as exc:
