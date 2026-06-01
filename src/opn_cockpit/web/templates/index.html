@@ -60,7 +60,7 @@
              - Bei Erststart pflichtfeld 'new_admin_password'
              - Vault: Pfad + Master-PW + optional create-Flag -->
         <div class="login-view" data-view="setup-vault" hidden>
-          <p class="login-hint">
+          <p class="login-hint" id="su-hint">
             <strong>Erste Einrichtung.</strong>
             Default-Login <code>admin</code> / <code>OPN-Cockpit!</code> —
             beim ersten Mal Pflicht: neues Admin-Passwort setzen + zentralen
@@ -74,11 +74,13 @@
           <label class="form-label" for="su-admin-pw">Aktuelles Passwort</label>
           <input id="su-admin-pw" class="form-input" type="password" placeholder="OPN-Cockpit!" autocomplete="current-password" />
 
-          <label class="form-label" for="su-admin-newpw">Neues Admin-Passwort (min. 12 Zeichen)</label>
-          <input id="su-admin-newpw" class="form-input" type="password" autocomplete="new-password" />
+          <div id="su-newpw-block">
+            <label class="form-label" for="su-admin-newpw">Neues Admin-Passwort (min. 12 Zeichen)</label>
+            <input id="su-admin-newpw" class="form-input" type="password" autocomplete="new-password" />
 
-          <label class="form-label" for="su-admin-newpw2">Wiederholen</label>
-          <input id="su-admin-newpw2" class="form-input" type="password" autocomplete="new-password" />
+            <label class="form-label" for="su-admin-newpw2">Wiederholen</label>
+            <input id="su-admin-newpw2" class="form-input" type="password" autocomplete="new-password" />
+          </div>
 
           <div class="form-divider"></div>
 

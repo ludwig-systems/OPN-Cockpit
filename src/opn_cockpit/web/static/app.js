@@ -144,7 +144,36 @@
     const data = await response.json();
     state.serverMode = data.mode;
     state.bootstrapStatus = data.status;
+    state.adminRequiresPwChange = !!data.admin_requires_password_change;
+    applySetupWizardMode();
     return data;
+  }
+
+  // Setup-Wizard-Maske an Server-Status anpassen:
+  // - Default-Admin hat noch sein Initial-PW (admin_requires_password_change
+  //   = True) -> Felder "Neues Admin-Passwort" einblenden, Pflicht.
+  // - Default-Admin hat schon ein eigenes PW (False) -> Felder ausblenden,
+  //   die Wizard-Maske wird zur reinen Vault-Unlock-Form mit Auth.
+  function applySetupWizardMode() {
+    const requirePw = !!state.adminRequiresPwChange;
+    const block = document.getElementById('su-newpw-block');
+    if (block) block.hidden = !requirePw;
+    const hint = document.getElementById('su-hint');
+    if (hint) {
+      if (requirePw) {
+        hint.innerHTML =
+          '<strong>Erste Einrichtung.</strong> ' +
+          'Default-Login <code>admin</code> / <code>OPN-Cockpit!</code> — ' +
+          'beim ersten Mal Pflicht: neues Admin-Passwort setzen + zentralen ' +
+          'Tresor entsperren.';
+      } else {
+        hint.innerHTML =
+          '<strong>Tresor entsperren.</strong> ' +
+          'Nach Service-Neustart muss der zentrale Tresor mit deinem ' +
+          'Master-Passwort wieder geoeffnet werden. Logge dich dazu mit ' +
+          'deinem Admin-Account ein.';
+      }
+    }
   }
 
   // -------------------- Multi-User-Login --------------------
@@ -191,11 +220,14 @@
     const createIfMissing = $('#su-vault-create').checked;
     const errorBox = $('#setup-vault-error');
     errorBox.hidden = true;
+    const requirePwChange = !!state.adminRequiresPwChange;
     if (!adminUser) return showSetupError(errorBox, 'Admin-Benutzername fehlt (Default: admin).');
     if (!adminPw) return showSetupError(errorBox, 'Aktuelles Admin-Passwort fehlt.');
-    if (newPw1.length < 12) return showSetupError(errorBox, 'Neues Admin-Passwort muss mindestens 12 Zeichen haben.');
-    if (newPw1 !== newPw2) return showSetupError(errorBox, 'Die beiden neuen Admin-Passwoerter stimmen nicht ueberein.');
-    if (newPw1 === adminPw) return showSetupError(errorBox, 'Neues Admin-Passwort darf nicht mit dem Default identisch sein.');
+    if (requirePwChange) {
+      if (newPw1.length < 12) return showSetupError(errorBox, 'Neues Admin-Passwort muss mindestens 12 Zeichen haben.');
+      if (newPw1 !== newPw2) return showSetupError(errorBox, 'Die beiden neuen Admin-Passwoerter stimmen nicht ueberein.');
+      if (newPw1 === adminPw) return showSetupError(errorBox, 'Neues Admin-Passwort darf nicht mit dem Default identisch sein.');
+    }
     if (!path) return showSetupError(errorBox, 'Pfad zur Tresor-Datei fehlt.');
     if (vaultPw.length < 12) return showSetupError(errorBox, 'Tresor-Master-Passwort muss mindestens 12 Zeichen haben.');
     const btn = $('#setup-vault-btn');
@@ -214,7 +246,11 @@
           create_if_missing: createIfMissing,
           admin_username: adminUser,
           admin_password: adminPw,
-          new_admin_password: newPw1,
+          // new_admin_password nur mitschicken wenn der Server das verlangt,
+          // sonst wertet er es als "User will Passwort wechseln" und scheitert
+          // an der Identitaets-Pruefung (Default != new). Server toleriert
+          // ein fehlendes Feld wenn must_change_password=False.
+          ...(requirePwChange ? { new_admin_password: newPw1 } : {}),
         }),
       });
       if (!response.ok) {

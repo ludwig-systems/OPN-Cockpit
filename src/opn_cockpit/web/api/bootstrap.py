@@ -54,11 +54,17 @@ class BootstrapStatusResponse(BaseModel):
     ``mode`` ist der konfigurierte Auth-Backend-Wert. ``status`` ist der
     aktuelle Lifecycle-Punkt — Frontend wertet das aus, um den richtigen
     Screen zu zeigen.
+
+    ``admin_requires_password_change`` ist True solange der Default-Admin
+    noch sein Initial-Passwort traegt. Das Frontend nutzt das, um die
+    "Neues Admin-Passwort"-Felder nur beim Erst-Setup einzublenden und
+    nicht bei jedem Restart-Vault-Unlock erneut zu fordern.
     """
 
     mode: str  # 'vault' (single-user) | 'user-db' (multi-user)
     status: str  # 'single-user' | 'needs-admin' | 'needs-vault-unlock' | 'ready'
     suggested_vault_path: str | None = None
+    admin_requires_password_change: bool = False
 
 
 class BootstrapAdminRequest(BaseModel):
@@ -161,10 +167,16 @@ def bootstrap_status(
 
     Oeffentlicher Endpunkt — der Frontend-Boot ruft das ohne Token auf.
     """
+    admin_must_change = False
+    if server.is_multi_user_mode and server._user_store is not None:
+        from opn_cockpit.web.server_state import DEFAULT_ADMIN_USERNAME
+        admin = server._user_store.get_user_by_name(DEFAULT_ADMIN_USERNAME)
+        admin_must_change = bool(admin and admin.must_change_password)
     return BootstrapStatusResponse(
         mode=server.settings.auth_backend,
         status=server.bootstrap_status,
         suggested_vault_path=server.suggested_vault_path,
+        admin_requires_password_change=admin_must_change,
     )
 
 
