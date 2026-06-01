@@ -38,7 +38,13 @@ class UserStoreError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class User:
-    """User-Eintrag (ohne Passwort-Hash)."""
+    """User-Eintrag (ohne Passwort-Hash).
+
+    ``must_change_password`` wird gesetzt wenn der User mit einem Default-
+    oder Initial-Passwort angelegt wurde (z. B. der Default-Admin
+    `admin` / `OPN-Cockpit!`). Solange das Flag steht, sperrt der Web-
+    Layer alle Aktionen ausser dem Self-Service-Passwort-Wechsel.
+    """
 
     id: int
     username: str
@@ -47,6 +53,7 @@ class User:
     created_at_iso: str
     last_login_at_iso: str | None
     disabled: bool
+    must_change_password: bool = False
 
 
 def default_users_db_path() -> Path:
@@ -91,6 +98,14 @@ class UserStore:
                     disabled INTEGER NOT NULL DEFAULT 0
                 );
             """)
+            # Migration: must_change_password fuer bestehende DBs nachziehen.
+            # SQLite hat kein IF NOT EXISTS fuer ADD COLUMN, daher Probe.
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(users)")}
+            if "must_change_password" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE users ADD COLUMN must_change_password "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
 
     # ----- CRUD -----
 
@@ -101,8 +116,14 @@ class UserStore:
         password: str,
         role: Role,
         allowed_tags: tuple[str, ...] = (),
+        must_change_password: bool = False,
     ) -> User:
-        """Legt einen neuen User an. Wirft ``UserStoreError`` bei Dubletten."""
+        """Legt einen neuen User an. Wirft ``UserStoreError`` bei Dubletten.
+
+        ``must_change_password=True`` markiert den User als
+        "Default-Passwort, muss beim ersten Login wechseln". Wird vom
+        Default-Admin-Bootstrap genutzt (siehe ServerState).
+        """
         username = username.strip()
         if not username:
             raise UserStoreError("Username darf nicht leer sein.")
@@ -115,12 +136,13 @@ class UserStore:
         password_hash = self._hasher.hash(password)
         now = _now_iso()
         tags_str = ",".join(t.strip() for t in allowed_tags if t.strip())
+        mcp = 1 if must_change_password else 0
         try:
             with self._lock, self._conn:
                 cursor = self._conn.execute(
                     "INSERT INTO users (username, password_hash, role, allowed_tags, "
-                    "created_at_iso) VALUES (?, ?, ?, ?, ?)",
-                    (username, password_hash, role, tags_str, now),
+                    "created_at_iso, must_change_password) VALUES (?, ?, ?, ?, ?, ?)",
+                    (username, password_hash, role, tags_str, now, mcp),
                 )
                 user_id = cursor.lastrowid
         except sqlite3.IntegrityError as exc:
@@ -134,6 +156,7 @@ class UserStore:
             created_at_iso=now,
             last_login_at_iso=None,
             disabled=False,
+            must_change_password=must_change_password,
         )
 
     def authenticate(self, username: str, password: str) -> User | None:
@@ -228,6 +251,9 @@ class UserStore:
         return result
 
     def change_password(self, user_id: int, new_password: str) -> None:
+        """Aendert das Passwort und loescht ein etwaiges
+        ``must_change_password``-Flag (User hat den Wechsel jetzt vollzogen).
+        """
         if len(new_password) < MIN_PASSWORD_LENGTH:
             raise UserStoreError(
                 f"Passwort muss mindestens {MIN_PASSWORD_LENGTH} Zeichen lang sein.",
@@ -235,7 +261,8 @@ class UserStore:
         password_hash = self._hasher.hash(new_password)
         with self._lock, self._conn:
             cursor = self._conn.execute(
-                "UPDATE users SET password_hash = ? WHERE id = ?",
+                "UPDATE users SET password_hash = ?, must_change_password = 0 "
+                "WHERE id = ?",
                 (password_hash, user_id),
             )
         if cursor.rowcount == 0:
@@ -269,6 +296,13 @@ def _now_iso() -> str:
 
 def _row_to_user(row: sqlite3.Row, *, last_login_override: str | None = None) -> User:
     tags_str = row["allowed_tags"] or ""
+    # must_change_password kann fehlen wenn die DB von vor dem Schema-Update
+    # kommt — _init_schema-Migration zieht es im naechsten Open nach.
+    mcp = False
+    try:
+        mcp = bool(row["must_change_password"])
+    except (IndexError, KeyError):
+        pass
     return User(
         id=row["id"],
         username=row["username"],
@@ -277,6 +311,7 @@ def _row_to_user(row: sqlite3.Row, *, last_login_override: str | None = None) ->
         created_at_iso=row["created_at_iso"],
         last_login_at_iso=last_login_override or row["last_login_at_iso"],
         disabled=bool(row["disabled"]),
+        must_change_password=mcp,
     )
 
 

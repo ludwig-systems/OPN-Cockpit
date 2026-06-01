@@ -333,3 +333,70 @@ Auswahl, Restore bei Blur ohne Auswahl).
 
 - F7 🔵 Design-Guide schreiben (verbindlich für künftige UI-Arbeit).
 - F8 🔵 Logo / Favicon entwerfen.
+
+## Test-Runde 5 (Multi-User-Install + Vault-Import)
+
+### F22–F23 → durch F28 obsolet
+
+Bootstrap-Token-Mechanik komplett ersetzt durch Default-Admin (siehe F28).
+
+### F24 ✅ Setup-Wizard ganz links + Submit-Button verschwand
+
+**Beobachtet** (Runde 5): Wizard-Karte landet top-left statt zentriert.
+Wenn Validierungs-Box dazukommt, wird das Formular länger als Viewport
+→ Submit-Button unten weg.
+
+**Resolution** (2026-06-01, Runde 6): `.screen-setup` bekam eigene
+Layout-Regel mit `align-items: center, justify-content: flex-start,
+padding: 5vh 24px, overflow-y: auto`. Submit-Button bleibt immer
+scrollbar erreichbar, Karte sitzt zentriert.
+
+### F25 ✅ Brand-Header zu wenig Platz im Multi-User-Mode
+
+**Beobachtet**: Logo + „OPN-Cockpit" + „FIREWALLS.OPNVAULT" +
+„ADMIN · 1 USER" überlappt die Search-Box.
+
+**Resolution** (2026-06-01, Runde 6): Logo 32→26px, h1 22→19px,
+`min-width: 0` + `max-width: 320px` auf `.brand`, plus
+`white-space: nowrap` und Text-Overflow auf h1 und user-badge.
+
+### F26 ✅ Bulk-Import „Anderer Tresor" hatte keinen Datei-Picker
+
+### F27 ✅ Vault-Import-Pfad-Validierung lehnt User-Pfade im Multi-Mode ab
+
+**Beobachtet**: Multi-User-Server läuft als LocalService, sieht
+`C:\Users\Dell\...` nicht. Pfad-Validator wirft „außerhalb der
+erlaubten Basen".
+
+**Resolution** (2026-06-01, Runde 6): Komplett-Refactor auf
+File-Upload. Backend: neuer `vault.store.open_vault_bytes()` +
+`POST /api/imports/vault-upload` mit `UploadFile + Form('password')`.
+Frontend: `<input type=file accept=.opnvault>` statt Text-Pfad.
+Server liest die Bytes direkt — kein Pfad-Zugriff mehr nötig.
+F26 + F27 in einem Wisch.
+
+### F28 ✅ NEU: Default-Admin statt Bootstrap-Token
+
+**Befund** (Runde 5, User-Entscheidung): „Lass das mit dem Bootstrap-
+Token, pragmatisch wie Proxmox — Default-Admin + Pflicht-PW-Wechsel
+reicht völlig."
+
+**Resolution** (2026-06-01, Runde 6):
+- UserStore-Schema: `must_change_password` Spalte + ALTER-TABLE-
+  Migration für bestehende DBs.
+- `ServerState._ensure_default_admin()` legt beim Erststart
+  `admin` / `OPN-Cockpit!` mit `must_change_password=True` an.
+- Bootstrap-Token-Minting, Token-File, `_check_bootstrap_token`
+  komplett entfernt.
+- `POST /api/bootstrap/admin` → 410 Gone (Legacy-Hinweis).
+- `POST /api/bootstrap/vault` kombiniert jetzt Admin-Login + PW-
+  Wechsel + Vault-Unlock in einem Call. Payload:
+  `admin_username, admin_password, [new_admin_password], vault_path,
+  password, create_if_missing`. `new_admin_password` ist Pflicht,
+  solange das Default-PW noch aktiv ist.
+- Frontend: setup-admin-View entfernt, setup-vault-View hat zwei
+  Sektionen (Admin-Login mit PW-Wechsel + Vault-Setup) in einem
+  Step.
+- `install-service.ps1`: WinForms-Dialog mit zwei Copy-Buttons
+  (User + PW) und Browser-Open-Button — F22 ist damit auch erledigt.
+- 17 neue Tests in `test_bootstrap.py` decken den F28-Flow ab.

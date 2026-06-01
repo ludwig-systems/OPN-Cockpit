@@ -1,22 +1,17 @@
 """Bootstrap-Endpunkte fuer den Multi-User-Server-Mode.
 
-Der Frontend-Bootloader ruft beim Page-Load als erstes
-``GET /api/bootstrap/status`` auf und entscheidet anhand der Antwort,
-ob er den klassischen Single-User-Vault-Picker, den Setup-Wizard
-(Admin + Vault anlegen) oder den Multi-User-Login zeigt.
+Seit F28 (2026-06-01) gibt's keine Bootstrap-Token-Mechanik mehr.
+Stattdessen:
 
-Im Single-User-Mode liefert ``status`` immer ``single-user``; die POST-
-Routen schlagen mit 409 fehl. Im Multi-User-Mode laufen die POSTs durch
-den ``ServerState``-Lifecycle:
+* Server legt beim Erststart einen Default-Admin an
+  (``admin`` / ``OPN-Cockpit!``) mit Pflicht-PW-Wechsel.
+* User loggt sich darueber via normales ``POST /api/auth/login`` ein,
+  wechselt das Passwort via ``POST /api/users/me/password``.
+* ``POST /api/bootstrap/vault`` braucht jetzt eine echte Admin-Session
+  (Bearer-Token statt X-Bootstrap-Token) — pragmatisch wie Proxmox.
 
-* ``POST /api/bootstrap/admin`` — legt den ersten Admin an. Nur erlaubt,
-  solange noch kein Admin existiert.
-* ``POST /api/bootstrap/vault`` — entsperrt den zentralen Vault. Nur
-  erlaubt, wenn Admin existiert und Vault noch nicht entsperrt ist.
-
-Beide Endpunkte sind absichtlich oeffentlich (kein Bearer-Token), weil
-sie zur Initialisierung des Tokens dienen. Sobald der Server ``ready``
-ist, antworten beide mit 409.
+``POST /api/bootstrap/admin`` bleibt nur noch als 410-Gone-Erinnerung
+fuer altes Frontend / CLI bestehen.
 """
 
 from __future__ import annotations
@@ -28,7 +23,8 @@ from pydantic import BaseModel, Field
 
 from opn_cockpit.audit.backend import get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
-from opn_cockpit.security.users import UserStoreError
+from opn_cockpit.security.session import Session
+from opn_cockpit.security.users import UserStoreError  # noqa: F401  (used by legacy 410 path)
 from opn_cockpit.vault.errors import (
     CorruptVaultError,
     InvalidPasswordError,
@@ -36,6 +32,7 @@ from opn_cockpit.vault.errors import (
     VaultIOError,
     VaultVersionError,
 )
+from opn_cockpit.web.auth.dependencies import require_admin
 from opn_cockpit.web.rate_limit import RateLimiter
 from opn_cockpit.web.server_state import ServerState, ServerStateError
 from opn_cockpit.web.vault_path import (
@@ -70,15 +67,25 @@ class BootstrapAdminRequest(BaseModel):
 
 
 class BootstrapVaultRequest(BaseModel):
-    """Bootstrap-Vault. Wenn ``create_if_missing=True`` und die Datei nicht
-    existiert, legt der Server einen neuen leeren Vault unter dem
-    gewaehlten Pfad mit dem gelieferten Passwort an. Erstinstallations-
-    Pfad fuer einen frischen Multi-User-Server.
+    """Bootstrap-Vault — Erst-Setup-Wizard nach Default-Admin-Anlage.
+
+    Enthaelt:
+
+    * ``admin_username`` / ``admin_password`` — User-DB-Login. Default-
+      Admin ist `admin` / `OPN-Cockpit!`, vor Vault-Unlock gibt's noch
+      keine Session, wir authentifizieren daher direkt.
+    * ``new_admin_password`` — pflichtfeld wenn das Admin-Konto noch das
+      Default-Passwort traegt (must_change_password=True). Optional sonst.
+    * ``vault_path`` / ``vault_password`` — der zentrale Multi-User-Vault.
+      ``create_if_missing=True`` legt einen leeren neuen Vault an.
     """
 
     vault_path: str = Field(..., min_length=1)
     password: str = Field(..., min_length=12)
     create_if_missing: bool = Field(False)
+    admin_username: str = Field(..., min_length=1)
+    admin_password: str = Field(..., min_length=1)
+    new_admin_password: str | None = Field(None, min_length=12)
 
 
 # ---------------------------------------------------------------------------
@@ -163,60 +170,24 @@ def bootstrap_status(
 
 @router.post(
     "/admin",
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_410_GONE,
+    include_in_schema=False,
 )
-def bootstrap_admin(
-    payload: BootstrapAdminRequest,
-    request: Request,
-    server: ServerState = Depends(get_server_state),
-    x_bootstrap_token: str | None = Header(None, alias="X-Bootstrap-Token"),
-) -> dict[str, str]:
-    """Legt den ersten Admin an.
+def bootstrap_admin_gone() -> dict[str, str]:
+    """Legacy-Endpoint — seit F28 nicht mehr verwendet.
 
-    Erfordert ``X-Bootstrap-Token`` aus dem Server-Log (Audit #5).
-    Rate-Limit: 5 Versuche pro Stunde pro IP (Audit #4).
+    Server legt den Default-Admin (`admin` / `OPN-Cockpit!`) automatisch
+    an. Wer hier landet, hat ein veraltetes Frontend; Antwort 410 macht
+    das offensichtlich.
     """
-    if server.bootstrap_status != "needs-admin":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Bootstrap-Admin nicht erlaubt — Server-Status: "
-                f"{server.bootstrap_status}."
-            ),
-        )
-    limiter = _bootstrap_limiter(request)
-    client_key = _client_ip(request)
-    remaining = limiter.check(client_key)
-    if remaining is not None:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Zu viele Bootstrap-Versuche — {int(remaining) + 1} s warten.",
-            headers={"Retry-After": str(int(remaining) + 1)},
-        )
-    try:
-        _check_bootstrap_token(server, x_bootstrap_token)
-    except HTTPException:
-        limiter.register_failure(client_key)
-        raise
-    try:
-        server.bootstrap_create_admin(payload.username, payload.password)
-    except UserStoreError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    except ServerStateError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(exc),
-        ) from exc
-    # Admin angelegt — alter Token wird verbraucht, neuer fuer Vault-Unlock
-    # generiert (rotiert; Server-Admin muss neu in die Logs schauen).
-    server.invalidate_bootstrap_token()
-    server._mint_bootstrap_token_if_needed()
-    limiter.register_success(client_key)
-    _audit_admin_created(payload.username)
-    return {"status": server.bootstrap_status}
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Bootstrap-Admin-Endpoint wurde entfernt. Default-Admin "
+            "'admin' (PW 'OPN-Cockpit!') wird beim Server-Start automatisch "
+            "angelegt; bitte ueber /api/auth/login einloggen."
+        ),
+    )
 
 
 @router.post(
@@ -227,12 +198,14 @@ def bootstrap_vault(
     payload: BootstrapVaultRequest,
     request: Request,
     server: ServerState = Depends(get_server_state),
-    x_bootstrap_token: str | None = Header(None, alias="X-Bootstrap-Token"),
 ) -> dict[str, str]:
     """Entsperrt den zentralen Multi-User-Vault.
 
-    Erfordert ``X-Bootstrap-Token`` aus dem Server-Log (Audit #5).
-    Rate-Limit: 5 Versuche pro Stunde pro IP (Audit #4).
+    Seit F28: Endpoint pruef ``admin_username`` + ``admin_password`` direkt
+    gegen die User-DB (Henne-Ei: vor Vault-Unlock gibt's keine Session).
+    User muss Admin-Rolle haben, und seit F28 darf er kein
+    ``must_change_password``-Flag mehr haben — sprich, das Default-PW
+    muss vorher gewechselt sein. Rate-Limit auf IP bleibt.
     """
     if server.bootstrap_status != "needs-vault-unlock":
         raise HTTPException(
@@ -241,6 +214,11 @@ def bootstrap_vault(
                 "Bootstrap-Vault nicht erlaubt — Server-Status: "
                 f"{server.bootstrap_status}."
             ),
+        )
+    if server.user_store is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User-Store nicht initialisiert.",
         )
     limiter = _bootstrap_limiter(request)
     client_key = _client_ip(request)
@@ -251,11 +229,35 @@ def bootstrap_vault(
             detail=f"Zu viele Bootstrap-Versuche — {int(remaining) + 1} s warten.",
             headers={"Retry-After": str(int(remaining) + 1)},
         )
-    try:
-        _check_bootstrap_token(server, x_bootstrap_token)
-    except HTTPException:
+    # Direkter Username/Passwort-Check gegen die User-DB.
+    admin_user = server.user_store.authenticate(payload.admin_username, payload.admin_password)
+    if admin_user is None or admin_user.role != "admin":
         limiter.register_failure(client_key)
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin-Login fehlgeschlagen (User unbekannt, Passwort falsch oder keine Admin-Rolle).",
+        )
+    if admin_user.must_change_password:
+        if not payload.new_admin_password:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Default-Admin-Passwort muss in diesem Schritt gewechselt werden. "
+                    "Feld 'new_admin_password' (min. 12 Zeichen) mitschicken."
+                ),
+            )
+        if payload.new_admin_password == payload.admin_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Neues Admin-Passwort darf nicht mit dem Default identisch sein.",
+            )
+        try:
+            server.user_store.change_password(admin_user.id, payload.new_admin_password)
+        except UserStoreError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"PW-Wechsel fehlgeschlagen: {exc}",
+            ) from exc
     try:
         path = resolve_safe_vault_path(payload.vault_path)
     except VaultPathError as exc:

@@ -58,6 +58,12 @@ from opn_cockpit.vault.store import OpenedVault, create_vault, open_vault, save_
 
 VAULT_PATH_ENV = "OPNCOCKPIT_VAULT_PATH"
 
+# Default-Admin fuer Multi-User-Erststart. Wer das aendern will, kann's
+# direkt im Code tun — bewusst nicht per Env, weil sonst der Inno-Setup-
+# Dialog die Anzeige nicht mehr weiss.
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "OPN-Cockpit!"  # 12 Zeichen — entspricht MIN_PASSWORD_LENGTH
+
 # Lifecycle-Stati.
 BootstrapStatus = Literal[
     "single-user",        # Single-User-Mode, kein Bootstrap noetig
@@ -98,71 +104,54 @@ class ServerState:
         bleibt aber noch geschlossen — er wird beim Server-Admin-Login
         durch :meth:`bootstrap_unlock_vault` entsperrt.
 
-        Im Multi-Mode wird zudem ein Bootstrap-Token generiert und auf
-        stderr geschrieben — der Setup-Wizard verlangt ihn, damit nicht
-        irgendein Netzwerk-Erstankoemmling sich als Admin anmelden kann
-        (Audit #5).
+        Falls die User-DB leer ist, wird ein Default-Admin angelegt
+        (`admin` / `OPN-Cockpit!`) mit Pflicht-Passwort-Wechsel beim
+        ersten Login. Pragmatisch wie Proxmox: keine Token-Logistik
+        noetig, der Installer-Dialog/-Container-Log nennt das Default-PW,
+        User wechselt es sofort.
         """
         s = settings or AppSettings.load()
         state = cls(settings=s)
         if state.is_multi_user_mode:
             state._user_store = UserStore(path=default_users_db_path())
-            state._mint_bootstrap_token_if_needed()
+            state._ensure_default_admin()
         return state
 
-    def _mint_bootstrap_token_if_needed(self) -> None:
-        """Generiert einen Bootstrap-Token wenn Bootstrap noetig ist.
+    def _ensure_default_admin(self) -> None:
+        """Legt den Default-Admin an wenn die User-DB leer ist.
 
-        Token wird an drei Stellen veroeffentlicht:
+        Username: ``admin``. Passwort: ``OPN-Cockpit!`` (12 Zeichen).
+        ``must_change_password=True`` zwingt den User beim ersten Login
+        auf den Self-Service-PW-Wechsel.
 
-        * **stderr** (typisch ``docker compose logs`` / ``journalctl``)
-        * **Token-Datei** ``<data_dir>/BOOTSTRAP-TOKEN.txt`` — zuverlaessig
-          lesbar fuer Installer-Skripte (Windows-NSSM-Service hat keine
-          Konsole, der User wuerde stderr.log nie von selbst finden).
-        * Bei Service-Mode-Install zeigt ``install-service.ps1`` den Token
-          nach dem Start in einer MessageBox an.
+        Wenn die DB schon User enthaelt (Upgrade einer bestehenden
+        Multi-User-Installation, oder manueller Admin), passiert nichts.
         """
-        if self.bootstrap_status == "ready":
+        if self._user_store is None:
             return
-        token = secrets.token_urlsafe(24)
-        self._bootstrap_token = token
+        if self._user_store.count() > 0:
+            return
+        from opn_cockpit.security.users import UserStoreError
+        with contextlib.suppress(UserStoreError):
+            self._user_store.create_user(
+                username=DEFAULT_ADMIN_USERNAME,
+                password=DEFAULT_ADMIN_PASSWORD,
+                role="admin",
+                must_change_password=True,
+            )
+        # Sichtbare Notiz fuer Container-Logs (Docker/journalctl) — auf
+        # Windows-Service zeigt install-service.ps1 das gleiche im Dialog.
         msg = (
             "\n"
             + "=" * 60 + "\n"
-            + "  OPN-Cockpit BOOTSTRAP-TOKEN\n"
-            + "  Status: " + self.bootstrap_status + "\n"
-            + "  Token : " + token + "\n"
-            + "  Diesen Token im Setup-Wizard eingeben.\n"
+            + "  OPN-Cockpit Default-Admin angelegt\n"
+            + "  Username: " + DEFAULT_ADMIN_USERNAME + "\n"
+            + "  Passwort: " + DEFAULT_ADMIN_PASSWORD + "\n"
+            + "  Beim ersten Login MUSS das Passwort geaendert werden.\n"
             + "=" * 60 + "\n"
         )
         sys.stderr.write(msg)
         sys.stderr.flush()
-        self._write_token_file(token)
-
-    def _write_token_file(self, token: str) -> None:
-        """Schreibt den Bootstrap-Token in ``<data_dir>/BOOTSTRAP-TOKEN.txt``.
-
-        Format ist bewusst grep-bar — install-service.ps1 sucht die
-        ``Token:``-Zeile. Wenn das Schreiben scheitert (z. B. Permissions
-        auf der LocalService-Daten-Dir vergessen), schlucken wir den
-        Fehler stumm — stderr-Pfad bleibt als Fallback.
-        """
-        from opn_cockpit.config import get_app_data_dir
-        with contextlib.suppress(OSError):
-            data_dir = get_app_data_dir()
-            data_dir.mkdir(parents=True, exist_ok=True)
-            token_file = data_dir / "BOOTSTRAP-TOKEN.txt"
-            content = (
-                "OPN-Cockpit Bootstrap-Token\n"
-                "============================\n"
-                "Status: " + self.bootstrap_status + "\n"
-                "Token: " + token + "\n"
-                "\n"
-                "Im Setup-Wizard unter http://localhost:9876 eingeben.\n"
-                "Nach erfolgreicher Admin-Anlage wird diese Datei automatisch\n"
-                "geloescht.\n"
-            )
-            token_file.write_text(content, encoding="utf-8")
 
     # ----- Mode-Abfragen -----
 
@@ -260,11 +249,14 @@ class ServerState:
         username: str,
         password: str,
     ) -> None:
-        """Legt den ersten Admin an. Schlaegt fehl wenn bereits einer existiert.
+        """Legt einen Admin-User an.
 
-        Multi-User-only. Im Single-Mode hat das keinen Sinn — der
-        Aufrufer (Bootstrap-Endpoint) muss das via :attr:`bootstrap_status`
-        vorher pruefen.
+        Multi-User-only. Seit F28 verzichten wir auf den frueheren Count-
+        Check, weil der Default-Admin (`admin` / `OPN-Cockpit!`) den Count
+        immer auf >=1 setzt. Die Methode bleibt aber im Werkzeugkasten
+        bestehen, weil sie von der CLI + Tests genutzt wird, um zusaetzliche
+        Admins direkt programmatisch anzulegen. Sie wirft jetzt nur noch
+        bei strukturellen Fehlern (kein Multi-Mode, Username-Konflikt).
         """
         if not self.is_multi_user_mode:
             raise ServerStateError(
@@ -272,10 +264,6 @@ class ServerState:
             )
         assert self._user_store is not None
         with self._lock:
-            if self._user_store.count() > 0:
-                raise ServerStateError(
-                    "Es existiert bereits mindestens ein User — Bootstrap abgeschlossen.",
-                )
             self._user_store.create_user(
                 username=username,
                 password=password,

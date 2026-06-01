@@ -157,21 +157,17 @@ if ($state -ne 'Running') {
     exit 2
 }
 
-# Bootstrap-Token aus dem Token-File holen (server_state.py schreibt es
-# beim Start in dataDir\BOOTSTRAP-TOKEN.txt). MessageBox + Konsolen-
-# Ausgabe + Notepad-Open fuer maximale Auffindbarkeit.
-$tokenFile = Join-Path $dataDir "BOOTSTRAP-TOKEN.txt"
-$token = $null
-$retries = 0
-while ($retries -lt 10 -and -not (Test-Path $tokenFile)) {
-    Start-Sleep -Milliseconds 500
-    $retries++
-}
-if (Test-Path $tokenFile) {
-    $tokenLine = Get-Content $tokenFile | Where-Object { $_ -match '^Token:' } | Select-Object -First 1
-    if ($tokenLine) {
-        $token = ($tokenLine -replace '^Token:\s*', '').Trim()
-    }
+# Default-Admin-Konto (seit F28: kein Bootstrap-Token mehr, stattdessen
+# legt der Server beim Erststart 'admin' mit Default-PW 'OPN-Cockpit!' an
+# und verlangt einen sofortigen PW-Wechsel beim ersten Login).
+$DefaultAdminUser = "admin"
+$DefaultAdminPw   = "OPN-Cockpit!"
+
+# Alte Token-Datei aus vorherigen Installationen weglaeumen, damit User
+# nicht denkt der Token wuerde noch gelten.
+$oldTokenFile = Join-Path $dataDir "BOOTSTRAP-TOKEN.txt"
+if (Test-Path $oldTokenFile) {
+    Remove-Item -Force $oldTokenFile -EA SilentlyContinue
 }
 
 Write-Host ""
@@ -179,36 +175,119 @@ Write-Host "===================================================="
 Write-Host "  OPN-Cockpit laeuft jetzt als Windows-Dienst."
 Write-Host "  Browser:  http://localhost:9876"
 Write-Host "  Logs:     $LogDir"
-Write-Host "  Token:    $tokenFile"
-if ($token) {
-    Write-Host ""
-    Write-Host "  Bootstrap-Token (im Setup-Wizard eingeben):"
-    Write-Host ("    " + $token)
-}
+Write-Host ""
+Write-Host "  Default-Admin (beim Erst-Login Pflicht-PW-Wechsel):"
+Write-Host ("    Benutzer:  " + $DefaultAdminUser)
+Write-Host ("    Passwort:  " + $DefaultAdminPw)
 Write-Host ""
 Write-Host "  Stoppen:  Stop-Service -Name $ServiceName"
 Write-Host "  Starten:  Start-Service -Name $ServiceName"
 Write-Host "===================================================="
 
-# MessageBox + Notepad: damit der User den Token nicht in der PowerShell
-# suchen muss. MessageBox geht auch wenn das PS-Fenster runhidden ist.
-if ($token) {
-    try {
-        Add-Type -AssemblyName System.Windows.Forms | Out-Null
-        $msg = "OPN-Cockpit ist installiert und gestartet.`r`n`r`n" +
-               "Bootstrap-Token (im Setup-Wizard eingeben):`r`n`r`n" +
-               $token + "`r`n`r`n" +
-               "Browser oeffnen mit:  http://localhost:9876`r`n`r`n" +
-               "Der Token liegt zusaetzlich in:`r`n" + $tokenFile
-        [System.Windows.Forms.MessageBox]::Show(
-            $msg,
-            "OPN-Cockpit Bootstrap-Token",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Information
-        ) | Out-Null
-    } catch {
-        # Fallback: Notepad oeffnen, falls die MessageBox-Assembly nicht
-        # verfuegbar ist (Server Core o.ae.).
-        try { Start-Process notepad.exe -ArgumentList $tokenFile } catch {}
-    }
+# Default-Login-Dialog: WinForms-Form mit Copy-Buttons fuer User + PW.
+# Bewusst nicht als blosse MessageBox, weil deren Strg+C-Verhalten den
+# gesamten Box-Inhalt nimmt — User-Test hat gezeigt dass das nicht
+# erkennbar ist (F22).
+try {
+    Add-Type -AssemblyName System.Windows.Forms | Out-Null
+    Add-Type -AssemblyName System.Drawing | Out-Null
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "OPN-Cockpit installiert"
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedDialog"
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.Size = New-Object System.Drawing.Size(540, 340)
+    $form.Topmost = $true
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = "OPN-Cockpit ist installiert und gestartet.`r`n" +
+                  "Default-Admin (bei Erst-Login Pflicht-PW-Wechsel):"
+    $label.Location = New-Object System.Drawing.Point(20, 18)
+    $label.Size = New-Object System.Drawing.Size(500, 40)
+    $form.Controls.Add($label)
+
+    # Benutzer-Reihe
+    $userLabel = New-Object System.Windows.Forms.Label
+    $userLabel.Text = "Benutzer"
+    $userLabel.Location = New-Object System.Drawing.Point(20, 68)
+    $userLabel.Size = New-Object System.Drawing.Size(80, 22)
+    $form.Controls.Add($userLabel)
+
+    $userBox = New-Object System.Windows.Forms.TextBox
+    $userBox.Text = $DefaultAdminUser
+    $userBox.ReadOnly = $true
+    $userBox.Font = New-Object System.Drawing.Font("Consolas", 11)
+    $userBox.Location = New-Object System.Drawing.Point(110, 65)
+    $userBox.Size = New-Object System.Drawing.Size(260, 26)
+    $form.Controls.Add($userBox)
+
+    $userCopy = New-Object System.Windows.Forms.Button
+    $userCopy.Text = "kopieren"
+    $userCopy.Location = New-Object System.Drawing.Point(380, 64)
+    $userCopy.Size = New-Object System.Drawing.Size(120, 28)
+    $userCopy.Add_Click({
+        [System.Windows.Forms.Clipboard]::SetText($userBox.Text)
+        $userCopy.Text = "kopiert!"
+    })
+    $form.Controls.Add($userCopy)
+
+    # Passwort-Reihe
+    $pwLabel = New-Object System.Windows.Forms.Label
+    $pwLabel.Text = "Passwort"
+    $pwLabel.Location = New-Object System.Drawing.Point(20, 105)
+    $pwLabel.Size = New-Object System.Drawing.Size(80, 22)
+    $form.Controls.Add($pwLabel)
+
+    $pwBox = New-Object System.Windows.Forms.TextBox
+    $pwBox.Text = $DefaultAdminPw
+    $pwBox.ReadOnly = $true
+    $pwBox.Font = New-Object System.Drawing.Font("Consolas", 11)
+    $pwBox.Location = New-Object System.Drawing.Point(110, 102)
+    $pwBox.Size = New-Object System.Drawing.Size(260, 26)
+    $form.Controls.Add($pwBox)
+
+    $pwCopy = New-Object System.Windows.Forms.Button
+    $pwCopy.Text = "kopieren"
+    $pwCopy.Location = New-Object System.Drawing.Point(380, 101)
+    $pwCopy.Size = New-Object System.Drawing.Size(120, 28)
+    $pwCopy.Add_Click({
+        [System.Windows.Forms.Clipboard]::SetText($pwBox.Text)
+        $pwCopy.Text = "kopiert!"
+    })
+    $form.Controls.Add($pwCopy)
+
+    $hint = New-Object System.Windows.Forms.Label
+    $hint.Text = "Beim ersten Login musst du das Passwort sofort wechseln,`r`n" +
+                 "und du brauchst zusaetzlich das Master-Passwort fuer den`r`n" +
+                 "zentralen Tresor (im selben Wizard).`r`n`r`n" +
+                 "Browser oeffnet sich automatisch unter http://localhost:9876"
+    $hint.Location = New-Object System.Drawing.Point(20, 145)
+    $hint.Size = New-Object System.Drawing.Size(500, 90)
+    $hint.ForeColor = [System.Drawing.Color]::Gray
+    $form.Controls.Add($hint)
+
+    $browserBtn = New-Object System.Windows.Forms.Button
+    $browserBtn.Text = "Browser oeffnen"
+    $browserBtn.Location = New-Object System.Drawing.Point(20, 250)
+    $browserBtn.Size = New-Object System.Drawing.Size(200, 32)
+    $browserBtn.Add_Click({
+        Start-Process "http://localhost:9876"
+    })
+    $form.Controls.Add($browserBtn)
+
+    $okBtn = New-Object System.Windows.Forms.Button
+    $okBtn.Text = "Schliessen"
+    $okBtn.Location = New-Object System.Drawing.Point(395, 250)
+    $okBtn.Size = New-Object System.Drawing.Size(105, 32)
+    $okBtn.DialogResult = "OK"
+    $form.AcceptButton = $okBtn
+    $form.Controls.Add($okBtn)
+
+    $form.ShowDialog() | Out-Null
+    $form.Dispose()
+} catch {
+    # Fallback: einfache Konsolen-Ausgabe ist eh schon oben angezeigt.
+    Write-Warning ("MessageBox konnte nicht angezeigt werden: " + $_.Exception.Message)
 }

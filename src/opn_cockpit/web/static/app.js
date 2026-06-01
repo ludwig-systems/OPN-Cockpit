@@ -179,57 +179,25 @@
     }
   }
 
-  // -------------------- Setup-Wizard (Multi-User-First-Run) --------------------
-
-  async function doSetupAdmin() {
-    const token = $('#su-token').value.trim();
-    const username = $('#su-username').value.trim();
-    const pw1 = $('#su-pw1').value;
-    const pw2 = $('#su-pw2').value;
-    const errorBox = $('#setup-admin-error');
-    errorBox.hidden = true;
-    if (!token) return showSetupError(errorBox, 'Bootstrap-Token fehlt (siehe Server-Log).');
-    if (!username) return showSetupError(errorBox, 'Benutzername fehlt.');
-    if (pw1.length < 12) return showSetupError(errorBox, 'Passwort muss mindestens 12 Zeichen haben.');
-    if (pw1 !== pw2) return showSetupError(errorBox, 'Die beiden Passwoerter stimmen nicht ueberein.');
-    const btn = $('#setup-admin-btn');
-    btn.disabled = true;
-    btn.textContent = 'Lege an…';
-    try {
-      const response = await fetch('/api/bootstrap/admin', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          'X-Bootstrap-Token': token,
-        },
-        body: JSON.stringify({ username, password: pw1 }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.detail || `Fehler ${response.status}`);
-      }
-      // Admin angelegt — naechster Schritt: Vault entsperren.
-      await fetchBootstrapStatus();
-      enterBootstrapPhase();
-    } catch (err) {
-      showSetupError(errorBox, err.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Admin anlegen';
-    }
-  }
+  // -------------------- Setup-Wizard (Multi-User-First-Run, seit F28) --------------------
 
   async function doSetupUnlockVault() {
-    const token = $('#su-vault-token').value.trim();
+    const adminUser = $('#su-admin-user').value.trim();
+    const adminPw = $('#su-admin-pw').value;
+    const newPw1 = $('#su-admin-newpw').value;
+    const newPw2 = $('#su-admin-newpw2').value;
     const path = $('#su-vault-path').value.trim();
-    const password = $('#su-vault-pw').value;
+    const vaultPw = $('#su-vault-pw').value;
     const createIfMissing = $('#su-vault-create').checked;
     const errorBox = $('#setup-vault-error');
     errorBox.hidden = true;
-    if (!token) return showSetupError(errorBox, 'Bootstrap-Token fehlt (siehe Server-Log).');
+    if (!adminUser) return showSetupError(errorBox, 'Admin-Benutzername fehlt (Default: admin).');
+    if (!adminPw) return showSetupError(errorBox, 'Aktuelles Admin-Passwort fehlt.');
+    if (newPw1.length < 12) return showSetupError(errorBox, 'Neues Admin-Passwort muss mindestens 12 Zeichen haben.');
+    if (newPw1 !== newPw2) return showSetupError(errorBox, 'Die beiden neuen Admin-Passwoerter stimmen nicht ueberein.');
+    if (newPw1 === adminPw) return showSetupError(errorBox, 'Neues Admin-Passwort darf nicht mit dem Default identisch sein.');
     if (!path) return showSetupError(errorBox, 'Pfad zur Tresor-Datei fehlt.');
-    if (password.length < 12) return showSetupError(errorBox, 'Master-Passwort muss mindestens 12 Zeichen haben.');
+    if (vaultPw.length < 12) return showSetupError(errorBox, 'Tresor-Master-Passwort muss mindestens 12 Zeichen haben.');
     const btn = $('#setup-vault-btn');
     btn.disabled = true;
     btn.textContent = 'Entsperre…';
@@ -239,12 +207,14 @@
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
-          'X-Bootstrap-Token': token,
         },
         body: JSON.stringify({
           vault_path: path,
-          password,
+          password: vaultPw,
           create_if_missing: createIfMissing,
+          admin_username: adminUser,
+          admin_password: adminPw,
+          new_admin_password: newPw1,
         }),
       });
       if (!response.ok) {
@@ -258,7 +228,7 @@
       showSetupError(errorBox, err.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Tresor entsperren';
+      btn.textContent = 'Tresor entsperren / anlegen';
     }
   }
 
@@ -268,16 +238,15 @@
   }
 
   function enterBootstrapPhase() {
-    // Nach jedem Status-Wechsel: passenden Screen zeigen.
+    // Nach jedem Status-Wechsel: passenden Screen zeigen. Seit F28 gibt es
+    // 'needs-admin' nicht mehr als eigener Step — Default-Admin wird vom
+    // Server angelegt, dann startet der Setup-Wizard direkt mit dem
+    // kombinierten "Admin-PW wechseln + Vault entsperren"-Formular.
     const s = state.bootstrapStatus;
-    if (s === 'needs-admin') {
-      showScreen('setup');
-      showLoginView('setup-admin');
-      setTimeout(() => $('#su-username').focus(), 0);
-    } else if (s === 'needs-vault-unlock') {
+    if (s === 'needs-admin' || s === 'needs-vault-unlock') {
       showScreen('setup');
       showLoginView('setup-vault');
-      setTimeout(() => $('#su-vault-pw').focus(), 0);
+      setTimeout(() => $('#su-admin-pw').focus(), 0);
     } else if (s === 'ready') {
       showScreen('login');
       showLoginView('multi-user');
@@ -2288,7 +2257,7 @@
     $('#bk-fmt-json').checked = false;
     $('#bk-fmt-vault').checked = false;
     $('#bk-file').value = '';
-    $('#bk-vault-path').value = '';
+    $('#bk-vault-file').value = '';
     $('#bk-vault-pw').value = '';
     $('#bulk-modal-error').hidden = true;
     $('#bulk-parse-errors').hidden = true;
@@ -2299,20 +2268,27 @@
   async function submitVaultImport() {
     const errorBox = $('#bulk-modal-error');
     errorBox.hidden = true;
-    const path = $('#bk-vault-path').value.trim();
+    const file = $('#bk-vault-file').files[0];
     const password = $('#bk-vault-pw').value;
-    if (!path || !password) {
-      errorBox.textContent = 'Bitte Pfad und Master-Passwort des Quell-Tresors angeben.';
+    if (!file || !password) {
+      errorBox.textContent = 'Bitte Vault-Datei waehlen und Master-Passwort eingeben.';
       errorBox.hidden = false;
       return;
     }
+    const form = new FormData();
+    form.append('file', file);
+    form.append('password', password);
     const btn = $('#bulk-submit-btn');
     btn.disabled = true;
     btn.textContent = 'Importiere…';
     try {
-      const response = await apiPost('/api/imports/vault', {
-        source_path: path,
-        source_password: password,
+      const headers = {};
+      const token = getToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch('/api/imports/vault-upload', {
+        method: 'POST',
+        headers,
+        body: form,
       });
       if (response.status === 401) {
         const body = await response.json().catch(() => ({}));
@@ -2351,9 +2327,9 @@
     const isCsv = $('#bk-fmt-csv').checked;
     const isJson = $('#bk-fmt-json').checked;
     const isVault = $('#bk-fmt-vault').checked;
-    // File-Felder anzeigen vs Vault-Felder
+    // File-Feld umschalten: CSV/JSON nutzen #bk-file, Vault nutzt #bk-vault-file.
     $('#bulk-file-row').hidden = isVault;
-    $('#bulk-vault-path-row').hidden = !isVault;
+    $('#bulk-vault-file-row').hidden = !isVault;
     $('#bulk-vault-pw-row').hidden = !isVault;
     if (isCsv) {
       $('#bk-format-hint').innerHTML =
@@ -3494,14 +3470,7 @@
     const themeMulti = $('#theme-toggle-multi');
     if (themeMulti) themeMulti.addEventListener('click', toggleTheme);
 
-    // Setup-Wizard
-    const setupAdminBtn = $('#setup-admin-btn');
-    if (setupAdminBtn) {
-      setupAdminBtn.addEventListener('click', doSetupAdmin);
-      $('#su-pw2').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doSetupAdmin();
-      });
-    }
+    // Setup-Wizard (seit F28 nur noch ein Step — setup-admin-View entfernt)
     const setupVaultBtn = $('#setup-vault-btn');
     if (setupVaultBtn) {
       setupVaultBtn.addEventListener('click', doSetupUnlockVault);

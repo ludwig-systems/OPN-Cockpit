@@ -39,7 +39,7 @@ from opn_cockpit.vault.errors import (
     VaultVersionError,
 )
 from opn_cockpit.vault.model import VaultDevice
-from opn_cockpit.vault.store import open_vault
+from opn_cockpit.vault.store import open_vault, open_vault_bytes
 from opn_cockpit.web.acl import require_write_role
 from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
@@ -332,6 +332,84 @@ def import_from_vault(
     source_devices = list(source_opened.data.devices)
     # Quell-Vault loslassen — kein Caching von fremden Credentials.
     del source_opened
+
+    with server.vault_mutation_lock():
+        to_add, skipped = _filter_new(session, source_devices)
+        if not to_add:
+            return DeviceImportResponse(
+                added=[],
+                skipped_existing=skipped,
+                parsed_count=len(source_devices),
+            )
+        _persist_or_500(request, session, vault_path, to_add)
+    return DeviceImportResponse(
+        added=[_to_device_response(d) for d in to_add],
+        skipped_existing=skipped,
+        parsed_count=len(source_devices),
+    )
+
+
+@router.post(
+    "/vault-upload",
+    response_model=DeviceImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_from_uploaded_vault(
+    request: Request,
+    file: Annotated[UploadFile, File(description="Quell-Vault als Upload aus dem Browser")],
+    password: Annotated[str, Form(description="Master-Passwort des Quell-Vaults")],
+    session: Session = Depends(require_session),
+    server: ServerState = Depends(get_server_state),
+) -> DeviceImportResponse:
+    """Geraete aus einer hochgeladenen .opnvault-Datei in den aktiven Vault uebernehmen.
+
+    Wichtiger Unterschied zum aelteren ``/vault``-Endpoint: hier landet die
+    Datei als Upload — der Server muss keinen User-Pfad lesen. Funktioniert
+    auch im Multi-User-Server-Mode, in dem der LocalService-Account keine
+    Sicht auf C:\\Users\\... hat (Audit-Findung F27).
+
+    Quell-Vault wird nur fuer den Lese-Vorgang entsperrt und sofort wieder
+    freigegeben — Bytes leben nur als lokale Variable.
+    """
+    require_write_role(session)
+    vault_path = session.vault_path
+    if vault_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tresor-Pfad fehlt in der Session.",
+        )
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Hochgeladene Vault-Datei ist leer.",
+        )
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Datei zu gross (>{MAX_UPLOAD_BYTES // 1024} KiB).",
+        )
+    try:
+        source_opened = open_vault_bytes(raw, password)
+    except InvalidPasswordError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Master-Passwort des Quell-Tresors falsch.",
+        ) from exc
+    except (CorruptVaultError, VaultVersionError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Datei ist kein gueltiger Vault: {exc}",
+        ) from exc
+    except VaultError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    source_devices = list(source_opened.data.devices)
+    del source_opened
+    del raw
 
     with server.vault_mutation_lock():
         to_add, skipped = _filter_new(session, source_devices)

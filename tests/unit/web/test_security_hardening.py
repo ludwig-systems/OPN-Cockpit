@@ -205,51 +205,16 @@ def multi_client(
     yield TestClient(create_app())
 
 
-class TestBootstrapToken:
-    def test_admin_endpoint_requires_token(
-        self, multi_client: TestClient,
-    ) -> None:
+class TestBootstrapAdminLegacy:
+    """Seit F28 (Default-Admin) ist /api/bootstrap/admin abgeloest worden
+    durch automatische Default-Admin-Anlage. Endpoint antwortet 410."""
+
+    def test_admin_endpoint_is_gone(self, multi_client: TestClient) -> None:
         response = multi_client.post("/api/bootstrap/admin", json={
             "username": "alice", "password": "starkes-passwort-12+",
         })
-        assert response.status_code == 403
-        assert "token" in response.json()["detail"].lower()
-
-    def test_wrong_token_rejected(self, multi_client: TestClient) -> None:
-        response = multi_client.post(
-            "/api/bootstrap/admin",
-            headers={"X-Bootstrap-Token": "definitiv-nicht-der-token"},
-            json={"username": "alice", "password": "starkes-passwort-12+"},
-        )
-        assert response.status_code == 403
-
-    def test_correct_token_accepted(self, multi_client: TestClient) -> None:
-        server: ServerState = multi_client.app.state.server_state
-        token = server.bootstrap_token
-        assert token is not None
-        response = multi_client.post(
-            "/api/bootstrap/admin",
-            headers={"X-Bootstrap-Token": token},
-            json={"username": "alice", "password": "starkes-passwort-12+"},
-        )
-        assert response.status_code == 201
-
-    def test_token_rotates_after_admin_step(
-        self, multi_client: TestClient,
-    ) -> None:
-        server: ServerState = multi_client.app.state.server_state
-        first_token = server.bootstrap_token
-        assert first_token is not None
-        # Admin anlegen mit erstem Token
-        multi_client.post(
-            "/api/bootstrap/admin",
-            headers={"X-Bootstrap-Token": first_token},
-            json={"username": "alice", "password": "starkes-passwort-12+"},
-        )
-        new_token = server.bootstrap_token
-        # Es gibt einen neuen Token (fuer vault-unlock-Schritt)
-        assert new_token is not None
-        assert new_token != first_token
+        assert response.status_code == 410
+        assert "Default-Admin" in response.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

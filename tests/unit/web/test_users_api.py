@@ -47,6 +47,15 @@ def multi_client(
     ).save(data / "settings.json")
     client = TestClient(create_app())
     server: ServerState = client.app.state.server_state
+    # Seit F28 legt der Server beim Start einen Default-Admin an —
+    # fuer die User-API-Tests entfernen wir ihn wieder, damit die
+    # Test-Asserts ("nur alice in der DB") nicht durch ihn verfaelscht
+    # werden. Die User-API selbst stellen wir damit aber nicht ungetestet
+    # ein — der Default-Admin ist in test_bootstrap.py separat abgedeckt.
+    assert server.user_store is not None
+    default_user = server.user_store.get_user_by_name("admin")
+    if default_user is not None:
+        server.user_store.delete_user(default_user.id)
     server.bootstrap_create_admin("alice", ADMIN_PASSWORD)
     server.bootstrap_unlock_vault(vault_path, VAULT_PASSWORD)
     yield client

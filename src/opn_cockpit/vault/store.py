@@ -94,6 +94,13 @@ def open_vault(path: Path, password: str) -> OpenedVault:
     * ``InvalidPasswordError`` — Passwort falsch oder Inhalt manipuliert
     """
     raw = _read_file(path)
+    return open_vault_bytes(raw, password)
+
+
+def open_vault_bytes(raw: bytes, password: str) -> OpenedVault:
+    """Wie :func:`open_vault`, aber direkt aus den Bytes — fuer File-Uploads
+    aus dem Multi-User-Server-Mode, bei dem der Server keine User-Pfade
+    sehen darf (LocalService-Account)."""
     if len(raw) < HEADER_SIZE:
         raise CorruptVaultError(
             f"Tresor-Datei zu kurz ({len(raw)} < {HEADER_SIZE} Bytes)."
