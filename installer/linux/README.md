@@ -149,25 +149,58 @@ systemctl restart opn-cockpit
 
 ## Update
 
+**Empfohlen — derselbe Link wie bei der Installation, im Container ausgeführt:**
+
 ```bash
-# Auf dem Host
-cd /opt/opn-cockpit
-sudo -u opncockpit git pull
-sudo -u opncockpit .venv/bin/pip install -e .
-sudo systemctl restart opn-cockpit
+# In der Container-Shell (pct enter / SSH)
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"
 ```
 
-Im Proxmox-Container:
+Der Helper erkennt automatisch:
+- **Proxmox-Host** (pveam vorhanden) → TUI-Wizard für neuen Container
+- **Container mit OPN-Cockpit** (`/opt/opn-cockpit` + systemd-Unit) → Update-Modus
+
+Im Update-Modus zeigt der TUI-Dialog explizit:
+- Aktuelle Version + Commit-Hash → Neue Version
+- Was angefasst wird: nur `/opt/opn-cockpit` (Code)
+- Was unverändert bleibt: `/var/lib/opn-cockpit/` (Vault, Audit, User-DB, Settings)
+
+Nach Bestätigung läuft:
+1. `systemctl stop opn-cockpit`
+2. `git fetch --depth 1 origin <branch>` + `git reset --hard origin/<branch>`
+3. `pip install -e .` (neue/geänderte Dependencies)
+4. `systemctl start opn-cockpit` — beim Start läuft `run_pending_migrations()`
+5. Migrations schreiben **vor** Schema-Änderungen ein Backup in `/var/lib/opn-cockpit/backups/<ts>-pre-<version>/`
+
+**Manuell ohne Helper** (z.B. für Skripte):
+
 ```bash
-pct exec <ct-id> -- bash -c "cd /opt/opn-cockpit && \
-    sudo -u opncockpit git pull && \
-    sudo -u opncockpit .venv/bin/pip install -e . && \
-    systemctl restart opn-cockpit"
+# Im Container
+sudo systemctl stop opn-cockpit
+sudo -u opncockpit git -C /opt/opn-cockpit fetch --depth 1 origin main
+sudo -u opncockpit git -C /opt/opn-cockpit reset --hard origin/main
+sudo -u opncockpit /opt/opn-cockpit/.venv/bin/pip install --quiet --upgrade -e /opt/opn-cockpit
+sudo systemctl start opn-cockpit
 ```
 
-Auto-Migration: beim Restart führt der Server `run_pending_migrations()`
-aus (Schema-Upgrades). Bei Schema-Änderungen landet vorher ein Backup
-in `/var/lib/opn-cockpit/backups/`.
+**Vom Proxmox-Host aus** (Einzeiler):
+
+```bash
+pct exec <ct-id> -- bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"
+```
+
+### Was passiert NICHT beim Update
+
+User-Daten werden **nicht angefasst**. Konkret:
+
+- Tresor (`firewalls.opnvault`) bleibt — Inventar + API-Credentials intakt
+- User-DB (`users.db`) bleibt — Admin-Login + andere User intakt
+- Audit-Log (`audit.db`) bleibt — Historie erhalten
+- Plans + Reports bleiben
+- Settings (`settings.json`) bleibt
+
+Nach Update kannst du dich direkt mit deinen bestehenden
+Credentials weiter einloggen.
 
 ## Backup
 

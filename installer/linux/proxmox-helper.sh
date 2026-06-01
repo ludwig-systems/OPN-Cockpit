@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 # Proxmox-Helper-Skript fuer OPN-Cockpit.
 #
-# Laeuft auf einem Proxmox-VE-Host und legt automatisch einen Debian-12-
-# LXC-Container an, in dem OPN-Cockpit als systemd-Service installiert wird.
+# Dual-Mode wie bei community-scripts.org:
 #
-# Aufruf:
+#   - Auf Proxmox-Host ausgefuehrt:
+#     -> TUI-Wizard erzeugt einen frischen LXC-Container und installiert
+#        OPN-Cockpit als systemd-Service darin.
+#
+#   - In einem Container mit existierender OPN-Cockpit-Installation:
+#     -> Update-Modus: zieht die neue Code-Version aus dem Repo, laesst
+#        ALLE User-Daten in /var/lib/opn-cockpit unangetastet (Tresor,
+#        Audit, User-DB, Plans, Settings). Migrations laufen automatisch
+#        beim naechsten Service-Start und schreiben dabei einen Backup-
+#        Snapshot in <data>/backups/.
+#
+# Aufruf (beide Modi mit dem selben Link):
 #   bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"
 #
-# Pattern angelehnt an community-scripts.org/ProxmoxVE: whiptail-TUI mit
+# Wizard angelehnt an community-scripts.org/ProxmoxVE: whiptail-TUI mit
 # echten Menus fuer Storage + Bridge — kein Frei-Text mehr, du kannst nur
 # aus tatsaechlich vorhandenen Ressourcen waehlen.
 #
@@ -52,10 +62,19 @@ err() {
 }
 
 # ---------------------------------------------------------------------------
-# Voraussetzungen
+# Voraussetzungen + Mode-Detection
 # ---------------------------------------------------------------------------
-[[ $EUID -eq 0 ]] || err "Bitte auf dem Proxmox-Host als root ausfuehren."
-command -v pveam &>/dev/null || err "pveam fehlt. Dieses Skript laeuft nur auf Proxmox VE."
+[[ $EUID -eq 0 ]] || err "Skript braucht root (auf Proxmox-Host oder im Container via 'sudo')."
+
+# Mode: CREATE = auf Proxmox-Host (pveam existiert), UPDATE = im Container
+# mit existierender Installation (kein pveam, /opt/opn-cockpit existiert)
+if command -v pveam &>/dev/null; then
+    MODE="create"
+elif [[ -d /opt/opn-cockpit && -f /etc/systemd/system/opn-cockpit.service ]]; then
+    MODE="update"
+else
+    err "Dieses Skript laeuft entweder auf einem Proxmox-VE-Host (Container anlegen) oder in einem Container mit existierender OPN-Cockpit-Installation (Update).\n\nGefunden weder pveam noch /opt/opn-cockpit."
+fi
 
 # whiptail sollte auf Debian/Proxmox immer da sein — defensiv nachziehen
 if ! command -v whiptail &>/dev/null; then
@@ -63,6 +82,98 @@ if ! command -v whiptail &>/dev/null; then
     apt-get update -qq
     apt-get install -y --no-install-recommends whiptail >/dev/null
 fi
+
+# ---------------------------------------------------------------------------
+# Update-Modus (im Container) — komplett separater Pfad, exit nach Abschluss
+# ---------------------------------------------------------------------------
+if [[ "$MODE" == "update" ]]; then
+    BACKTITLE="OPN-Cockpit Update | $REPO_BRANCH"
+
+    log "Update-Modus erkannt (kein Proxmox-Host, Installation in /opt/opn-cockpit)."
+
+    INSTALL_DIR="/opt/opn-cockpit"
+    DATA_DIR="/var/lib/opn-cockpit"
+
+    # Aktuelle Version aus __init__.py + Commit-Hash
+    CURRENT_COMMIT=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+    CURRENT_VERSION=$(grep -oP '__version__ = "\K[^"]+' \
+        "$INSTALL_DIR/src/opn_cockpit/__init__.py" 2>/dev/null || echo "?")
+
+    # TUI: Bestaetigen + explizit Code-vs-Daten klar machen.
+    # Wichtig fuer User-Vertrauen: Admin-Login wird NICHT zurueckgesetzt.
+    whiptail --backtitle "$BACKTITLE" --title "Update" --yesno \
+"OPN-Cockpit-Installation gefunden.
+
+Aktuell:    $CURRENT_VERSION  (Commit $CURRENT_COMMIT)
+Repository: $REPO_URL
+Branch:     $REPO_BRANCH
+
+Aktualisiert (Code in $INSTALL_DIR):
+  + Python-Code via git reset --hard
+  + Python-Dependencies via pip install
+  + Service-Stop und Service-Start
+  + Schema-Migrations laufen automatisch und schreiben dabei
+    einen Backup-Snapshot in $DATA_DIR/backups/<ts>-pre-<ver>/
+
+UNVERAENDERT (User-Daten in $DATA_DIR):
+  - firewalls.opnvault       (Tresor + alle Geraete + API-Keys)
+  - users.db                 (Admin-Login + andere User)
+  - audit.db, plans.db       (Historie + Plan-Reports)
+  - settings.json
+
+Dein Admin-Passwort bleibt das gleiche. Kein erneutes Default-
+Setup, kein Force-PW-Wechsel. Nach dem Update loggst du dich
+direkt mit deinen jetzigen Credentials weiter ein.
+
+Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
+
+    log "Service stoppen..."
+    systemctl stop opn-cockpit.service
+
+    log "Code aktualisieren (git fetch + reset)..."
+    sudo -u opncockpit git -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+    sudo -u opncockpit git -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH"
+
+    log "Python-Dependencies aktualisieren..."
+    sudo -u opncockpit "$INSTALL_DIR/.venv/bin/pip" install --quiet --upgrade -e "$INSTALL_DIR"
+
+    log "Service starten (Migrations laufen automatisch)..."
+    systemctl start opn-cockpit.service
+
+    # Auf Service warten (max 10s)
+    sleep 3
+    for _ in {1..7}; do
+        systemctl is-active --quiet opn-cockpit.service && break
+        sleep 1
+    done
+
+    if systemctl is-active --quiet opn-cockpit.service; then
+        NEW_COMMIT=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+        NEW_VERSION=$(grep -oP '__version__ = "\K[^"]+' \
+            "$INSTALL_DIR/src/opn_cockpit/__init__.py" 2>/dev/null || echo "?")
+        HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+
+        whiptail --backtitle "$BACKTITLE" --title "Update fertig" --msgbox \
+"Update erfolgreich.
+
+Vorher:    $CURRENT_VERSION  (Commit $CURRENT_COMMIT)
+Jetzt:     $NEW_VERSION  (Commit $NEW_COMMIT)
+
+Service:   running
+URL:       http://${HOST_IP}:9876
+
+User-Daten und Login bleiben unveraendert. Du kannst dich direkt
+mit deinem bestehenden Admin-Konto wieder einloggen." 18 78 || true
+
+        log "Update fertig: $CURRENT_VERSION ($CURRENT_COMMIT) -> $NEW_VERSION ($NEW_COMMIT)"
+    else
+        err "Service ist nach Update nicht aktiv.\n\njournalctl -u opn-cockpit -n 50"
+    fi
+
+    exit 0
+fi
+
+# Ab hier: MODE == "create" — Original-Wizard fuer Proxmox-Host
 
 # ---------------------------------------------------------------------------
 # Wizard-Helpers — REPLY-Pattern, damit Abbruch via Esc/Cancel sauber endet
