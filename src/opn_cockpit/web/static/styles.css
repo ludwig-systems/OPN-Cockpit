@@ -123,6 +123,16 @@ body > div[data-dashlane-rid][style*="height: 0px"] {
   pointer-events: none !important;
 }
 
+/* Notbremse: alle data-lpignore-Eingaben sollten LastPass dazu bringen,
+ * gar kein Save-Popup mehr fuer dieses Cockpit zu zeigen. Falls es das
+ * trotzdem tut (alte LastPass-Versionen, falscher Form-Detection-Heuristik),
+ * den sichtbaren Modal-Container komplett ausblenden. Auto-Fill-Indikator
+ * (data-lastpass-icon-root, 0x0) bleibt durch die spezifischere Regel
+ * oben unangetastet. */
+body > div[data-lastpass-root]:not([style*="width: 0px"]) {
+  display: none !important;
+}
+
 /* Defensive gegen den Topbar-/Filter-Click-Bug (Test-Runde 7+): interaktive
  * Elemente forcieren pointer-events: auto. Falls irgendein Parent
  * versehentlich pointer-events: none geerbt hat, schlaegt der !important durch.

@@ -72,14 +72,14 @@
           <input id="su-admin-user" class="form-input" type="text" value="admin" autocomplete="username" />
 
           <label class="form-label" for="su-admin-pw">Aktuelles Passwort</label>
-          <input id="su-admin-pw" class="form-input" type="password" placeholder="OPN-Cockpit!" autocomplete="current-password" />
+          <input id="su-admin-pw" class="form-input" type="password" data-lpignore="true" placeholder="OPN-Cockpit!" autocomplete="current-password" />
 
           <div id="su-newpw-block">
             <label class="form-label" for="su-admin-newpw">Neues Admin-Passwort (min. 12 Zeichen)</label>
-            <input id="su-admin-newpw" class="form-input" type="password" autocomplete="new-password" />
+            <input id="su-admin-newpw" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
 
             <label class="form-label" for="su-admin-newpw2">Wiederholen</label>
-            <input id="su-admin-newpw2" class="form-input" type="password" autocomplete="new-password" />
+            <input id="su-admin-newpw2" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
           </div>
 
           <div class="form-divider"></div>
@@ -89,7 +89,7 @@
           <input id="su-vault-path" class="form-input" type="text" placeholder="C:\ProgramData\OPN-Cockpit\firewalls.opnvault" />
 
           <label class="form-label" for="su-vault-pw">Master-Passwort (min. 12 Zeichen)</label>
-          <input id="su-vault-pw" class="form-input" type="password" autocomplete="current-password" />
+          <input id="su-vault-pw" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
 
           <label class="form-checkbox">
             <input id="su-vault-create" type="checkbox" />
@@ -143,7 +143,7 @@
           <input id="mu-username" class="form-input" type="text" autocomplete="username" />
 
           <label class="form-label" for="mu-password">Passwort</label>
-          <input id="mu-password" class="form-input" type="password" autocomplete="current-password" />
+          <input id="mu-password" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
 
           <div class="form-error" id="mu-error" hidden></div>
 
@@ -164,7 +164,7 @@
           <input
             id="password-input"
             class="form-input"
-            type="password"
+            type="password" data-lpignore="true"
             autocomplete="current-password"
             placeholder="Passwort"
           />
@@ -209,10 +209,10 @@
           <input id="new-vault-path" type="hidden" />
 
           <label class="form-label" for="new-vault-pw1">Master-Passwort (min. 12 Zeichen)</label>
-          <input id="new-vault-pw1" class="form-input" type="password" autocomplete="new-password" />
+          <input id="new-vault-pw1" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
 
           <label class="form-label" for="new-vault-pw2">Wiederholen</label>
-          <input id="new-vault-pw2" class="form-input" type="password" autocomplete="new-password" />
+          <input id="new-vault-pw2" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
 
           <div class="form-error" id="create-error" hidden></div>
 
@@ -542,7 +542,7 @@
           <div class="form-row">
             <div class="form-col">
               <label class="form-label" for="ad-apisecret">API-Secret</label>
-              <input id="ad-apisecret" class="form-input" type="password" autocomplete="off" />
+              <input id="ad-apisecret" class="form-input" type="password" data-lpignore="true" autocomplete="off" />
             </div>
           </div>
 
@@ -703,7 +703,7 @@
           <div class="form-row" id="bulk-vault-pw-row" hidden>
             <div class="form-col">
               <label class="form-label" for="bk-vault-pw">Master-Passwort des Quell-Tresors</label>
-              <input id="bk-vault-pw" class="form-input" type="password" autocomplete="off" />
+              <input id="bk-vault-pw" class="form-input" type="password" data-lpignore="true" autocomplete="off" />
             </div>
           </div>
 
@@ -763,7 +763,7 @@
             <div class="form-row">
               <div class="form-col">
                 <label class="form-label" for="nu-password">Passwort (min. 12)</label>
-                <input id="nu-password" class="form-input" type="password" autocomplete="new-password" />
+                <input id="nu-password" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
               </div>
             </div>
             <div class="form-row">
@@ -822,13 +822,13 @@
           <!-- Sektion: Master-Passwort -->
           <h3 class="modal-section-title">Master-Passwort aendern</h3>
           <label class="form-label" for="vs-pw-current">Aktuelles Passwort</label>
-          <input id="vs-pw-current" class="form-input" type="password" autocomplete="current-password" />
+          <input id="vs-pw-current" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
 
           <label class="form-label" for="vs-pw-new1">Neues Passwort (min. 12 Zeichen)</label>
-          <input id="vs-pw-new1" class="form-input" type="password" autocomplete="new-password" />
+          <input id="vs-pw-new1" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
 
           <label class="form-label" for="vs-pw-new2">Wiederholen</label>
-          <input id="vs-pw-new2" class="form-input" type="password" autocomplete="new-password" />
+          <input id="vs-pw-new2" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
 
           <div class="form-error" id="vs-pw-error" hidden></div>
           <div class="form-success" id="vs-pw-ok" hidden>Passwort geaendert.</div>
@@ -856,13 +856,13 @@
 
         <div class="modal-body">
           <label class="form-label" for="pwself-current">Aktuelles Passwort</label>
-          <input id="pwself-current" class="form-input" type="password" autocomplete="current-password" />
+          <input id="pwself-current" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
 
           <label class="form-label" for="pwself-new1">Neues Passwort (min. 12)</label>
-          <input id="pwself-new1" class="form-input" type="password" autocomplete="new-password" />
+          <input id="pwself-new1" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
 
           <label class="form-label" for="pwself-new2">Wiederholen</label>
-          <input id="pwself-new2" class="form-input" type="password" autocomplete="new-password" />
+          <input id="pwself-new2" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
 
           <div class="form-error" id="pwself-error" hidden></div>
         </div>
@@ -899,7 +899,7 @@
           <input id="vsw-path" class="form-input" type="text" placeholder="/data/anderer.opnvault" />
 
           <label class="form-label" for="vsw-pw">Master-Passwort (min. 12 Zeichen)</label>
-          <input id="vsw-pw" class="form-input" type="password" autocomplete="off" />
+          <input id="vsw-pw" class="form-input" type="password" data-lpignore="true" autocomplete="off" />
 
           <label class="form-checkbox">
             <input id="vsw-create" type="checkbox" />
@@ -939,7 +939,7 @@
           <select id="ssw-vault-select" class="form-select"></select>
 
           <label class="form-label" for="ssw-pw">Master-Passwort</label>
-          <input id="ssw-pw" class="form-input" type="password" autocomplete="current-password" />
+          <input id="ssw-pw" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
 
           <div class="form-divider"></div>
 
@@ -950,10 +950,10 @@
             <input id="ssw-new-path" class="form-input" type="text" placeholder="z. B. C:\\Vaults\\zweittresor.opnvault" />
 
             <label class="form-label" for="ssw-new-pw1">Neues Master-Passwort (min. 12)</label>
-            <input id="ssw-new-pw1" class="form-input" type="password" autocomplete="new-password" />
+            <input id="ssw-new-pw1" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
 
             <label class="form-label" for="ssw-new-pw2">Wiederholen</label>
-            <input id="ssw-new-pw2" class="form-input" type="password" autocomplete="new-password" />
+            <input id="ssw-new-pw2" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
           </div>
 
           <div class="form-error" id="ssw-error" hidden></div>
@@ -999,7 +999,7 @@
           </p>
 
           <label class="form-label" for="export-template-pw">Passwort fuer das Template (min. 12 Zeichen)</label>
-          <input id="export-template-pw" class="form-input" type="password" autocomplete="new-password" />
+          <input id="export-template-pw" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
           <div class="form-hint">
             Der Empfaenger braucht dieses Passwort zum Oeffnen. Kann dasselbe
             wie das aktuelle Master-PW sein, sollte es aber nicht.
