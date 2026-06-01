@@ -101,6 +101,22 @@ html, body {
  * .user-badge[hidden] als leere weisse Pille im Brand-Block sichtbar war. */
 [hidden] { display: none !important; }
 
+/* Password-Manager-Browser-Extensions (LastPass, Bitwarden, 1Password,
+ * Dashlane) injizieren eigene Root-Container ins DOM. LastPass nutzt
+ * z.B. <div data-lastpass-root> mit position:absolute und 0x0 Pixel
+ * Groesse - sein Subtree (Auto-Fill-Indikator, Tooltips) kann unter
+ * Chromium/Linux aber doch die Klicks auf darunterliegende Topbar-Icons
+ * abfangen (auf Windows tritt das nicht auf). Den ganzen Subtree vom
+ * Pointer-Handling entkoppeln; PW-Manager-eigene UI bleibt sichtbar
+ * (visuell), nur die unsichtbare Klick-Falle ist weg. */
+body > div[data-lastpass-root],
+body > div[data-lastpass-icon-root],
+body > div[bit-watcher],
+body > div[data-onepassword-overlay-root],
+body > div[data-dashlane-rid] {
+  pointer-events: none !important;
+}
+
 /* Defensive gegen den Topbar-/Filter-Click-Bug (Test-Runde 7+): interaktive
  * Elemente forcieren pointer-events: auto. Falls irgendein Parent
  * versehentlich pointer-events: none geerbt hat, schlaegt der !important durch.
