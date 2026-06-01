@@ -59,11 +59,24 @@ OPNCOCKPIT_REPO_BRANCH=feature/xyz \
 bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"
 ```
 
-Interaktive Abfrage:
-- Container-ID (Default: nächste freie)
-- Storage-Pool
-- Disk-Größe (Default 2 GB), CPUs (1), RAM (512 MB)
-- Netzwerk-Bridge (Default `vmbr0`, DHCP)
+Interaktive Abfrage (Enter = Default übernehmen):
+
+| Feld | Default | Bemerkung |
+|---|---|---|
+| Container-ID | nächste freie | aus `pvesh get /cluster/nextid` |
+| Hostname | `opn-cockpit` | per Env `CT_HOSTNAME` vorbelegbar |
+| Storage | erster verfügbarer rootdir-Pool | `pvesm status` |
+| Disk-Größe | 2 GB | OPN-Cockpit braucht ~200 MB, 2 GB Reserve für Logs/DB |
+| CPUs | 1 | reicht für Single-Box bis ~25 Firewalls |
+| RAM | 512 MB | ausreichend für Single-Box-Setup |
+| Netzwerk-Bridge | `vmbr0` | |
+| IP-Modus | DHCP (`d`) | `s` für statisch |
+| IPv4 + CIDR | — | nur bei statisch, z.B. `192.168.1.100/24` |
+| Gateway | — | nur bei statisch |
+| VLAN-Tag | leer | optional, kein VLAN |
+| MAC-Adresse | leer | Proxmox vergibt automatisch |
+| DNS-Server | leer | leer = vom Host übernehmen; sonst kommagetrennt |
+| DNS-Search-Domain | leer | optional |
 
 Was passiert:
 - Debian-12-Standard-Template wird (falls nötig) heruntergeladen
