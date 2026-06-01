@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OPN-Cockpit Favicon — Kompass-Stern, reduziert auf 4 Kardinalachsen +
+  olive Zentrum. Themed via prefers-color-scheme: stroke dunkel auf
+  hellem Tab, hell auf dunklem Tab. Olive bleibt fix (mittelhell genug
+  fuer beide Hintergruende).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <style>
+    .arm { stroke: #16181b; stroke-width: 1.4; stroke-linecap: round; fill: none; }
+    .pivot { fill: #586a26; }
+    @media (prefers-color-scheme: dark) {
+      .arm { stroke: #f1f2f4; }
+      .pivot { fill: #b5c97a; }
+    }
+  </style>
+  <!-- 4 Kardinal-Achsen, Luecke um den Zentrum-Punkt -->
+  <line class="arm" x1="8" y1="1.2" x2="8" y2="5.4" />
+  <line class="arm" x1="8" y1="10.6" x2="8" y2="14.8" />
+  <line class="arm" x1="1.2" y1="8" x2="5.4" y2="8" />
+  <line class="arm" x1="10.6" y1="8" x2="14.8" y2="8" />
+  <!-- Zentrum-Punkt -->
+  <circle class="pivot" cx="8" cy="8" r="2.1" />
+</svg>

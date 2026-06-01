@@ -126,7 +126,7 @@ def _asset_version() -> str:
     die Asset-Dateien nicht angefasst werden.
     """
     parts: list[str] = [__version__]
-    for asset in ("static/app.js", "static/styles.css"):
+    for asset in ("static/app.js", "static/styles.css", "static/favicon.svg"):
         path = WEB_DIR / asset
         try:
             parts.append(str(path.stat().st_mtime_ns))
