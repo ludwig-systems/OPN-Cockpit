@@ -160,6 +160,20 @@ Filename: "powershell.exe"; \
   RunOnceId: "UninstallService"; Flags: runhidden waituntilterminated; Components: service
 
 [UninstallDelete]
-; Embedded-Python-Bundle wird mit deinstalliert. AppData/ProgramData bleibt
-; bewusst stehen (Tresor, Audit, Settings).
+; Embedded-Python-Bundle wird mit deinstalliert.
+;
+; %ProgramData%\OPN-Cockpit bleibt bewusst stehen (Tresor + Audit + Plans
+; = User-Daten), AUSSER:
+;
+;   - users.db ist Install-/Auth-Chain-State, kein User-Daten. Wenn der User
+;     deinstalliert und neu installiert, erwartet er einen frischen
+;     Default-Admin (admin/OPN-Cockpit!). Mit alter users.db haengt sein
+;     vergessenes Test-Passwort weiter dran und Default-Login klappt nicht.
+;   - BOOTSTRAP-TOKEN.txt: temporaer, gehoert nicht in ein Install-
+;     uebergreifendes State.
+;   - logs/: Diagnose-Reste vergangener Installation, fuer einen Re-Install
+;     irrelevant. Wer Logs braucht backupt vorher selbst.
 Type: filesandordirs; Name: "{app}\python"
+Type: files; Name: "{commonappdata}\OPN-Cockpit\users.db"
+Type: files; Name: "{commonappdata}\OPN-Cockpit\BOOTSTRAP-TOKEN.txt"
+Type: filesandordirs; Name: "{commonappdata}\OPN-Cockpit\logs"
