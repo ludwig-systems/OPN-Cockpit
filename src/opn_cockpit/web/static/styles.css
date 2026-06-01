@@ -18,7 +18,7 @@
   --radius-md: 10px;
   --radius-lg: 14px;
 
-  --topbar-height: 64px;
+  --topbar-height: 82px;
   --sidebar-width: 274px;
 }
 
@@ -159,11 +159,13 @@ body {
   height: 64px;
   margin-bottom: 18px;
   color: var(--text);
+  pointer-events: none;
 }
 
 .boot-logo svg {
   width: 100%;
   height: 100%;
+  pointer-events: none;
 }
 
 .boot-brand h1 {
@@ -231,11 +233,13 @@ body {
   height: 52px;
   margin-bottom: 12px;
   color: var(--text);
+  pointer-events: none;
 }
 
 .login-logo svg {
   width: 100%;
   height: 100%;
+  pointer-events: none;
 }
 
 .login-header h1 {
@@ -639,16 +643,18 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   min-width: 0;            /* erlaubt der Topbar wieder zu shrinken */
-  max-width: 320px;        /* deckelt den Brand-Block, Search bleibt sichtbar */
+  max-width: 360px;        /* deckelt den Brand-Block, Search bleibt sichtbar */
   flex: 0 1 auto;
+  overflow: hidden;        /* defensive: visueller Overflow blockiert sonst Klicks
+                              auf rechts danebenliegende Topbar-Buttons */
 }
 
 .brand-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;            /* sonst expandiert flex-child immer */
 }
 
@@ -658,15 +664,17 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 38px;
+  height: 38px;
   flex: none;
   color: var(--text);
+  pointer-events: none;     /* dekorativ — klicken durch zu der Topbar-Action darunter */
 }
 
 .brand-logo svg {
   width: 100%;
   height: 100%;
+  pointer-events: none;
 }
 
 .brand-logo-pivot {
@@ -675,7 +683,7 @@ body {
 
 .brand h1 {
   font-family: var(--font-display);
-  font-size: 19px;
+  font-size: 24px;
   font-weight: 500;
   letter-spacing: -0.005em;
   line-height: 1.05;
@@ -686,7 +694,7 @@ body {
 
 .vault-name {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11.5px;
   color: var(--text-subtle);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -715,12 +723,12 @@ body {
 
 .search input {
   width: 100%;
-  height: 36px;
+  height: 42px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 0 56px 0 38px;
-  font-size: 13px;
+  padding: 0 60px 0 40px;
+  font-size: 14px;
   font-family: var(--font-sans);
   color: var(--text);
   transition: border-color 0.15s, background-color 0.15s;
@@ -731,11 +739,16 @@ body {
 
 .search-icon {
   position: absolute;
-  left: 13px;
+  left: 14px;
   top: 50%;
   transform: translateY(-50%);
   pointer-events: none;
   color: var(--text-subtle);
+}
+
+.search-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .search kbd {
@@ -768,8 +781,8 @@ body {
 }
 
 .icon-btn {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -781,6 +794,14 @@ body {
   transition: all 0.15s;
 }
 
+/* SVGs in Topbar-Icon-Buttons proportional zur neuen Hoehe vergroessern.
+ * Die meisten SVGs sind hardcoded 13-16px im HTML; ueberschreibung per
+ * Element-Selektor traegt zu robusterem Skalieren bei. */
+.icon-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
 .icon-btn:hover {
   background: var(--bg-elevated);
   color: var(--text);
@@ -788,14 +809,19 @@ body {
 }
 
 .lock-btn {
-  padding: 0 12px 0 10px;
+  padding: 0 14px 0 12px;
   width: auto;
-  gap: 6px;
-  font-size: 12.5px;
+  gap: 7px;
+  font-size: 13.5px;
   font-weight: 500;
   font-family: var(--font-sans);
   color: var(--text-muted);
-  margin-left: 6px;
+  margin-left: 8px;
+}
+
+.lock-btn svg {
+  width: 15px;
+  height: 15px;
 }
 
 .lock-btn:hover { color: var(--text); }
@@ -1380,6 +1406,7 @@ body {
   border: 1.5px solid var(--checking);
   opacity: 0;
   animation: pulse-checking 2s cubic-bezier(.2,.7,.5,1) infinite;
+  pointer-events: none;     /* dekorativ — Pulse-Ring soll Karten-Klick nicht abfangen */
 }
 
 .status-dot.checking::after { animation-delay: 1s; }
@@ -2152,11 +2179,11 @@ a.card-open-link { text-decoration: none; }
 .user-badge {
   display: inline-flex;
   align-items: center;
-  padding: 1px 7px;
+  padding: 2px 8px;
   margin-left: 0;          /* sitzt in brand-text-column, kein left-margin noetig */
   border-radius: 999px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.04em;
   white-space: nowrap;
   overflow: hidden;
