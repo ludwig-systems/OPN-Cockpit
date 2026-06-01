@@ -1589,13 +1589,10 @@
     $('#pl-alias-descr').value = '';
     $('#pl-alias-merge').checked = false;
     $('#pl-confirm').checked = false;
-    // F19: Chip-Listen bei Modal-Reset leeren — sonst zeigen sie Eintraege
-    // vom vorigen Geraet auch wenn der User das Modal frisch oeffnet.
-    const aliasChips = $('#pl-alias-chips');
-    if (aliasChips) { aliasChips.innerHTML = ''; aliasChips.hidden = true; }
-    const gwChips = $('#pl-gateway-chips');
-    if (gwChips) { gwChips.innerHTML = ''; gwChips.hidden = true; }
+    // Suggestion-Caches leeren — sonst greift F19-Rebrowse fuer Eintraege
+    // die vom vorherigen Geraet kamen.
     aliasSuggestionTypes = new Map();
+    gatewaySuggestionNames = new Set();
   }
 
   function showPlanFieldSet(mode) {
@@ -2059,20 +2056,14 @@
       const data = await response.json();
       const dl = $('#pl-gateway-suggestions');
       dl.innerHTML = '';
-      const chipItems = [];
+      gatewaySuggestionNames = new Set();
       for (const g of data.gateways) {
         const opt = document.createElement('option');
         opt.value = g.name;
         opt.label = g.address ? `${g.name} — ${g.address} (${g.status})` : g.name;
         dl.appendChild(opt);
-        chipItems.push({ value: g.name, meta: g.status || '' });
+        gatewaySuggestionNames.add(g.name);
       }
-      renderSuggestionChips('pl-gateway-chips', chipItems, (picked) => {
-        const inp = $('#pl-route-gateway');
-        inp.value = picked;
-        inp.dispatchEvent(new Event('input', { bubbles: true }));
-        inp.focus();
-      });
       showToast(`${data.gateways.length} Gateway(s) gefunden auf ${device.name}.`);
     } catch (err) {
       showToast(err.message, true);
@@ -2085,41 +2076,41 @@
   // Map<name, type> aus der letzten discover/aliases-Antwort, damit wir bei
   // Datalist-Auswahl den Typ automatisch ins Dropdown uebernehmen koennen.
   let aliasSuggestionTypes = new Map();
+  // Set<name> der zuletzt geladenen Gateways — fuer F19 Re-Browse-Trick.
+  let gatewaySuggestionNames = new Set();
 
-  function renderSuggestionChips(containerId, items, onPick) {
-    // F19: ergaenzendes UI zur datalist — klickbare Chips erlauben Re-Browse
-    // nach Auswahl (datalist filtert nach value und blendet dann alles aus).
-    const c = $(`#${containerId}`);
-    if (!c) return;
-    c.innerHTML = '';
-    if (!items.length) {
-      c.hidden = true;
-      return;
-    }
-    c.hidden = false;
-    for (const item of items) {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'suggestion-chip';
-      chip.dataset.value = item.value;
-      const name = document.createElement('span');
-      name.textContent = item.value;
-      chip.appendChild(name);
-      if (item.meta) {
-        const meta = document.createElement('span');
-        meta.className = 'suggestion-chip-type';
-        meta.textContent = item.meta;
-        chip.appendChild(meta);
+  // F19 v2: Wir verzichten auf die Chip-Liste (sprengt das Modal ab ~20 Eintraegen)
+  // und sorgen stattdessen dafuer, dass das native Dropdown re-browsable bleibt.
+  // Browser blenden datalist-Optionen aus wenn input.value exakt einer Option
+  // entspricht. Workaround: beim erneuten Fokus/Mousedown den Wert temporaer
+  // leeren — User sieht wieder alle Optionen, kann einen neuen waehlen.
+  function enableDatalistRebrowse(inputId, knownValuesSetGetter) {
+    const inp = $(`#${inputId}`);
+    if (!inp) return;
+    const tryClear = () => {
+      const v = inp.value.trim();
+      if (v && knownValuesSetGetter().has(v)) {
+        inp.dataset.lastPick = v;
+        inp.value = '';
       }
-      chip.addEventListener('click', () => {
-        onPick(item.value);
-        // active-Markierung
-        for (const other of c.querySelectorAll('.suggestion-chip')) {
-          other.classList.toggle('active', other.dataset.value === item.value);
+    };
+    inp.addEventListener('focus', tryClear);
+    inp.addEventListener('mousedown', () => {
+      // Falls focus schon mal lief, mousedown trotzdem ausloesen damit
+      // ein erneuter Klick auf das schon fokussierte Feld wieder leert.
+      setTimeout(tryClear, 0);
+    });
+    inp.addEventListener('blur', () => {
+      // Wenn nach dem Verlassen nichts gewaehlt wurde, alten Wert restaurieren
+      // — sonst verliert der User seine vorige Auswahl beim Wegklicken.
+      setTimeout(() => {
+        if (!inp.value && inp.dataset.lastPick) {
+          inp.value = inp.dataset.lastPick;
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
         }
-      });
-      c.appendChild(chip);
-    }
+        delete inp.dataset.lastPick;
+      }, 150);
+    });
   }
 
   async function loadAliasSuggestions() {
@@ -2143,21 +2134,13 @@
       const dl = $('#pl-alias-suggestions');
       dl.innerHTML = '';
       aliasSuggestionTypes = new Map();
-      const chipItems = [];
       for (const a of data.aliases) {
         const opt = document.createElement('option');
         opt.value = a.name;
         opt.label = a.type ? `${a.name} (${a.type})` : a.name;
         dl.appendChild(opt);
         if (a.type) aliasSuggestionTypes.set(a.name, String(a.type).toLowerCase());
-        chipItems.push({ value: a.name, meta: a.type || '' });
       }
-      renderSuggestionChips('pl-alias-chips', chipItems, (picked) => {
-        const inp = $('#pl-alias-name');
-        inp.value = picked;
-        inp.dispatchEvent(new Event('input', { bubbles: true }));
-        inp.focus();
-      });
       showToast(`${data.aliases.length} Alias(e) gefunden auf ${device.name}.`);
     } catch (err) {
       showToast(err.message, true);
@@ -2597,6 +2580,12 @@
         return;
       }
       okBox.hidden = false;
+      // Footer-Anzeige + Session-State synchron halten — sonst zeigt der Footer
+      // den alten 10-Min-Wert obwohl die Session schon mit der neuen Frist laeuft.
+      $('#timeout-display').textContent = minutes;
+      if (state.sessionInfo) {
+        state.sessionInfo.inactivity_timeout_s = minutes * 60;
+      }
       showToast(`Auto-Sperre auf ${minutes} Minuten gesetzt.`);
     } catch (err) {
       errBox.textContent = err.message;
@@ -3573,6 +3562,9 @@
     // F17: Datalist-Auswahl feuert ein input-Event mit dem fertigen Wert.
     $('#pl-alias-name').addEventListener('input', syncAliasTypeFromSuggestion);
     $('#pl-alias-name').addEventListener('change', syncAliasTypeFromSuggestion);
+    // F19 v2: Re-Browse via focus/mousedown-Clear bei bekannter Auswahl.
+    enableDatalistRebrowse('pl-alias-name', () => new Set(aliasSuggestionTypes.keys()));
+    enableDatalistRebrowse('pl-route-gateway', () => gatewaySuggestionNames);
     $('#pl-profile-select').addEventListener('change', (e) => applyProfile(e.target.value));
     $('#pl-profile-delete').addEventListener('click', deleteCurrentProfile);
     $('#pl-save-profile-btn') || null;  // Button id ist plan-save-profile-btn

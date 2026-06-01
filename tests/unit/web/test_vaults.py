@@ -131,3 +131,115 @@ class TestCreateVault:
                 json={"path": str(target), "password": "kurz"},
             )
         assert response.status_code == 400
+
+
+class TestVaultSettingsAndChangePassword:
+    """F5a + F5b + R3-Followup: Inaktivity-Timeout aenderbar, Vault-Master-PW
+    aenderbar — und der frueher 500-werfende persist_session_vault-Aufruf
+    bleibt verifiziert OK."""
+
+    def _create_and_unlock(self, client: TestClient, tmp_path: Path) -> str:
+        target = tmp_path / "v.opnvault"
+        with patch.dict(os.environ, {"APPDATA": str(tmp_path / "appdata")}):
+            r = client.post(
+                "/api/vaults",
+                json={"path": str(target), "password": PASSWORD},
+            )
+        return r.json()["token"]
+
+    def test_get_settings_returns_current_inactivity_minutes(
+        self, client: TestClient, tmp_path: Path,
+    ) -> None:
+        token = self._create_and_unlock(client, tmp_path)
+        r = client.get(
+            "/api/vaults/settings",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["inactivity_minutes"] == 10
+        assert "max_workers" in body
+
+    def test_update_settings_persists_and_returns_new_value(
+        self, client: TestClient, tmp_path: Path,
+    ) -> None:
+        """Regression: vorher 500 wegen falscher persist_session_vault-Signatur."""
+        token = self._create_and_unlock(client, tmp_path)
+        r = client.post(
+            "/api/vaults/settings",
+            json={"inactivity_minutes": 45},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["inactivity_minutes"] == 45
+        # Re-Read und verifiziere dass es persistent ist
+        r2 = client.get(
+            "/api/vaults/settings",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r2.json()["inactivity_minutes"] == 45
+
+    def test_update_settings_validates_range(
+        self, client: TestClient, tmp_path: Path,
+    ) -> None:
+        token = self._create_and_unlock(client, tmp_path)
+        r = client.post(
+            "/api/vaults/settings",
+            json={"inactivity_minutes": 999},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        # Pydantic-Validation -> 422
+        assert r.status_code in {400, 422}
+
+    def test_change_password_succeeds_and_session_keeps_working(
+        self, client: TestClient, tmp_path: Path,
+    ) -> None:
+        token = self._create_and_unlock(client, tmp_path)
+        new_pw = "neues-passwort-mindestens-12-zeichen"
+        r = client.post(
+            "/api/vaults/change-password",
+            json={
+                "current_password": PASSWORD,
+                "new_password": new_pw,
+                "new_password_repeat": new_pw,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.text
+        # Token muss weiter funktionieren (session.unlock mit neuem PW lief)
+        me = client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert me.status_code == 200
+
+    def test_change_password_rejects_wrong_current(
+        self, client: TestClient, tmp_path: Path,
+    ) -> None:
+        token = self._create_and_unlock(client, tmp_path)
+        r = client.post(
+            "/api/vaults/change-password",
+            json={
+                "current_password": "ist-bestimmt-nicht-richtig-mindestens-12",
+                "new_password": "neues-passwort-mindestens-12-zeichen",
+                "new_password_repeat": "neues-passwort-mindestens-12-zeichen",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 401
+
+    def test_change_password_rejects_mismatch(
+        self, client: TestClient, tmp_path: Path,
+    ) -> None:
+        token = self._create_and_unlock(client, tmp_path)
+        r = client.post(
+            "/api/vaults/change-password",
+            json={
+                "current_password": PASSWORD,
+                "new_password": "neues-passwort-mindestens-12-zeichen",
+                "new_password_repeat": "etwas-ganz-anderes-mindestens-12",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 400

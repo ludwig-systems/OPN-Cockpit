@@ -259,26 +259,77 @@ Optionen mehr, bis der Input-Wert komplett gelöscht ist.
 value` exakt einer Option entspricht, wird die Liste ausgeblendet
 („nichts mehr zum Vorschlagen").
 
-**Resolution** (2026-06-01, Runde 2): Zusätzlich zur Datalist wird
-unter dem Input eine Klick-Chip-Liste gerendert (`<button class=
-"suggestion-chip">`). Klick = Wert setzen + `input`-Event
-dispatchen (triggert F17 Auto-Typ). Wirkt auch für Gateway-
-Suggestions. CSS: `.suggestion-chips`/`.suggestion-chip` Pillen
-in der Calm-Precision-Linie, aktive Auswahl olive markiert.
+**Resolution v1** (2026-06-01, Runde 2, Commit `d3a3f23`):
+Suggestion-Chip-Liste unter dem Input. **Verworfen in Runde 3** —
+sprengt das Modal sobald 20+ Aliase geladen sind.
 
-## Bearbeitungs-Reihenfolge — Stand 2026-06-01 21:00
+**Resolution v2** (2026-06-01, Runde 3): Neuer Helper
+`enableDatalistRebrowse(inputId, knownValuesGetter)`. Hängt
+`focus`+`mousedown`-Listener an: wenn `input.value` exakt einer
+Suggestion entspricht, wird der Wert temporär geleert (alter Wert
+in `dataset.lastPick` gemerkt) → der Browser zeigt die volle Liste
+wieder. `blur` ohne Auswahl restauriert den alten Wert. Aktiv für
+Alias- und Gateway-Input. CSS-Chips-Regeln entfernt.
+
+## Test-Runde 3 (Folgebefunde)
+
+### F20 ✅ Settings-Save liefert Fehler 500 — Wert wird aber teilweise übernommen
+
+**Beobachtet** (Runde 3): Timeout im Settings-Modal auf 60 setzen,
+Speichern → rote Box „Fehler 500". Aber Footer-Anzeige bleibt bei
+10 Min, **die Session-Restzeit-Anzeige hingegen läuft schon mit
+~60 Minuten**.
+
+**Ursache**: Mein `update_vault_settings`-Handler rief
+`persist_session_vault(session)` mit falscher Signatur auf (echt ist
+`persist_session_vault(request, session, vault_path, *, rollback=…)`).
+Server crashte mit TypeError → 500. Vorher hatte ich aber schon
+`session.opened.data.settings = new_settings` direkt mutiert — die
+laufende Session sieht den neuen Wert, der File-Save kam nicht
+zustande. Footer war ein statisch initialisiertes Feld aus
+`sessionInfo.inactivity_timeout_s` und wurde nie aktualisiert.
+
+**Resolution** (2026-06-01, Runde 3): Drei Fixes:
+1. Korrekte `persist_session_vault(request, session, vault_path,
+   rollback=…)`-Signatur. `request` als FastAPI-Dependency dazu.
+2. Rollback-Closure stellt bei Save-Fehler die alten Settings in
+   der Session wieder her — keine In-Memory/Platte-Drift mehr.
+3. Frontend `saveInactivityTimeout` updated nach Erfolg auch
+   `#timeout-display` und `state.sessionInfo.inactivity_timeout_s`.
+Regression-Tests: `TestVaultSettingsAndChangePassword` mit 6 Cases
+(get/update/range/change-pw/wrong-current/mismatch).
+
+### F21 ✅ Settings-Icon visuell identisch mit Dark-Mode-Toggle
+
+**Beobachtet** (Runde 3): Mein Zahnrad-SVG war ein Sonnen-Symbol —
+gleich wie der Theme-Toggle daneben.
+
+**Resolution** (2026-06-01, Runde 3): Neues SVG mit echten Zahnrad-
+Zähnen (kurze Rechtecke an den 4 Kardinalpunkten zusätzlich zu den
+diagonalen Strichen).
+
+### F19v1 → F19v2 ✅ Suggestion-Chips entfernt — Modal sprengte ab ~20 Aliasen
+
+**Beobachtet** (Runde 3): Die in Runde 2 hinzugefügten Suggestion-Chips
+unter dem Alias-Input zeigten alle ~25 Aliase gleichzeitig — sprengte
+das Modal vertikal.
+
+**Resolution**: siehe F19 oben — Chips entfernt, Re-Browse jetzt per
+`enableDatalistRebrowse`-Helper (Wert-Clear bei Re-Fokus auf bekannte
+Auswahl, Restore bei Blur ohne Auswahl).
+
+## Bearbeitungs-Reihenfolge — Stand 2026-06-01 (Runde 3)
 
 **Erledigt** (✅ in den Items oben):
 
-- **Runde 1** (Commit `f905ac4` + `9e8bc8d`): F1, F2, F3, F6, F9/F13,
+- **Runde 1** (`f905ac4`, `9e8bc8d`): F1, F2, F3, F6, F9/F13,
   F10/F14, F11/F15, F12/F16, F17, F18 (Stufe 1: result-Detection).
-- **Runde 2** (Commit folgt): F4, F5a, F5b, F18 (Stufe 2: Type-Dict-
-  Parsing + Summary-Detail), F19.
+- **Runde 2** (`d3a3f23`): F4, F5a, F5b, F18 (Stufe 2: Type-Dict-
+  Parsing + Summary-Detail), F19 v1.
+- **Runde 3** (Commit folgt): F19 v2 (Chips weg, Re-Browse-Helper),
+  F20 (Settings-500 + Footer-Refresh), F21 (Zahnrad-Icon).
 
 **Noch offen**:
 
 - F7 🔵 Design-Guide schreiben (verbindlich für künftige UI-Arbeit).
 - F8 🔵 Logo / Favicon entwerfen.
-
-Die offenen Items sind kuratorische Größere — kein Blocker für die
-Test-Runden. Erst angehen wenn die Test-Runde stabil läuft.

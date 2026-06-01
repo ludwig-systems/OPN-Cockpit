@@ -1549,48 +1549,10 @@ a.card-open-link { text-decoration: none; }
   letter-spacing: -0.005em;
 }
 
-/* F19: Datalist allein erlaubt nach Auswahl kein Re-Browse mehr (Browser
- * blendet alle Optionen aus wenn input.value exakt einer Option entspricht).
- * Suggestion-Chips daneben loesen das — klick = setze Value + dispatch input. */
-.suggestion-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.suggestion-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-elevated);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.suggestion-chip:hover {
-  border-color: var(--accent);
-  color: var(--accent-strong);
-  background: var(--bg);
-}
-
-.suggestion-chip.active {
-  border-color: var(--accent);
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-  font-weight: 500;
-}
-
-.suggestion-chip-type {
-  margin-left: 6px;
-  opacity: 0.6;
-  font-size: 10.5px;
-}
+/* F19 v2: Chips-Loesung wurde verworfen (sprengt das Modal bei ~20+ Eintraegen).
+ * Re-Browse laeuft jetzt rein per JS-Workaround in enableDatalistRebrowse():
+ * input.focus + bekannter Wert -> Wert temporaer leeren -> Datalist zeigt wieder
+ * alle Optionen. Bei blur ohne Auswahl: alten Wert restaurieren. Keine CSS noetig. */
 
 .selection-summary.no-selection {
   border-color: var(--danger);

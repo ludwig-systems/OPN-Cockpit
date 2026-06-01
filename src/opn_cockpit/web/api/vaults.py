@@ -406,36 +406,46 @@ def get_vault_settings(
 @router.post("/settings", response_model=VaultSettingsResponse)
 def update_vault_settings(
     payload: VaultSettingsUpdateRequest,
+    request: Request,
     session: Session = Depends(require_session),
 ) -> VaultSettingsResponse:
     """Aktualisiert die Tresor-Settings (aktuell nur Inaktivitaets-Timeout)
-    und persistiert. Wirkt sofort fuer die laufende Session."""
+    und persistiert. Wirkt sofort fuer die laufende Session.
+
+    Schreibreihenfolge wichtig: erst mutieren, dann ueber
+    ``persist_session_vault`` speichern — wenn der Save scheitert, faellt
+    der rollback() die In-Memory-Aenderung zurueck, sonst laeuft die Session
+    weiter mit einem Wert, der nirgends auf Platte steht.
+    """
     from opn_cockpit.vault.model import VaultSettings as _VS
+    from opn_cockpit.web.vault_writes import persist_session_vault as _persist
     minutes = payload.inactivity_minutes
-    if minutes < 1 or minutes > 240:
+    # Pydantic prueft 1..240 schon — Doppel-Check entfernt.
+    if session.vault_path is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inaktivitaets-Timeout muss zwischen 1 und 240 Minuten liegen.",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Aktiver Tresor-Pfad fehlt — bitte neu entsperren.",
         )
-    old = session.opened.data.settings
+    old_settings = session.opened.data.settings
     new_settings = _VS(
         inactivity_minutes=minutes,
-        max_workers=old.max_workers,
-        connect_timeout_s=old.connect_timeout_s,
-        read_timeout_s=old.read_timeout_s,
-        reconfigure_timeout_s=old.reconfigure_timeout_s,
-        retry_count=old.retry_count,
+        max_workers=old_settings.max_workers,
+        connect_timeout_s=old_settings.connect_timeout_s,
+        read_timeout_s=old_settings.read_timeout_s,
+        reconfigure_timeout_s=old_settings.reconfigure_timeout_s,
+        retry_count=old_settings.retry_count,
     )
     session.opened.data.settings = new_settings
-    # Persistieren — beim naechsten Server-Start oder Lock+Unlock greift
-    # der neue Wert ohnehin, aber direkt schreiben damit auch Multi-Browser
-    # konsistent sind.
-    from opn_cockpit.web.vault_writes import persist_session_vault
-    persist_session_vault(session)
+
+    def _rollback() -> None:
+        session.opened.data.settings = old_settings
+
+    _persist(request, session, session.vault_path, rollback=_rollback)
+
     get_audit_backend().append(
-        AuditEventKind.VAULT_OPENED,  # kein eigener Kind, generischer Eintrag
+        AuditEventKind.VAULT_OPENED,
         actor=audit_actor(session),
-        vault_path=str(session.vault_path) if session.vault_path else None,
+        vault_path=str(session.vault_path),
         summary=f"Tresor-Settings aktualisiert: inactivity_minutes={minutes}",
     )
     return VaultSettingsResponse(
