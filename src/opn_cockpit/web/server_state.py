@@ -118,18 +118,22 @@ class ServerState:
         return state
 
     def _ensure_default_admin(self) -> None:
-        """Legt den Default-Admin an wenn die User-DB leer ist.
+        """Legt den Default-Admin an wenn noch kein ``admin``-User existiert.
 
         Username: ``admin``. Passwort: ``OPN-Cockpit!`` (12 Zeichen).
         ``must_change_password=True`` zwingt den User beim ersten Login
         auf den Self-Service-PW-Wechsel.
 
-        Wenn die DB schon User enthaelt (Upgrade einer bestehenden
-        Multi-User-Installation, oder manueller Admin), passiert nichts.
+        Bewusst Check per Username, nicht ueber ``count()``: bei Upgrades
+        einer Test-/Vor-Installation koennen schon andere User in der DB
+        sein (z. B. alice aus alten Test-Versuchen) — wenn dann der
+        ``admin``-User fehlt, kann sich niemand mehr einloggen. Diese
+        Variante repariert das selbstheilend, ohne bestehende User zu
+        veraendern oder zu loeschen.
         """
         if self._user_store is None:
             return
-        if self._user_store.count() > 0:
+        if self._user_store.get_user_by_name(DEFAULT_ADMIN_USERNAME) is not None:
             return
         from opn_cockpit.security.users import UserStoreError
         with contextlib.suppress(UserStoreError):
