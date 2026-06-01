@@ -16,7 +16,8 @@
 
 set -euo pipefail
 
-REPO_URL="${OPNCOCKPIT_REPO:-https://github.com/your-org/opn-cockpit.git}"
+REPO_URL="${OPNCOCKPIT_REPO_URL:-${OPNCOCKPIT_REPO:-https://github.com/ludwig-systems/opn-cockpit.git}}"
+REPO_BRANCH="${OPNCOCKPIT_REPO_BRANCH:-main}"
 INSTALL_DIR="${OPNCOCKPIT_INSTALL_DIR:-/opt/opn-cockpit}"
 DATA_DIR="${OPNCOCKPIT_DATA_DIR:-/var/lib/opn-cockpit}"
 SVC_USER="opncockpit"
@@ -62,13 +63,16 @@ chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR"
 # ---------------------------------------------------------------------------
 if [[ -n "$SOURCE_DIR" ]]; then
     log "Source aus '$SOURCE_DIR' kopieren..."
-    rsync -a --exclude='.git' --exclude='.venv' "$SOURCE_DIR/" "$INSTALL_DIR/"
+    apt-get install -y --no-install-recommends rsync >/dev/null
+    rsync -a --exclude='.git' --exclude='.venv' --exclude='installer/bundle' \
+          --exclude='__pycache__' "$SOURCE_DIR/" "$INSTALL_DIR/"
 elif [[ -d "$INSTALL_DIR/.git" ]]; then
-    log "Repo unter '$INSTALL_DIR' aktualisieren..."
-    git -C "$INSTALL_DIR" pull --ff-only
+    log "Repo unter '$INSTALL_DIR' auf Branch '$REPO_BRANCH' aktualisieren..."
+    git -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+    git -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH"
 else
-    log "Repo nach '$INSTALL_DIR' klonen..."
-    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    log "Repo nach '$INSTALL_DIR' klonen (Branch '$REPO_BRANCH')..."
+    git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR"
 fi
 
 chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR"
@@ -99,11 +103,20 @@ systemctl enable --now opn-cockpit.service
 sleep 3
 if systemctl is-active --quiet opn-cockpit.service; then
     HOST_IP=$(hostname -I | awk '{print $1}')
-    log "Installation fertig."
-    log "Service laeuft."
-    log "URL:   http://${HOST_IP}:9876"
-    log "Logs:  journalctl -u opn-cockpit -f"
-    log "Stop:  systemctl stop opn-cockpit"
+    echo
+    log "Installation fertig. Service laeuft."
+    echo
+    echo "  URL:           http://${HOST_IP}:9876"
+    echo "  Default-Login: admin / OPN-Cockpit!  (Pflicht-PW-Wechsel beim Erst-Login)"
+    echo
+    echo "  Logs:          journalctl -u opn-cockpit -f"
+    echo "  Stop:          systemctl stop opn-cockpit"
+    echo "  Status:        systemctl status opn-cockpit"
+    echo
+    log "Im Setup-Wizard:"
+    log "  - Default-Admin einloggen + neues PW vergeben (min. 12 Zeichen)"
+    log "  - Vault-Pfad: /var/lib/opn-cockpit/firewalls.opnvault"
+    log "  - 'Tresor neu anlegen' aktivieren, Master-PW vergeben"
 else
     err "Service ist nicht aktiv. Logs: journalctl -u opn-cockpit -n 50"
 fi
