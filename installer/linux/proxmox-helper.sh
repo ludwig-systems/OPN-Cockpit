@@ -303,6 +303,34 @@ DNS_SERVERS="$REPLY"
 ASK "DNS-Search-Domain (optional)" "Search-Domain (leer = keine)" ""
 DNS_SEARCH="$REPLY"
 
+# ----- Root-Passwort (optional) -----
+# Default ist KEIN Root-PW: Zugang ueber 'pct enter' vom Host reicht fuer
+# Wartung. Wer SSH ins Container will, kann hier ein PW setzen.
+CT_PASSWORD=""
+while true; do
+    CT_PASSWORD=$(whiptail --backtitle "$BACKTITLE" --title "Root-Passwort (optional)" \
+        --passwordbox "Container-Root-Passwort\n\nLeer lassen = kein PW (Zugang nur per 'pct enter' vom Host, sicherste Variante)\nWert setzen = klassischer Root-Login (z.B. fuer SSH von aussen)" \
+        14 78 3>&1 1>&2 2>&3) || err "Abgebrochen."
+
+    if [[ -z "$CT_PASSWORD" ]]; then
+        break
+    fi
+    if [[ ${#CT_PASSWORD} -lt 5 ]]; then
+        whiptail --backtitle "$BACKTITLE" --title "Zu kurz" \
+            --msgbox "Mindestens 5 Zeichen.\nLeer lassen geht auch (kein Root-PW)." 10 60
+        continue
+    fi
+    CT_PASSWORD_CONFIRM=$(whiptail --backtitle "$BACKTITLE" --title "Wiederholen" \
+        --passwordbox "Passwort wiederholen" 10 60 3>&1 1>&2 2>&3) || err "Abgebrochen."
+    if [[ "$CT_PASSWORD" != "$CT_PASSWORD_CONFIRM" ]]; then
+        whiptail --backtitle "$BACKTITLE" --title "Ungleich" \
+            --msgbox "Passwoerter stimmen nicht ueberein, nochmal." 10 60
+        CT_PASSWORD=""
+        continue
+    fi
+    break
+done
+
 # ----- Net-String fuer pct zusammenbauen -----
 NET_STR="name=eth0,bridge=$CT_NETWORK"
 if [[ -n "$IPV4_CIDR" ]]; then
@@ -322,9 +350,16 @@ fi
 [[ -n "$VLAN_TAG" ]] && NET_SUMMARY="$NET_SUMMARY, VLAN $VLAN_TAG"
 [[ -n "$MAC_ADDR" ]] && NET_SUMMARY="$NET_SUMMARY, MAC $MAC_ADDR"
 
+if [[ -n "$CT_PASSWORD" ]]; then
+    PW_SUMMARY="gesetzt (Root-Login per Console/SSH moeglich)"
+else
+    PW_SUMMARY="kein (Zugang nur per 'pct enter' vom Host)"
+fi
+
 SUMMARY="Container
   ID:        $CT_ID
   Hostname:  $CT_HOSTNAME
+  Root-PW:   $PW_SUMMARY
   Storage:   $CT_STORAGE
   Disk:      ${CT_DISK} GB
   CPUs:      $CT_CPU
@@ -403,6 +438,7 @@ PCT_ARGS=(
 )
 [[ -n "$DNS_SERVERS" ]] && PCT_ARGS+=(--nameserver "$DNS_SERVERS")
 [[ -n "$DNS_SEARCH"  ]] && PCT_ARGS+=(--searchdomain "$DNS_SEARCH")
+[[ -n "$CT_PASSWORD" ]] && PCT_ARGS+=(--password "$CT_PASSWORD")
 
 pct create "$CT_ID" "${TPL_STORAGE}:vztmpl/$TEMPLATE" "${PCT_ARGS[@]}" >/dev/null
 
@@ -438,6 +474,12 @@ OPNCOCKPIT_REPO_URL='${REPO_URL}' OPNCOCKPIT_REPO_BRANCH='${REPO_BRANCH}' /tmp/i
 # ---------------------------------------------------------------------------
 # Fertig — sowohl Whiptail-Msgbox als auch Konsolen-Ausgabe
 # ---------------------------------------------------------------------------
+if [[ -n "$CT_PASSWORD" ]]; then
+    PW_HINT="Container-Root-PW: dein gewaehltes Passwort (auch fuer Console/SSH)"
+else
+    PW_HINT="Container-Root-Login: KEIN Passwort gesetzt - Zugang nur per 'pct enter $CT_ID' vom Host"
+fi
+
 SUCCESS="OPN-Cockpit ist installiert und gestartet.
 
 Container-ID:  $CT_ID
@@ -445,15 +487,17 @@ Hostname:      $CT_HOSTNAME
 IP:            $CT_IP
 URL:           http://${CT_IP}:9876
 
-Default-Login: admin / OPN-Cockpit!
+OPN-Cockpit-Login: admin / OPN-Cockpit!
 Beim ersten Login MUSS das Admin-PW gewechselt werden.
 
-Befehle (auf Proxmox-Host):
-  pct exec $CT_ID -- journalctl -u opn-cockpit -f
-  pct enter $CT_ID
-  pct stop $CT_ID"
+$PW_HINT
 
-whiptail --backtitle "$BACKTITLE" --title "Fertig" --msgbox "$SUCCESS" 22 78 || true
+Befehle (auf Proxmox-Host):
+  pct enter $CT_ID                               (Shell im Container)
+  pct exec $CT_ID -- journalctl -u opn-cockpit -f  (Logs)
+  pct stop $CT_ID                                (Stop)"
+
+whiptail --backtitle "$BACKTITLE" --title "Fertig" --msgbox "$SUCCESS" 24 78 || true
 
 echo
 log "Installation fertig."
@@ -463,7 +507,8 @@ echo "  Hostname:      $CT_HOSTNAME"
 echo "  IP:            $CT_IP"
 echo "  URL:           http://${CT_IP}:9876"
 echo
-echo "  Default-Login: admin / OPN-Cockpit!  (Pflicht-PW-Wechsel beim Erst-Login)"
+echo "  OPN-Cockpit-Login: admin / OPN-Cockpit!  (Pflicht-PW-Wechsel beim Erst-Login)"
+echo "  $PW_HINT"
 echo
 echo "  Logs:          pct exec $CT_ID -- journalctl -u opn-cockpit -f"
 echo "  Shell:         pct enter $CT_ID"

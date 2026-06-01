@@ -9,7 +9,16 @@ mit Pflicht-Passwort-Wechsel beim ersten Login. Kein Bootstrap-Token mehr.
 
 ## Variante 1: Docker (am einfachsten, auch unter Windows via Docker Desktop)
 
-Siehe [../../docs/DOCKER.md](../../docs/DOCKER.md).
+Quelltree enthält ein `Dockerfile` + `docker-compose.yml`:
+
+```bash
+git clone https://github.com/ludwig-systems/opn-cockpit.git
+cd opn-cockpit
+docker compose up -d
+```
+
+Daten landen im Named-Volume `opn-cockpit-data` (Vault + User-DB + Audit + Settings).
+Port `9876` ist nach außen gemappt.
 
 ## Variante 2: Direkt auf Debian-/Ubuntu-Host als systemd-Service
 
@@ -80,6 +89,7 @@ Esc = Abbruch.
 | MAC-Adresse | Eingabe | leer | leer = Proxmox vergibt |
 | DNS-Server | Eingabe | leer | leer = vom Host; sonst kommagetrennt |
 | DNS-Search-Domain | Eingabe | leer | optional |
+| Root-Passwort | Passwordbox | leer | leer = kein PW (Zugang nur per `pct enter` vom Host). Wer SSH ins Container will, setzt hier eins (min. 5 Zeichen, Wiederholung) |
 | Zusammenfassung | **Ja/Nein** | — | letzte Bestätigung vor `pct create` |
 
 Am Ende: Whiptail-Msgbox mit Container-Daten + Default-Login,
@@ -224,8 +234,7 @@ Komplette Datei → komplettes Restore.
   ersten Login. Solange das Default-PW gilt, blockt der Server alle
   Vault-Operationen.
 - Bind ist `0.0.0.0` — bei produktivem Betrieb hinter Reverse-Proxy
-  mit TLS + Client-Cert / mTLS. nginx-Beispiel siehe
-  [../../docs/DOCKER.md](../../docs/DOCKER.md).
+  mit TLS + Client-Cert / mTLS (Standard-nginx- oder Caddy-Setup).
 - Rate-Limit auf Login + Bootstrap (10 Versuche / 15 min pro IP).
 - Audit-Log ist HMAC-Chain-protected → Tamper-Evidence.
 
