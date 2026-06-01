@@ -3709,4 +3709,54 @@
   }
 
   document.addEventListener('DOMContentLoaded', bootstrap);
+
+  // Diagnose-Helfer fuer den Click-Bug (Test-Runde 7+):
+  // window.__opnDiag() in der Browser-Console aufrufen — listet alle
+  // sichtbaren Vollflaechen-Overlays (position fixed/absolute mit inset 0
+  // oder Top-Left + 100% Groesse) auf, plus jedes Element ueber den
+  // Topbar-Icons. So sieht man sofort welches DOM-Element die Klicks
+  // abfaengt ohne F12-Layer-Panel manuell durchgehen zu muessen.
+  window.__opnDiag = function () {
+    const all = document.querySelectorAll('*');
+    const overlays = [];
+    for (const el of all) {
+      const s = getComputedStyle(el);
+      if ((s.position === 'fixed' || s.position === 'absolute') &&
+          s.pointerEvents !== 'none' && s.visibility !== 'hidden' &&
+          s.display !== 'none') {
+        const r = el.getBoundingClientRect();
+        const fullWidth = r.width >= window.innerWidth * 0.8;
+        const fullHeight = r.height >= window.innerHeight * 0.8;
+        if (fullWidth && fullHeight) {
+          overlays.push({
+            tag: el.tagName,
+            id: el.id || '(no id)',
+            cls: el.className || '(no class)',
+            zIndex: s.zIndex,
+            rect: `${Math.round(r.width)}x${Math.round(r.height)} @ ${Math.round(r.left)},${Math.round(r.top)}`,
+          });
+        }
+      }
+    }
+    console.group('OPN-Cockpit Click-Diagnose: Vollflaechen-Overlays');
+    if (overlays.length === 0) {
+      console.log('Keine Vollflaechen-Overlays gefunden.');
+    } else {
+      console.table(overlays);
+    }
+    console.groupEnd();
+    // Welches Element liegt unter dem ersten icon-btn der Topbar?
+    const topbarBtn = document.querySelector('.topbar .icon-btn:not([hidden])');
+    if (topbarBtn) {
+      const r = topbarBtn.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const elAtPoint = document.elementFromPoint(cx, cy);
+      console.group('Element unter Topbar-Icon (' + Math.round(cx) + ',' + Math.round(cy) + ')');
+      console.log('Erwartet:', topbarBtn);
+      console.log('Tatsaechlich:', elAtPoint);
+      console.log('Gleich?', elAtPoint === topbarBtn || topbarBtn.contains(elAtPoint));
+      console.groupEnd();
+    }
+    return overlays;
+  };
 })();

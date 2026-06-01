@@ -101,6 +101,20 @@ html, body {
  * .user-badge[hidden] als leere weisse Pille im Brand-Block sichtbar war. */
 [hidden] { display: none !important; }
 
+/* Defensive gegen den Topbar-/Filter-Click-Bug (Test-Runde 7+): interaktive
+ * Elemente forcieren pointer-events: auto. Falls irgendein Parent
+ * versehentlich pointer-events: none geerbt hat, schlaegt der !important durch.
+ * Deko-Pseudo-Elemente (.brand-logo, .status-dot::before, etc.) sind separat
+ * mit pointer-events: none markiert — die bleiben unangetastet. */
+button:not([disabled]),
+a[href],
+input,
+select,
+textarea,
+[role="button"]:not([disabled]) {
+  pointer-events: auto !important;
+}
+
 body {
   font-family: var(--font-sans);
   background: var(--bg);

@@ -1,20 +1,30 @@
-# OPN-Cockpit Windows-Dienst entfernen (v3.2).
+# OPN-Cockpit Windows-Dienst entfernen.
 #
-# Stoppt und entfernt den NSSM-Service. Belaesst:
-#   - venv (wird vom Inno-Installer mit-deinstalliert)
-#   - Daten in %APPDATA%\OPN-Cockpit (Vault, Audit, Settings)
-#   - Logs in %ProgramData%\OPN-Cockpit\logs
+# Stoppt + entfernt den NSSM-Service. Belaesst:
+#   - Daten in %ProgramData%\OPN-Cockpit (Vault, Audit, Settings, Logs)
 #
-# Aufruf:
-#   .\scripts\uninstall-service.ps1
+# WICHTIG: stop-processes.ps1 sollte VOR diesem Skript laufen, um die
+# laufenden Python-Prozesse sauber zu beenden. Inno-Setup macht das im
+# [UninstallRun]-Block in dieser Reihenfolge.
+#
+# ASCII-only fuer PowerShell-5.1-CP-1252-Kompatibilitaet.
 
 [CmdletBinding()]
 param(
-    [string]$InstallDir = $PSScriptRoot | Split-Path -Parent,
+    [string]$InstallDir,
     [string]$ServiceName = "OPN-Cockpit"
 )
 
-$ErrorActionPreference = "Stop"
+# Defensive Execution-Policy fuer GP-restriktive Maschinen
+try {
+    Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force -ErrorAction Stop
+} catch {}
+
+$ErrorActionPreference = "Continue"
+
+if (-not $InstallDir -or $InstallDir.Length -eq 0) {
+    $InstallDir = Split-Path -Parent $PSScriptRoot
+}
 
 function Test-Admin {
     $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -23,26 +33,27 @@ function Test-Admin {
 }
 
 if (-not (Test-Admin)) {
-    Write-Error "Dieses Skript muss als Administrator laufen."
-    exit 1
+    Write-Warning "Dieses Skript muss als Administrator laufen."
+    exit 0  # Inno-Uninstall nicht abbrechen
 }
 
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if (-not $existing) {
-    Write-Host "Dienst '$ServiceName' existiert nicht. Nichts zu tun."
+    Write-Host ("Dienst '" + $ServiceName + "' existiert nicht. Nichts zu tun.")
     exit 0
 }
 
 $nssm = Join-Path $InstallDir "bundle\nssm.exe"
 if (-not (Test-Path $nssm)) {
-    Write-Warning "NSSM nicht gefunden: $nssm. Verwende sc.exe als Fallback."
-    sc.exe stop $ServiceName | Out-Null
-    Start-Sleep -Seconds 2
-    sc.exe delete $ServiceName | Out-Null
+    Write-Warning ("NSSM nicht gefunden: " + $nssm + ". Verwende sc.exe als Fallback.")
+    & sc.exe stop $ServiceName | Out-Null
+    Start-Sleep -Seconds 3
+    & sc.exe delete $ServiceName | Out-Null
 } else {
-    & $nssm stop $ServiceName confirm
-    Start-Sleep -Seconds 2
-    & $nssm remove $ServiceName confirm
+    & $nssm stop $ServiceName confirm | Out-Null
+    Start-Sleep -Seconds 3
+    & $nssm remove $ServiceName confirm | Out-Null
 }
 
-Write-Host "Dienst '$ServiceName' entfernt."
+Write-Host ("Dienst '" + $ServiceName + "' entfernt.")
+exit 0

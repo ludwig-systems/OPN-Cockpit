@@ -97,6 +97,11 @@ Source: "..\README.md";              DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\install-service.ps1";   DestDir: "{app}\scripts"; Flags: ignoreversion; Components: service
 Source: "..\scripts\uninstall-service.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion; Components: service
 
+; Pre-Uninstall-Helper: stoppt Service UND killt Single-User-Prozesse.
+; Wird immer mitinstalliert (auch Single-Mode), damit Uninstall sauber
+; alle Files entfernen kann.
+Source: "..\scripts\stop-processes.ps1";    DestDir: "{app}\scripts"; Flags: ignoreversion
+
 ; NSSM-Bundle - Build-Schritt muss `installer\bundle\nssm.exe` vorlegen
 ; (Download von nssm.cc, public domain). Optional: existiert nur wenn
 ; Service-Komponente gewaehlt.
@@ -141,10 +146,18 @@ Filename: "http://localhost:9876"; \
   Flags: postinstall skipifsilent shellexec; Components: service
 
 [UninstallRun]
-; Service-Mode: bei Deinstall den Dienst sauber entfernen.
+; Schritt 1 (IMMER): Service-Mode-Dienst stoppen UND laufende Single-User-
+; Prozesse killen. Sonst koennen DLLs/PYDs/SQLite-DBs nicht geloescht werden
+; und die Files bleiben nach Uninstall liegen. waituntilterminated blockiert
+; bis tatsaechlich alle Prozesse weg sind.
+Filename: "powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\stop-processes.ps1"""; \
+  RunOnceId: "StopProcesses"; Flags: runhidden waituntilterminated
+
+; Schritt 2 (nur Service-Mode): NSSM-Service entfernen.
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall-service.ps1"""; \
-  RunOnceId: "UninstallService"; Flags: runhidden; Components: service
+  RunOnceId: "UninstallService"; Flags: runhidden waituntilterminated; Components: service
 
 [UninstallDelete]
 ; Embedded-Python-Bundle wird mit deinstalliert. AppData/ProgramData bleibt
