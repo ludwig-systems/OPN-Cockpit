@@ -2,6 +2,116 @@
 
 Alle nennenswerten Änderungen pro Release.
 
+## v0.6.0 — 2026-06-01 — Multi-User-Server + Linux-Deployment
+
+Erste Release-Version mit echter Mehr-Plattform- und Mehr-Nutzer-Auslieferung.
+v0.6.0 hat denselben Funktionsumfang wie v2.0 (intern), läuft aber jetzt in
+vier produktiv nutzbaren Varianten: Windows-Single-User, Windows-Multi-User-
+Server (NSSM-Dienst), Linux-Server (systemd) und Proxmox-LXC. Erster
+Public-Release auf GitHub.
+
+### Authentifizierung — Default-Admin statt Bootstrap-Token
+
+- Beim ersten Start legt der Server automatisch einen Default-Admin an
+  (`admin` / `OPN-Cockpit!`) mit Pflicht-Passwort-Wechsel beim ersten Login.
+  Pragmatisch wie Proxmox: kein Token-Kopieren mehr, keine Token-Datei,
+  keine Setup-Schritte „erster Boot wartet auf Konsolen-Output".
+- `users.db`-Schema versteht `must_change_password` (SQLite `ALTER TABLE`-
+  Migration läuft beim Boot).
+- Selbstheilender Check via `get_user_by_name` statt `count()` — bei
+  zerstörter User-Tabelle wird der Default-Admin neu angelegt.
+- Tresor-Operationen sind blockiert, solange das Default-Passwort gilt
+  (Server-Status `ready_with_default_password`).
+- Bootstrap-Vault-Endpoint kombiniert Login + PW-Wechsel + Vault-Setup
+  in einem Schritt — der Setup-Wizard zeigt nur noch **einen** Step.
+
+### Multi-User-Server (Windows + Linux)
+
+- **Windows**: Installer-Wizard hat neuen Komponententyp „Multi-User-Server".
+  Registriert OPN-Cockpit als NSSM-basierten Windows-Dienst mit Autostart,
+  bindet auf `0.0.0.0:9876`. Service läuft unter `LocalService`. Vault-Upload
+  via `multipart/form-data` statt Pfad-Eingabe (LocalService kann User-
+  Pfade nicht sehen).
+- **Linux/Debian**: `installer/linux/install.sh` legt System-User
+  `opncockpit` an, baut Python-venv unter `/opt/opn-cockpit`, packt Daten
+  nach `/var/lib/opn-cockpit`, aktiviert systemd-Unit mit Hardening-Flags
+  (NoNewPrivileges, ProtectSystem=strict, PrivateTmp, ProtectHome).
+- Beide Modi nutzen den Default-Admin-Flow.
+
+### Proxmox-LXC-Helper (whiptail-TUI im Community-Scripts-Stil)
+
+- `installer/linux/proxmox-helper.sh` — ein Befehl auf dem PVE-Host:
+  ```bash
+  bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"
+  ```
+- **Dual-Mode**: derselbe Link funktioniert auf PVE-Host (Container anlegen)
+  UND im Container (in-place Update). Erkennung über `pveam`-Vorhandensein
+  bzw. `/opt/opn-cockpit + systemd-Unit`.
+- TUI führt durch Container-ID, Hostname, Storage-Pool (Auswahl-Menü aus
+  `pvesm status -content rootdir`), Disk-Größe, CPUs, RAM, Bridge (Menü
+  aller `vmbr*`), DHCP/Statisch, IPv4/Gateway/VLAN/MAC/DNS — alles per
+  Pfeiltasten + Enter, kein Frei-Text mehr.
+- Update-Modus belässt `/var/lib/opn-cockpit/` (Vault, Audit, User-DB,
+  Settings) unangetastet; nur `/opt/opn-cockpit` wird via `git fetch +
+  reset --hard` + `pip install` aktualisiert. Migrations laufen beim
+  Service-Start mit Pre-Backup.
+
+### Brand, UI und Design-Guide
+
+- Kompass-Stern-Logo als Inline-SVG überall (Boot-Splash, Header, Login,
+  About-Modal); Favicon mit `prefers-color-scheme`-Variante.
+- Header höher (`topbar-height: 82px`), Brand-Logo 38 px, Headline 24 px,
+  Icon-Buttons 40 px — proportional skaliert.
+- Interner Design-Guide als verbindliche Referenz für künftige UI-Arbeit
+  (Calm-Precision + Bahnschrift-Display + Olive-Akzent).
+- Defensive CSS-Regeln gegen Click-Bug auf Proxmox-Browser-Stack
+  (`pointer-events: auto !important` auf interaktive Elemente,
+  `[hidden] { display: none !important; }`).
+- Diagnose-Helper `window.__opnDiag()` in der Browser-Konsole für
+  Click-Bug-Reports (listet fullscreen overlays + Element unter erstem
+  Topbar-Icon).
+
+### Features (aus FR-Liste umgesetzt)
+
+- **OPNsense-Firmware-Version** pro Karte (`/api/core/firmware/status`)
+  mit Caching pro Heartbeat-Intervall.
+- **Backup ziehen** pro Karte (`/api/core/backup/download/this`) als
+  direkter Download-Stream; neuer Audit-Event `BACKUP_DOWNLOADED`.
+
+### Release-Pipeline
+
+- GitHub-Actions-Release-Workflow gefixt: PowerShell-Here-String im
+  YAML-`run: |`-Block sorgt für Indentation-Konflikt und Parse-Failure.
+  Ersetzt durch String-Array + `-join "`n"`. Em-Dashes aus ISS-Kommentaren
+  und Workflow-Inputs raus (CI-Sicherheit gegen non-UTF-8-Encoding bei
+  alten Toolchains).
+- `installer/opn-cockpit.iss` `[UninstallRun]` in 2 Stufen mit
+  `waituntilterminated`: Pre-Step killt laufende Prozesse (Service +
+  Single-User), zweiter Step entfernt NSSM-Service.
+- `[UninstallDelete]` entfernt zusätzlich `users.db`, `BOOTSTRAP-TOKEN.txt`,
+  `logs/` aus `%ProgramData%\OPN-Cockpit` — Re-Install bekommt sauberen
+  Default-Admin-State.
+
+### Operationelle Lehren
+
+- PowerShell 5.1 liest .ps1-Files als CP-1252; Em-Dashes (`—`) brechen
+  den Parser. **Alle Scripts ASCII-only.**
+- Defensives `Set-ExecutionPolicy Bypass -Scope Process` oben in jedem
+  Script gegen Group-Policy-Sperren.
+- `pveam update` vor `pveam available` — sonst veralteter Katalog → 404.
+- Vault-Upload für Multi-User-Server: Path-Validator kann User-Verzeichnis
+  des aufrufenden Browsers nicht sehen, also wird die `.opnvault`-Datei
+  per Multipart-Upload an den Server gestreamt und über `open_vault_bytes`
+  entschlüsselt.
+
+### Tests + Migration
+
+- 580+ Tests grün (`tests/unit/`), 100 % Coverage im Web-Layer.
+- SQLite-Migration-Framework läuft beim ersten Boot jedes Updates,
+  schreibt Pre-Backup nach `/var/lib/opn-cockpit/backups/<ts>-pre-<v>/`.
+
+---
+
 ## v2.0.0 — Web-Pivot
 
 Komplette Umstellung der Präsentations-Schicht von PySide6-Desktop-GUI auf
