@@ -117,11 +117,16 @@ Name: "{group}\{#MyAppName} (Web-UI oeffnen)"; Filename: "http://localhost:9876"
 
 [Run]
 ; Service-Mode: Dienst registrieren + starten.
+; Bewusst KEIN runhidden — wenn das Script (Group-Policy / Antivirus / NSSM
+; fehlt) scheitert, soll der User das im Konsolen-Fenster sehen statt sich
+; spaeter zu wundern wo der Dienst ist. waituntilterminated blockiert den
+; Installer-Fortschritt bis das Setup wirklich durch ist.
+; Das Script zeigt am Ende den Bootstrap-Token in einer MessageBox.
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\install-service.ps1"""; \
   WorkingDir: "{app}"; \
   StatusMsg: "Windows-Dienst wird registriert..."; \
-  Flags: runhidden; Components: service
+  Flags: waituntilterminated; Components: service
 
 ; Single-Mode: optional jetzt starten.
 Filename: "{app}\{#MyAppExeName}"; \

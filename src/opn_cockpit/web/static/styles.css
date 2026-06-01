@@ -1274,6 +1274,43 @@ body {
   font-feature-settings: 'tnum';
 }
 
+/* Firmware-Versions-Zeile unter den Stats. Bewusst leise — nicht jeder
+ * User braucht die Version sofort, aber wenn Update verfuegbar ist,
+ * springt der olive Akzent ins Auge. */
+.card-firmware {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.card-firmware-label {
+  text-transform: uppercase;
+}
+
+.card-firmware-version {
+  color: var(--text-muted);
+  font-feature-settings: 'tnum';
+}
+
+.card-firmware-update {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  margin-left: auto;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .stat { display: flex; align-items: center; gap: 5px; }
 .stat-label { color: var(--text-faint); }
 .stat-value { color: var(--text-muted); }

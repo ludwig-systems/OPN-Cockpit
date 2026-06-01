@@ -33,6 +33,8 @@
     heartbeatInFlight: false,
     selectedDeviceIds: new Set(),  // globale Multi-Auswahl fuer Plan/Apply
     outstandingByDevice: {},       // device_id -> { count, plans[] }
+    firmware: {},                  // device_id -> { version, status, update_available, summary, checked_at_iso }
+    firmwareLoading: false,
     serverMode: 'vault',           // 'vault' (single) | 'user-db' (multi)
     bootstrapStatus: 'single-user', // single-user | needs-admin | needs-vault-unlock | ready
   };
@@ -664,6 +666,38 @@
     renderSidebar();
     renderGrid();
     loadOutstanding().catch(() => {});
+    // Firmware-Status laeuft nicht im 30s-Takt mit dem Heartbeat (das ist
+    // ein authentifizierter Call und erscheint im OPNsense-Audit). Einmal
+    // nach Inventar-Laden + manuelles Refresh in der Karten-Action.
+    loadFirmwareStatus().catch(() => {});
+  }
+
+  async function loadFirmwareStatus(deviceIds = null) {
+    if (state.firmwareLoading) return;
+    state.firmwareLoading = true;
+    try {
+      const body = deviceIds ? { device_ids: deviceIds } : { device_ids: [] };
+      const response = await apiPost('/api/inventory/firmware-status', body);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) return;
+      const data = await response.json();
+      for (const r of data.results || []) {
+        state.firmware[r.device_id] = {
+          version: r.version,
+          status: r.status,
+          update_available: r.update_available,
+          summary: r.summary,
+          reachable: r.reachable,
+          authenticated: r.authenticated,
+          checked_at_iso: r.checked_at_iso,
+        };
+      }
+      renderGrid();
+    } catch (_e) {
+      // bewusst still — Firmware-Status ist nice-to-have, kein UI-Block
+    } finally {
+      state.firmwareLoading = false;
+    }
   }
 
   // -------------------- Retry-Status (Topbar-Indikator) --------------------
@@ -931,6 +965,30 @@
       <span class="stat"><span class="stat-value">${formatHeartbeatLabel(hb, reachability)}</span></span>
     `;
     article.appendChild(stats);
+
+    // Firmware-Zeile (nur wenn Daten da sind — sonst leiser Platzhalter
+    // damit das Karten-Layout nicht springt wenn die Daten nachgeladen
+    // werden).
+    const fw = state.firmware[device.id];
+    if (fw && fw.version && fw.version !== 'unknown') {
+      const fwRow = document.createElement('div');
+      fwRow.className = 'card-firmware';
+      const label = document.createElement('span');
+      label.className = 'card-firmware-label';
+      label.textContent = 'OPNsense';
+      const value = document.createElement('span');
+      value.className = 'card-firmware-version';
+      value.textContent = fw.version;
+      fwRow.appendChild(label);
+      fwRow.appendChild(value);
+      if (fw.update_available) {
+        const badge = document.createElement('span');
+        badge.className = 'card-firmware-update';
+        badge.textContent = 'Update verfuegbar';
+        fwRow.appendChild(badge);
+      }
+      article.appendChild(fwRow);
+    }
 
     article.addEventListener('click', () => openDeviceModal(device.id));
     return article;
@@ -1376,6 +1434,64 @@
       btn.disabled = false;
       if (labelSpan) labelSpan.textContent = originalLabel;
     }
+  }
+
+  async function doBackupDownload() {
+    if (!currentDeviceId) return;
+    const btn = $('#device-backup-btn');
+    const result = $('#device-test-result');
+    const labelSpan = btn.querySelector('span');
+    const originalLabel = labelSpan ? labelSpan.textContent : btn.textContent;
+    btn.disabled = true;
+    if (labelSpan) labelSpan.textContent = 'Lade Backup…';
+    result.textContent = '';
+    try {
+      // Bearer-Token muss mit — apiGet wraps das fuer JSON; hier brauchen wir
+      // den Blob fuer den File-Download.
+      const url = `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/backup`;
+      const t = getToken();
+      const headers = t ? { Authorization: `Bearer ${t}` } : {};
+      const response = await fetch(url, { method: 'GET', headers });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        let detail = `Fehler ${response.status}`;
+        try {
+          const body = await response.json();
+          if (body.detail) detail = body.detail;
+        } catch (_e) { /* nicht-json ist ok */ }
+        result.textContent = detail;
+        showToast(detail, true);
+        return;
+      }
+      // Datei-Name aus Content-Disposition lesen, sonst fallback.
+      let filename = 'opnsense-config.xml';
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="?([^";]+)"?/i);
+      if (match) filename = match[1];
+      const blob = await response.blob();
+      const dlUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(dlUrl);
+      result.textContent = `${filename} (${formatBytes(blob.size)}) heruntergeladen.`;
+      showToast(`Backup geladen: ${filename}`);
+    } catch (err) {
+      result.textContent = err.message;
+      showToast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      if (labelSpan) labelSpan.textContent = originalLabel;
+    }
+  }
+
+  function formatBytes(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(2)} MB`;
   }
 
   function doDuplicate() {
@@ -3603,6 +3719,7 @@
     });
     $('#device-edit-btn').addEventListener('click', doEditFromDetail);
     $('#device-duplicate-btn').addEventListener('click', doDuplicate);
+    $('#device-backup-btn').addEventListener('click', doBackupDownload);
     $('#device-url-copy').addEventListener('click', doCopyUrl);
     $('#device-modal').addEventListener('click', (e) => {
       if (e.target.id === 'device-modal') closeDeviceModal();

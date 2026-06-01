@@ -113,24 +113,56 @@ class ServerState:
     def _mint_bootstrap_token_if_needed(self) -> None:
         """Generiert einen Bootstrap-Token wenn Bootstrap noetig ist.
 
-        Token wird beim Start UND nach jedem Server-Restart in einem
-        nicht-``ready`` Status auf stderr ausgegeben (typisch
-        ``docker compose logs`` / ``journalctl -u opn-cockpit``).
+        Token wird an drei Stellen veroeffentlicht:
+
+        * **stderr** (typisch ``docker compose logs`` / ``journalctl``)
+        * **Token-Datei** ``<data_dir>/BOOTSTRAP-TOKEN.txt`` — zuverlaessig
+          lesbar fuer Installer-Skripte (Windows-NSSM-Service hat keine
+          Konsole, der User wuerde stderr.log nie von selbst finden).
+        * Bei Service-Mode-Install zeigt ``install-service.ps1`` den Token
+          nach dem Start in einer MessageBox an.
         """
         if self.bootstrap_status == "ready":
             return
         token = secrets.token_urlsafe(24)
         self._bootstrap_token = token
-        sys.stderr.write(
+        msg = (
             "\n"
             + "=" * 60 + "\n"
             + "  OPN-Cockpit BOOTSTRAP-TOKEN\n"
             + "  Status: " + self.bootstrap_status + "\n"
             + "  Token : " + token + "\n"
             + "  Diesen Token im Setup-Wizard eingeben.\n"
-            + "=" * 60 + "\n",
+            + "=" * 60 + "\n"
         )
+        sys.stderr.write(msg)
         sys.stderr.flush()
+        self._write_token_file(token)
+
+    def _write_token_file(self, token: str) -> None:
+        """Schreibt den Bootstrap-Token in ``<data_dir>/BOOTSTRAP-TOKEN.txt``.
+
+        Format ist bewusst grep-bar — install-service.ps1 sucht die
+        ``Token:``-Zeile. Wenn das Schreiben scheitert (z. B. Permissions
+        auf der LocalService-Daten-Dir vergessen), schlucken wir den
+        Fehler stumm — stderr-Pfad bleibt als Fallback.
+        """
+        from opn_cockpit.config import get_app_data_dir
+        with contextlib.suppress(OSError):
+            data_dir = get_app_data_dir()
+            data_dir.mkdir(parents=True, exist_ok=True)
+            token_file = data_dir / "BOOTSTRAP-TOKEN.txt"
+            content = (
+                "OPN-Cockpit Bootstrap-Token\n"
+                "============================\n"
+                "Status: " + self.bootstrap_status + "\n"
+                "Token: " + token + "\n"
+                "\n"
+                "Im Setup-Wizard unter http://localhost:9876 eingeben.\n"
+                "Nach erfolgreicher Admin-Anlage wird diese Datei automatisch\n"
+                "geloescht.\n"
+            )
+            token_file.write_text(content, encoding="utf-8")
 
     # ----- Mode-Abfragen -----
 
@@ -166,8 +198,18 @@ class ServerState:
         return secrets.compare_digest(self._bootstrap_token, supplied)
 
     def invalidate_bootstrap_token(self) -> None:
-        """Verbraucht den Bootstrap-Token (nach erfolgreichem Bootstrap-Schritt)."""
+        """Verbraucht den Bootstrap-Token (nach erfolgreichem Bootstrap-Schritt).
+
+        Loescht auch die Token-Datei aus ``<data_dir>/BOOTSTRAP-TOKEN.txt``,
+        damit dort kein veralteter Token herumliegt — sonst koennte ein
+        spaeterer Nutzer den File-Inhalt missverstehen.
+        """
         self._bootstrap_token = None
+        with contextlib.suppress(OSError, ImportError):
+            from opn_cockpit.config import get_app_data_dir
+            token_file = get_app_data_dir() / "BOOTSTRAP-TOKEN.txt"
+            if token_file.exists():
+                token_file.unlink()
 
     @contextlib.contextmanager
     def vault_mutation_lock(self) -> Iterator[None]:

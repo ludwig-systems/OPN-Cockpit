@@ -294,6 +294,30 @@ class ConnectionTestResponse(BaseModel):
     summary: str
 
 
+# Firmware-Status (Feature: OPNsense-Version auf der Karte)
+
+
+class FirmwareStatusRequest(BaseModel):
+    """Optional: Subset von Geraete-IDs probieren. Leer = alle sichtbaren."""
+
+    device_ids: list[str] = Field(default_factory=list)
+
+
+class FirmwareStatusEntry(BaseModel):
+    device_id: str
+    reachable: bool
+    authenticated: bool
+    version: str
+    status: str
+    update_available: bool
+    summary: str
+    checked_at_iso: str
+
+
+class FirmwareStatusResponse(BaseModel):
+    results: list[FirmwareStatusEntry]
+
+
 # ---------------------------------------------------------------------------
 # Plan / Apply
 # ---------------------------------------------------------------------------

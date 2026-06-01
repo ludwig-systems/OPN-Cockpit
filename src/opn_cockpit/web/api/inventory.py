@@ -13,7 +13,19 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from opn_cockpit.core.errors import ValidationError
+from opn_cockpit.audit.backend import audit_actor, get_audit_backend
+from opn_cockpit.audit.log import AuditEventKind
+from opn_cockpit.core.device_info import (
+    FirmwareStatus,
+    download_backup,
+    fetch_firmware_status,
+)
+from opn_cockpit.core.errors import (
+    ApiError,
+    AuthError,
+    UnreachableError,
+    ValidationError,
+)
 from opn_cockpit.core.health import check_device, tcp_probe
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
 from opn_cockpit.core.validation import validate_host
@@ -31,6 +43,9 @@ from opn_cockpit.web.api.schemas import (
     DeviceCreateRequest,
     DeviceResponse,
     DeviceUpdateRequest,
+    FirmwareStatusEntry,
+    FirmwareStatusRequest,
+    FirmwareStatusResponse,
     HeartbeatEntry,
     HeartbeatRequest,
     HeartbeatResponse,
@@ -306,6 +321,146 @@ def test_connection(
         reachable=result.reachable,
         authenticated=result.authenticated,
         summary=result.summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/inventory/firmware-status
+# ---------------------------------------------------------------------------
+
+
+@router.post("/firmware-status", response_model=FirmwareStatusResponse)
+def firmware_status(
+    payload: FirmwareStatusRequest,
+    session: Session = Depends(require_session),
+) -> FirmwareStatusResponse:
+    """Batch-Abruf der OPNsense-Version pro Geraet.
+
+    Im Unterschied zum Heartbeat *macht* das einen authentifizierten
+    HTTP-Call (``/api/core/firmware/status``) — wird also im Audit der
+    OPNsense sichtbar. Frontend sollte das daher nicht im 30s-Takt
+    pollen, sondern einmal beim Inventar-Laden + Manual-Refresh.
+    """
+    visible_devices = filter_devices_for(session.opened.data.devices, session)
+    if payload.device_ids:
+        wanted = set(payload.device_ids)
+        targets = [d for d in visible_devices if d.id in wanted]
+    else:
+        targets = list(visible_devices)
+
+    if not targets:
+        return FirmwareStatusResponse(results=[])
+
+    timestamp = _iso_now()
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+
+    def probe(vd: VaultDevice) -> FirmwareStatusEntry:
+        target = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
+        with HttpClient(targets=[target], tuning=tuning) as client:
+            fw: FirmwareStatus = fetch_firmware_status(
+                client, target, vd.api_key, vd.api_secret,
+            )
+        return FirmwareStatusEntry(
+            device_id=vd.id,
+            reachable=fw.reachable,
+            authenticated=fw.authenticated,
+            version=fw.version,
+            status=fw.status,
+            update_available=fw.update_available,
+            summary=fw.summary,
+            checked_at_iso=timestamp,
+        )
+
+    workers = min(HEARTBEAT_MAX_WORKERS, len(targets))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(probe, targets))
+    session.touch()
+    return FirmwareStatusResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/backup
+# ---------------------------------------------------------------------------
+
+
+@router.get("/devices/{device_id}/backup")
+def download_device_backup(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> "Response":
+    """Laedt die aktuelle OPNsense-Konfiguration als XML-Download.
+
+    Streamed direkt zum Browser (Content-Disposition: attachment).
+    Audit-Eintrag BACKUP_DOWNLOADED mit Device-ID + Datei-Groesse.
+    """
+    from datetime import datetime as _dt
+
+    from fastapi.responses import Response
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+    target = HttpTarget(
+        host=vault_device.host,
+        port=vault_device.port,
+        verify=vault_device.tls_verify,
+    )
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+    try:
+        with HttpClient(targets=[target], tuning=tuning) as client:
+            content = download_backup(client, target, vault_device.api_key, vault_device.api_secret)
+    except AuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Backup abgelehnt: {exc.context.summary or 'API-Schluessel ungueltig'}.",
+        ) from exc
+    except UnreachableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Geraet nicht erreichbar: {exc.context.summary or exc.context.error_kind}.",
+        ) from exc
+    except ApiError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OPNsense-Antwort fehlerhaft: {exc.context.summary or exc.context.error_kind}.",
+        ) from exc
+
+    # Datei-Name: device-name + ISO-Datum (ohne Doppelpunkte, sonst meckert Windows).
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in vault_device.name).strip("_") or "device"
+    ts = _dt.now().strftime("%Y-%m-%d_%H%M%S")
+    filename = f"opnsense-config-{safe_name}-{ts}.xml"
+
+    get_audit_backend().append(
+        AuditEventKind.BACKUP_DOWNLOADED,
+        actor=audit_actor(session),
+        action="backup_download",
+        device_id=device_id,
+        summary=f"Konfig-Backup geladen von {vault_device.name} ({len(content)} Bytes)",
+    )
+    session.touch()
+    return Response(
+        content=content,
+        media_type="application/xml; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
     )
 
 
