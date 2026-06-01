@@ -14,19 +14,19 @@
 ;     %ProgramFiles%\OPN-Cockpit\python\
 ;   - Legt eine minimale README.md im Programm-Ordner ab (kurzer Kontext)
 ;   - Single-User-Mode: Desktop-Verknuepfung auf opn-cockpit.exe
-;     (kein start.bat — die EXE legt pip aus dem entry_point an)
+;     (kein start.bat - die EXE legt pip aus dem entry_point an)
 ;   - Service-Mode: Registriert NSSM-Dienst, auto-startet
 ;   - Bei Bedarf: aktualisiert Daten in %APPDATA% bzw. %ProgramData% NICHT
 ;     (Migrations-Framework laeuft beim ersten Boot, siehe v6-Pass 1)
 ;
 ; Aus dem Source-Tree kommen mit:
-;   bundle\python\  (vom Build-Skript erzeugt, ~100 MB — enthaelt auch
+;   bundle\python\  (vom Build-Skript erzeugt, ~100 MB - enthaelt auch
 ;                    Scripts\opn-cockpit.exe als Launcher)
 ;   README.md       (einziges Doku-Asset)
 ;   bundle\nssm.exe (nur Service-Mode, public domain)
 ;
 ; Nicht mit:
-;   docs\           (Maintainer-Material — Roadmap, Releasing, TestPlan etc.
+;   docs\           (Maintainer-Material - Roadmap, Releasing, TestPlan etc.
 ;                    liegt auf GitHub, Endnutzer kommt ueber About-Modal +
 ;                    Startmenue-Link "Online-Hilfe" dran)
 ;   CHANGELOG.md    (Versionshistorie auf GitHub, Version steht im UI)
@@ -79,7 +79,7 @@ Name: "desktopicon"; Description: "Desktop-Verknuepfung anlegen"; \
   GroupDescription: "Zusaetzliche Symbole:"; Components: single
 
 [Files]
-; Embedded-Python-Bundle — der gesamte selbsttragende Interpreter inklusive
+; Embedded-Python-Bundle - der gesamte selbsttragende Interpreter inklusive
 ; aller Dependencies (httpx, fastapi, uvicorn, cryptography, etc.) plus die
 ; installierte opn-cockpit-Distribution. Wird von installer\bundle-python.ps1
 ; vor dem ISCC-Lauf gefuellt. Enthaelt auch Scripts\opn-cockpit.exe als
@@ -87,7 +87,7 @@ Name: "desktopicon"; Description: "Desktop-Verknuepfung anlegen"; \
 Source: "bundle\python\*"; DestDir: "{app}\python"; \
   Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Einziges Doku-Asset: README — kurzer Was-ist-das-Kontext im Install-Ordner.
+; Einziges Doku-Asset: README - kurzer Was-ist-das-Kontext im Install-Ordner.
 ; Alles weitere (Roadmap, Releasing, TestPlan, Security-Audit, ...) bleibt
 ; auf GitHub, der Endnutzer kommt darueber den Start-Menue-Link "Online-Hilfe"
 ; oder das About-Modal hin.
@@ -122,7 +122,7 @@ Name: "{group}\{#MyAppName} (Web-UI oeffnen)"; Filename: "http://localhost:9876"
 
 [Run]
 ; Service-Mode: Dienst registrieren + starten.
-; Bewusst KEIN runhidden — wenn das Script (Group-Policy / Antivirus / NSSM
+; Bewusst KEIN runhidden - wenn das Script (Group-Policy / Antivirus / NSSM
 ; fehlt) scheitert, soll der User das im Konsolen-Fenster sehen statt sich
 ; spaeter zu wundern wo der Dienst ist. waituntilterminated blockiert den
 ; Installer-Fortschritt bis das Setup wirklich durch ist.
