@@ -1142,7 +1142,7 @@
     el.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
 
-  function handleSessionLost() {
+  async function handleSessionLost() {
     stopHeartbeat();
     stopSessionTicker();
     stopRetryPolling();
@@ -1150,12 +1150,39 @@
     state.devices = [];
     state.heartbeat = {};
     state.sessionInfo = null;
-    showScreen('login');
-    showLoginView('picker');
-    fetchVaultsAndPopulate().catch(() => {});
+    // Bootstrap-Status frisch ziehen: in Multi-User-Server bleibt der
+    // zentrale Vault offen wenn die Session weg ist (status='ready'),
+    // dann braucht der naechste User nur Username + Passwort, NICHT den
+    // Vault erneut entsperren. Single-User landet wie bisher beim Picker.
+    try {
+      await fetchBootstrapStatus();
+    } catch (_) {
+      // Status nicht abrufbar: defensive auf Picker fallen.
+    }
+    const s = state.bootstrapStatus;
+    if (s === 'ready' && state.serverMode === 'user-db') {
+      showScreen('login');
+      showLoginView('multi-user');
+      setTimeout(() => { const el = $('#mu-username'); if (el) el.focus(); }, 0);
+    } else if (s === 'needs-admin' || s === 'needs-vault-unlock') {
+      showScreen('setup');
+      showLoginView('setup-vault');
+      setTimeout(() => { const el = $('#su-admin-pw'); if (el) el.focus(); }, 0);
+    } else {
+      showScreen('login');
+      showLoginView('picker');
+      fetchVaultsAndPopulate().catch(() => {});
+    }
   }
 
   async function doLock() {
+    // Confirm-Gate: schuetzt gegen versehentliche Klicks aus dem
+    // Topbar-Icon (z.B. wenn Browser-Extensions wie LastPass ein
+    // Save-Password-Popup an derselben Stelle einblenden).
+    const msg = state.serverMode === 'user-db'
+      ? 'Session beenden? Du musst dich danach mit Username + Passwort neu einloggen.'
+      : 'Vault sperren? Du musst dich danach mit Master-Passwort neu entsperren.';
+    if (!confirm(msg)) return;
     try { await apiPost('/api/auth/lock'); } catch (_) {}
     handleSessionLost();
   }

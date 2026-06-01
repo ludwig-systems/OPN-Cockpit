@@ -103,17 +103,23 @@ html, body {
 
 /* Password-Manager-Browser-Extensions (LastPass, Bitwarden, 1Password,
  * Dashlane) injizieren eigene Root-Container ins DOM. LastPass nutzt
- * z.B. <div data-lastpass-root> mit position:absolute und 0x0 Pixel
- * Groesse - sein Subtree (Auto-Fill-Indikator, Tooltips) kann unter
- * Chromium/Linux aber doch die Klicks auf darunterliegende Topbar-Icons
- * abfangen (auf Windows tritt das nicht auf). Den ganzen Subtree vom
- * Pointer-Handling entkoppeln; PW-Manager-eigene UI bleibt sichtbar
- * (visuell), nur die unsichtbare Klick-Falle ist weg. */
-body > div[data-lastpass-root],
-body > div[data-lastpass-icon-root],
-body > div[bit-watcher],
-body > div[data-onepassword-overlay-root],
-body > div[data-dashlane-rid] {
+ * z.B. <div data-lastpass-root> mit position:absolute und Groesse 0x0
+ * Pixel fuer den Auto-Fill-Indikator-Subtree - das hat den Topbar-
+ * Click-Bug ausgeloest (Chromium/Linux betroffen, Windows nicht).
+ *
+ * Wir machen pointer-events:none NUR auf die wirklich 0x0-grossen
+ * Roots. Sobald LastPass ein echtes Modal mit Groesse einblendet,
+ * greift die Regel NICHT mehr - das Modal bleibt voll interaktiv,
+ * und sein eigenes Click-Handling fuer „X / Save / Never" funktioniert.
+ *
+ * Defense-in-depth: doLock() hat ausserdem ein confirm() davor, falls
+ * trotzdem ein Klick durch ein Modal hindurch auf den Vault-Sperren-
+ * Button trifft - dann fragt der Browser nach. */
+body > div[data-lastpass-root][style*="height: 0px"][style*="width: 0px"],
+body > div[data-lastpass-icon-root][style*="height: 0px"][style*="width: 0px"],
+body > div[bit-watcher][style*="height: 0px"],
+body > div[data-onepassword-overlay-root][style*="height: 0px"],
+body > div[data-dashlane-rid][style*="height: 0px"] {
   pointer-events: none !important;
 }
 
