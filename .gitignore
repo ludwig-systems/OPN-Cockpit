@@ -51,6 +51,8 @@ local-runtime/
 audit.log
 audit.jsonl
 settings.local.json
+# Persoenliche Notizen / Cheat-Sheets (Pattern: alles .local.md raus)
+*.local.md
 
 # Docs: standardmaessig privat (Arbeitsmaterial, Roadmap, Audit,
 # Design-Guide, Test-Plaene, Session-Notes, ...). Nur die zwei
