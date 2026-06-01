@@ -1,7 +1,7 @@
 [project]
 name = "opn-cockpit"
-version = "0.6.0"
-description = "Lokales Windows-Tool zur Multi-Site-Konfiguration von OPNsense-Firewalls per REST-API"
+version = "0.6.3.dev0"
+description = "Multi-Site OPNsense-Management — Windows-Single-User, Windows-Multi-User-Server, Linux/Proxmox-Server. REST-API-basiert."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }

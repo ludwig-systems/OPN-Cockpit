@@ -33,7 +33,7 @@
 ;   .venv\, .git\, tests\, src\, start.bat, __pycache__\, .ruff_cache\
 
 #define MyAppName       "OPN-Cockpit"
-#define MyAppVersion    "0.6.0"
+#define MyAppVersion    "0.6.3.dev0"
 #define MyAppPublisher  "Ludwig Systems"
 #define MyAppURL        "https://github.com/ludwig-systems/opn-cockpit"
 ; opn-cockpit.exe ist eine Kopie der Embedded-Python python.exe in derselben
