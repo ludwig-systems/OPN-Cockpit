@@ -115,34 +115,78 @@ def _raise_if_not_saved(body: Any, path: str, ctx: RequestContext) -> None:
             detail = "; ".join(
                 f"{k}: {v}" for k, v in validations.items() if v
             )
+        msg = (
+            f"OPNsense lehnte den Schreibvorgang ab "
+            f"(result='{result}'{(': ' + detail) if detail else ''})."
+        )
+        # summary wird vom Executor in Result.short_message uebernommen und
+        # so im Audit + in der Result-Matrix sichtbar — ohne summary blendet
+        # der Executor seinen Default "Schreibvorgang fehlgeschlagen." ein.
         raise ApiError(
-            (
-                f"OPNsense lehnte den Schreibvorgang ab "
-                f"(result='{result}'{(': ' + detail) if detail else ''})."
-            ),
+            msg,
             context=make_context(
                 host=ctx.target.host,
                 port=ctx.target.port,
                 method="POST",
                 path=path,
                 error_kind="opnsense_save_failed",
+                summary=f"OPNsense lehnte ab: {detail}" if detail else msg,
             ),
         )
+
+
+def _is_selected(entry: Any) -> bool:
+    """OPNsense markiert ausgewaehlte Eintraege als selected=1 (auch als
+    String '1' oder Bool True). Alles andere zaehlt als nicht ausgewaehlt."""
+    if not isinstance(entry, dict):
+        return False
+    raw = entry.get("selected")
+    return raw in {1, "1", True}
+
+
+def _selected_key(value: Any, default: str) -> str:
+    """OPNsense ``getItem`` liefert Single-Select-Felder (Typ, etc.) als Map
+    ``{key: {"value": ..., "selected": 0|1}}``. Liefert den Key mit
+    ``selected=1``. Faelle:
+
+    * String -> unveraendert (z. B. searchItem-Antworten sind flach)
+    * Dict   -> Key des selected-Eintrags
+    * sonst  -> Default
+
+    Ohne diese Hilfe haben wir ``str({...})`` in den AliasSpec geschrieben,
+    der setItem-Call damit den Typ ``\"{host: {value: 'Host(s)'...\"`` gesendet
+    und OPNsense lehnte das stille ab (siehe TEST-FINDINGS F18).
+    """
+    if isinstance(value, str) and value.strip():
+        return value
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if _is_selected(v):
+                return str(k)
+    return default
 
 
 def _content_from_api(value: Any) -> tuple[str, ...]:
     """Normalisiert das Content-Feld der OPNsense-API.
 
     Die API liefert je nach Endpoint einen String (Newline-separated) oder
-    ein Dict (für Multi-Wert-Felder mit Beschriftungen). Wir bauen daraus
-    immer ein Tuple aus eindeutigen Strings.
+    ein Dict (fuer Multi-Wert-Felder mit Beschriftungen + selected-Flag).
+    Bei Dict-Form respektieren wir das selected-Flag wenn es vorhanden ist,
+    sonst nehmen wir alle Keys.
     """
     if value is None:
         return ()
     if isinstance(value, str):
         return tuple(line.strip() for line in value.splitlines() if line.strip())
     if isinstance(value, dict):
-        # OPNsense kann eine Map zurückgeben: { "value1": {...}, "value2": {...} }
+        # Wenn mindestens ein Eintrag selected-Markierung traegt, nur die
+        # selected uebernehmen — sonst (z. B. flache Liste ohne selected)
+        # alle Keys nehmen.
+        has_selected_flag = any(
+            isinstance(v, dict) and "selected" in v for v in value.values()
+        )
+        if has_selected_flag:
+            return tuple(str(k) for k, v in value.items() if _is_selected(v))
         return tuple(str(k) for k in value)
     if isinstance(value, list):
         return tuple(str(item) for item in value)
@@ -150,11 +194,14 @@ def _content_from_api(value: Any) -> tuple[str, ...]:
 
 
 def _row_to_spec(row: dict[str, Any]) -> AliasSpec:
+    # type, content, description koennen je nach Endpunkt String oder
+    # Select-Dict sein — siehe _selected_key / _content_from_api.
+    descr_raw = row.get("description", row.get("descr", ""))
     return AliasSpec(
         name=str(row.get("name", "")),
-        type=str(row.get("type", "host")),
+        type=_selected_key(row.get("type"), "host"),
         content=_content_from_api(row.get("content")),
-        descr=str(row.get("description", row.get("descr", ""))),
+        descr=descr_raw if isinstance(descr_raw, str) else "",
     )
 
 

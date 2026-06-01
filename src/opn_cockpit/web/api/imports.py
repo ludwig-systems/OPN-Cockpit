@@ -56,6 +56,77 @@ router = APIRouter(prefix="/api/imports", tags=["imports"])
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MiB
 
+# ---------------------------------------------------------------------------
+# Beispieldateien (kein Login noetig — reine Vorlagen, kein Vault-Zugriff)
+# ---------------------------------------------------------------------------
+
+_EXAMPLE_CSV = (
+    "# OPN-Cockpit Geraete-Import — CSV-Vorlage\n"
+    "# Pflichtfelder: name, host, api_key, api_secret\n"
+    "# Optional: port (Default 443), tls_verify (Default true),\n"
+    "# tags (semikolon-getrennt — Komma kollidiert mit CSV), descr.\n"
+    "# Kommentar-Zeilen beginnen mit '#'. Leere Zeilen werden ignoriert.\n"
+    "name,host,port,tls_verify,tags,descr,api_key,api_secret\n"
+    "HQ Berlin,opn-berlin.lab,443,true,branches;germany,Hauptsitz,KEY_BER,SECRET_BER\n"
+    "Branch Muenchen,opn-muenchen.lab,443,false,branches;germany,Niederlassung,KEY_MUC,SECRET_MUC\n"
+    "Lab,opn-lab.lab,8443,false,lab;test,Test-VM,KEY_LAB,SECRET_LAB\n"
+)
+
+_EXAMPLE_JSON = (
+    "{\n"
+    '  "_comment": "OPN-Cockpit Geraete-Import — JSON-Vorlage. Pflichtfelder: name, host, api_key, api_secret.",\n'
+    '  "devices": [\n'
+    "    {\n"
+    '      "name": "HQ Berlin",\n'
+    '      "host": "opn-berlin.lab",\n'
+    '      "port": 443,\n'
+    '      "tls_verify": true,\n'
+    '      "tags": ["branches", "germany"],\n'
+    '      "descr": "Hauptsitz",\n'
+    '      "api_key": "KEY_BER",\n'
+    '      "api_secret": "SECRET_BER"\n'
+    "    },\n"
+    "    {\n"
+    '      "name": "Branch Muenchen",\n'
+    '      "host": "opn-muenchen.lab",\n'
+    '      "port": 443,\n'
+    '      "tls_verify": false,\n'
+    '      "tags": ["branches", "germany"],\n'
+    '      "descr": "Niederlassung",\n'
+    '      "api_key": "KEY_MUC",\n'
+    '      "api_secret": "SECRET_MUC"\n'
+    "    }\n"
+    "  ]\n"
+    "}\n"
+)
+
+
+@router.get("/examples/devices.csv", include_in_schema=False)
+def example_devices_csv() -> "Response":
+    """Liefert die CSV-Vorlage zum Download. Anonyme Endpoint, weil kein
+    Tresor-Zugriff noetig."""
+    from fastapi.responses import Response
+    return Response(
+        content=_EXAMPLE_CSV,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="devices-example.csv"',
+        },
+    )
+
+
+@router.get("/examples/devices.json", include_in_schema=False)
+def example_devices_json() -> "Response":
+    """Liefert die JSON-Vorlage zum Download."""
+    from fastapi.responses import Response
+    return Response(
+        content=_EXAMPLE_JSON,
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="devices-example.json"',
+        },
+    )
+
 
 @router.post(
     "/devices",

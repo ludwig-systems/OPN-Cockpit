@@ -137,6 +137,27 @@ class CreateVaultResponse(BaseModel):
     seconds_until_expiry: int
 
 
+# F5b: Tresor-Settings (Inaktivitaets-Timeout etc.)
+
+
+class VaultSettingsResponse(BaseModel):
+    inactivity_minutes: int
+    max_workers: int
+
+
+class VaultSettingsUpdateRequest(BaseModel):
+    inactivity_minutes: int = Field(..., ge=1, le=240)
+
+
+# F5a: Master-Passwort des aktiven Tresors aendern
+
+
+class ChangeVaultPasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=12)
+    new_password_repeat: str = Field(..., min_length=1)
+
+
 # ---------------------------------------------------------------------------
 # Inventar
 # ---------------------------------------------------------------------------

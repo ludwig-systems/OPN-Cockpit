@@ -33,12 +33,15 @@ from opn_cockpit.vault.model import VaultData
 from opn_cockpit.vault.store import create_vault, open_vault
 from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
+    ChangeVaultPasswordRequest,
     CreateVaultRequest,
     CreateVaultResponse,
     PathSuggestion,
     TemplateExportRequest,
     VaultEntry,
     VaultListResponse,
+    VaultSettingsResponse,
+    VaultSettingsUpdateRequest,
     VaultSwitchRequest,
 )
 from opn_cockpit.web.auth.dependencies import (
@@ -380,3 +383,127 @@ def switch_vault(
         "created": "true" if created else "false",
         "revoked_sessions": str(revoked),
     }
+
+
+# ---------------------------------------------------------------------------
+# Settings (F5b) + Change-Password (F5a) fuer den aktiven Tresor
+# ---------------------------------------------------------------------------
+
+
+@router.get("/settings", response_model=VaultSettingsResponse)
+def get_vault_settings(
+    session: Session = Depends(require_session),
+) -> VaultSettingsResponse:
+    """Liefert die Tresor-eigenen Settings (Inaktivitaets-Timeout etc.) fuer
+    das Settings-Modal."""
+    s = session.opened.data.settings
+    return VaultSettingsResponse(
+        inactivity_minutes=int(s.inactivity_minutes),
+        max_workers=int(s.max_workers),
+    )
+
+
+@router.post("/settings", response_model=VaultSettingsResponse)
+def update_vault_settings(
+    payload: VaultSettingsUpdateRequest,
+    session: Session = Depends(require_session),
+) -> VaultSettingsResponse:
+    """Aktualisiert die Tresor-Settings (aktuell nur Inaktivitaets-Timeout)
+    und persistiert. Wirkt sofort fuer die laufende Session."""
+    from opn_cockpit.vault.model import VaultSettings as _VS
+    minutes = payload.inactivity_minutes
+    if minutes < 1 or minutes > 240:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inaktivitaets-Timeout muss zwischen 1 und 240 Minuten liegen.",
+        )
+    old = session.opened.data.settings
+    new_settings = _VS(
+        inactivity_minutes=minutes,
+        max_workers=old.max_workers,
+        connect_timeout_s=old.connect_timeout_s,
+        read_timeout_s=old.read_timeout_s,
+        reconfigure_timeout_s=old.reconfigure_timeout_s,
+        retry_count=old.retry_count,
+    )
+    session.opened.data.settings = new_settings
+    # Persistieren — beim naechsten Server-Start oder Lock+Unlock greift
+    # der neue Wert ohnehin, aber direkt schreiben damit auch Multi-Browser
+    # konsistent sind.
+    from opn_cockpit.web.vault_writes import persist_session_vault
+    persist_session_vault(session)
+    get_audit_backend().append(
+        AuditEventKind.VAULT_OPENED,  # kein eigener Kind, generischer Eintrag
+        actor=audit_actor(session),
+        vault_path=str(session.vault_path) if session.vault_path else None,
+        summary=f"Tresor-Settings aktualisiert: inactivity_minutes={minutes}",
+    )
+    return VaultSettingsResponse(
+        inactivity_minutes=int(new_settings.inactivity_minutes),
+        max_workers=int(new_settings.max_workers),
+    )
+
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+def change_vault_password(
+    payload: ChangeVaultPasswordRequest,
+    session: Session = Depends(require_session),
+) -> dict[str, str]:
+    """Aendert das Master-Passwort des aktiven Tresors.
+
+    Verlangt das aktuelle Passwort als Bestaetigung (Schutz vor Hijack
+    durch offene Browser-Session). Bei Erfolg wird die Session unter dem
+    neuen Passwort weitergefuehrt; Tabs muessen nicht neu einloggen.
+    """
+    from opn_cockpit.vault.store import change_password as _change_password
+    if session.vault_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Aktiver Tresor-Pfad fehlt — bitte Tresor erneut entsperren.",
+        )
+    if payload.new_password != payload.new_password_repeat:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Die beiden Eingaben fuer das neue Passwort stimmen nicht ueberein.",
+        )
+    if payload.current_password == payload.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Neues Passwort darf nicht mit dem aktuellen identisch sein.",
+        )
+    try:
+        new_opened = _change_password(
+            session.vault_path,
+            payload.current_password,
+            payload.new_password,
+        )
+    except InvalidPasswordError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Das aktuelle Master-Passwort ist falsch.",
+        ) from exc
+    except WeakPasswordError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except VaultError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    # Session unter dem neuen Passwort weiterfuehren — sonst schlagen
+    # spaetere Schreibvorgaenge fehl (master_password-Cache war alt).
+    session.unlock(
+        new_opened,
+        session.vault_path,
+        password=payload.new_password,
+        user=session.user,
+    )
+    get_audit_backend().append(
+        AuditEventKind.VAULT_OPENED,
+        actor=audit_actor(session),
+        vault_path=str(session.vault_path),
+        summary="Tresor-Master-Passwort geaendert.",
+    )
+    return {"status": "ok"}

@@ -252,6 +252,12 @@
               <polyline points="5 6.5 7.5 9 10 6.5"/>
             </svg>
           </button>
+          <button class="icon-btn" id="vault-settings-btn" title="Tresor-Einstellungen">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="7.5" cy="7.5" r="2"/>
+              <path d="M7.5 1v1.8 M7.5 12.2V14 M1 7.5h1.8 M12.2 7.5H14 M2.9 2.9l1.3 1.3 M10.8 10.8l1.3 1.3 M2.9 12.1l1.3-1.3 M10.8 4.2l1.3-1.3"/>
+            </svg>
+          </button>
           <button class="icon-btn" id="audit-open-btn" title="Audit-Log öffnen">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
               <line x1="3.5" y1="4.5" x2="12.5" y2="4.5"/>
@@ -605,6 +611,12 @@
                 CSV-Spalten: <code>name, host, port, tls_verify, tags, descr, api_key, api_secret</code>.
                 Tags semikolon-getrennt. Header-Zeile zwingend.
               </div>
+              <div class="form-hint">
+                Vorlage zum Ausfuellen:
+                <a class="btn-link" id="bk-example-csv" href="/api/imports/examples/devices.csv" download>Beispiel-CSV</a>
+                <span style="opacity:0.4; margin: 0 4px">·</span>
+                <a class="btn-link" id="bk-example-json" href="/api/imports/examples/devices.json" download>Beispiel-JSON</a>
+              </div>
             </div>
           </div>
 
@@ -705,6 +717,58 @@
 
         <div class="modal-footer">
           <button class="btn-link" id="users-modal-cancel">Schliessen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Tresor-Settings (F5a + F5b) ================ -->
+    <div class="modal-backdrop" id="vault-settings-modal" hidden>
+      <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="vault-settings-title">
+        <div class="modal-header">
+          <h2 id="vault-settings-title">Tresor-Einstellungen</h2>
+          <button class="icon-btn modal-close" id="vault-settings-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Sektion: Auto-Sperre -->
+          <h3 class="modal-section-title">Auto-Sperre</h3>
+          <label class="form-label" for="vs-timeout">Inaktivitaets-Timeout (Minuten)</label>
+          <div class="form-input-with-button">
+            <input id="vs-timeout" class="form-input" type="number" min="1" max="240" step="1" />
+            <button class="btn-secondary" id="vs-timeout-save" type="button">Speichern</button>
+          </div>
+          <div class="form-hint">
+            Nach dieser Dauer ohne Interaktion verlangt das Cockpit das Master-Passwort erneut.
+            1–240 Minuten. Aenderung wird im Tresor selbst gespeichert.
+          </div>
+          <div class="form-error" id="vs-timeout-error" hidden></div>
+          <div class="form-success" id="vs-timeout-ok" hidden>Gespeichert.</div>
+
+          <div class="form-divider"></div>
+
+          <!-- Sektion: Master-Passwort -->
+          <h3 class="modal-section-title">Master-Passwort aendern</h3>
+          <label class="form-label" for="vs-pw-current">Aktuelles Passwort</label>
+          <input id="vs-pw-current" class="form-input" type="password" autocomplete="current-password" />
+
+          <label class="form-label" for="vs-pw-new1">Neues Passwort (min. 12 Zeichen)</label>
+          <input id="vs-pw-new1" class="form-input" type="password" autocomplete="new-password" />
+
+          <label class="form-label" for="vs-pw-new2">Wiederholen</label>
+          <input id="vs-pw-new2" class="form-input" type="password" autocomplete="new-password" />
+
+          <div class="form-error" id="vs-pw-error" hidden></div>
+          <div class="form-success" id="vs-pw-ok" hidden>Passwort geaendert.</div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="vault-settings-cancel">Schliessen</button>
+          <button class="btn-primary btn-primary-inline" id="vs-pw-submit">Passwort aendern</button>
         </div>
       </div>
     </div>
@@ -1060,6 +1124,7 @@
                   <input id="pl-route-gateway" class="form-input" type="text" placeholder="WAN_GW" list="pl-gateway-suggestions" autocomplete="off" />
                   <datalist id="pl-gateway-suggestions"></datalist>
                   <button class="btn-link suggest-btn" id="pl-load-gateways" type="button">Vorschläge laden</button>
+                  <div class="suggestion-chips" id="pl-gateway-chips" hidden></div>
                 </div>
               </div>
               <div class="form-row">
@@ -1086,6 +1151,7 @@
                   <input id="pl-alias-name" class="form-input" type="text" placeholder="branch_ips" list="pl-alias-suggestions" autocomplete="off" />
                   <datalist id="pl-alias-suggestions"></datalist>
                   <button class="btn-link suggest-btn" id="pl-load-aliases" type="button">Vorschläge laden</button>
+                  <div class="suggestion-chips" id="pl-alias-chips" hidden></div>
                 </div>
                 <div class="form-col" style="flex:0 0 140px">
                   <label class="form-label" for="pl-alias-type">Typ</label>

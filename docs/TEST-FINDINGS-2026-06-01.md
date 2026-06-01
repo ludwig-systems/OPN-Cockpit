@@ -8,14 +8,19 @@ durch.
 
 | Symbol | Bedeutung |
 |---|---|
-| 🔴 | Bug — falsches Verhalten / Crash |
-| 🟡 | UX-Glitch — funktioniert, sieht/fühlt sich aber unsauber an |
-| 🔵 | Feature-Lücke / nice-to-have |
-| 🟢 | gefixt im Lauf dieser Session |
+| 🔴 | Bug — falsches Verhalten / Crash, offen |
+| 🟡 | UX-Glitch — funktioniert aber unsauber, offen |
+| 🔵 | Feature-Lücke / nice-to-have, offen |
+| ✅ | erledigt — siehe **Resolution** im Item |
+
+**Konvention**: Jedes Item bekommt am Ende einen `**Resolution**:`-Block
+mit Datum, Commit-SHA und 1–2 Sätzen WIE es gefixt wurde, sobald es
+erledigt ist. Symbol wechselt auf ✅. So sieht man auf einen Blick was
+noch offen ist.
 
 ## Funde
 
-### F1 🟢 Vault-Anlage scheitert wenn Ziel-Verzeichnis fehlt
+### F1 ✅ Vault-Anlage scheitert wenn Ziel-Verzeichnis fehlt
 
 **Beobachtet**: Speicherort `C:\Users\Dell\Desktop\OPN-Cockpit\` getippt,
 Ordner existierte nicht → rote Fehlerbox:
@@ -25,59 +30,86 @@ Ordner existierte nicht → rote Fehlerbox:
 **Ursache**: `vault/store.py::_atomic_write` öffnet die `.tmp`-Datei
 direkt, ohne den Eltern-Ordner zu erzeugen.
 
-**Fix**: Parent-Ordner per `mkdir(parents=True, exist_ok=True)` anlegen,
-bevor das `.tmp` geschrieben wird. Sicher, weil der Pfad bereits den
-`web/vault_path.py`-Validator passiert hat (also unterhalb einer
-erlaubten Basis liegt). Fix in dieser Session.
+**Resolution** (2026-06-01, `f905ac4`): `_atomic_write` legt vor dem
+`.tmp`-Schreiben `path.parent.mkdir(parents=True, exist_ok=True)` an —
+sicher, weil der Pfad durch `web/vault_path.py` schon auf erlaubte
+Basen (Home/Documents/Desktop/AppData) eingeschränkt ist. Regression-
+Test `test_creates_missing_parent_directory`.
 
-### F2 🟡 Single-User: User-Verwaltung sollte ausgeblendet sein
+### F2 ✅ Single-User: User-Verwaltung sollte ausgeblendet sein
 
 **Beobachtet**: Im UI gibt es Menüpunkte / Optionen für User-Verwaltung,
 obwohl es im Single-User-Modus keine Mehrbenutzer gibt.
 
-**Vorschlag**: User-Verwaltung nur sichtbar wenn Multi-User-Server-Modus
-(NSSM-Service) aktiv. Sonst komplett ausblenden.
+**Resolution** (2026-06-01, `9e8bc8d`): Indirekt gelöst durch F6 —
+der `[hidden] { display:none !important }`-Sammel-Fix lässt den
+`users-open-btn` und `password-self-btn` im Single-User-Mode endlich
+korrekt verschwinden. JS setzte `hidden=true` schon vorher korrekt,
+nur die CSS-Override durch `display: inline-flex` blockierte es.
 
-### F3 🟡 Menü "Eigenes Passwort ändern" missverständlich benannt
+### F3 ✅ Menü "Eigenes Passwort ändern" missverständlich benannt
 
 **Beobachtet**: Punkt "Eigenes Passwort ändern" — gemeint ist
 wahrscheinlich das Tresor-Master-Passwort, nicht ein User-Passwort
 (welches es im Single-User-Modus nicht gibt).
 
-**Vorschlag**: Single-User-Modus → Label "Tresor-Passwort ändern".
-Multi-User-Modus → bleibt "Eigenes Passwort ändern".
+**Resolution** (2026-06-01, Runde 2): Im Single-User-Modus ist der
+`pwself-btn` korrekt versteckt (war F6-Override-Bug, jetzt gefixt).
+Stattdessen jetzt **Tresor-Einstellungs-Modal** mit eigener Sektion
+"Master-Passwort ändern" (siehe F5a). Multi-User-Modus behält
+"Eigenes Passwort ändern" als User-Passwort.
 
-### F4 🔵 Bulk-Import: Beispiel-Dateien zum Download
+### F4 ✅ Bulk-Import: Beispiel-Dateien zum Download
 
 **Beobachtet**: Bulk-Import bietet CSV und JSON, aber keine
 Beispiel-Datei.
 
-**Vorschlag**: Im Bulk-Import-Dialog "Beispiel-CSV herunterladen" +
-"Beispiel-JSON herunterladen"-Buttons, die ein gültiges Mini-Schema
-mit Kommentaren ausliefern.
+**Resolution** (2026-06-01, Runde 2): Zwei neue anonyme Endpoints
+`GET /api/imports/examples/devices.csv` und `.json` liefern eine
+befüllte Vorlage mit Kommentaren als Download. Im Bulk-Modal sind
+sie als „Beispiel-CSV / Beispiel-JSON"-Links unter dem File-Input
+angeklickbar. Tests: `test_example_devices_csv_serves_template`
+und `_json_serves_template`.
 
-### F5 🔵 Auto-Sperre-Timeout in der UI nicht editierbar
+### F5a ✅ Vault-Master-Passwort ändern in der UI
+
+**Beobachtet** (Runde 2): Keine Möglichkeit das Vault-Master-Passwort
+über die Web-UI zu ändern — nur via CLI. Im Single-User-Mode also
+de facto blockiert.
+
+**Resolution** (2026-06-01, Runde 2): Neues Settings-Modal (Zahnrad-
+Icon in der Top-Bar) mit Sektion „Master-Passwort ändern". Backend:
+`POST /api/vaults/change-password` ruft `vault.store.change_password`
+auf, aktualisiert die Session unter dem neuen Passwort (kein
+Re-Login nötig). Validation: aktuelles Passwort als Bestätigung
+verlangt, neues min. 12 Zeichen, beide Eingaben müssen identisch
+sein, neu ≠ alt.
+
+### F5b ✅ Auto-Sperre-Timeout in der UI nicht editierbar
 
 **Beobachtet**: Default 10 Minuten Inaktivität → Sperre. Keine UI-Option
 gefunden, das z. B. auf 30 Minuten zu setzen.
 
-**Status**: Der Wert ist im Tresor-Settings-Objekt verankert (siehe
-Spec Schritt 4: "anpassbar via Tresor-Settings"). UI-Anbindung fehlt.
+**Resolution** (2026-06-01, Runde 2): Im selben Settings-Modal Sektion
+„Auto-Sperre" mit Number-Input (1–240 Minuten). Backend:
+`GET/POST /api/vaults/settings` liest/schreibt `inactivity_minutes`
+in die Tresor-Settings und persistiert. Greift sofort für die
+laufende Session (`Session.inactivity_timeout_s` ist computed property).
 
-**Vorschlag**: Settings-Modal mit Feld "Inaktivitäts-Timeout (Minuten)"
-plus Validation (1..240).
-
-### F6 🟡 Bild 4: Leeres Element unter Tresor-Name im Header
+### F6 ✅ Bild 4: Leeres Element unter Tresor-Name im Header
 
 **Beobachtet**: Auf der Inventar-Seite, direkt unter `OPN-Cockpit` +
 `TEST.OPNVAULT`-Badge ist ein flaches weißes Element sichtbar, das aus
 wie ein zusammengeschrumpftes Modal/Kachel aussieht.
 
-**Verdacht**: Vermutlich das Search-Input ohne Inhalt oder ein leerer
-Status-Badge-Container.
-
-**Aktion**: Anhand der index.html prüfen, was an dieser Stelle gerendert
-wird.
+**Resolution** (2026-06-01, `9e8bc8d`): Ursache war `<span class=
+"user-badge" hidden></span>` im Brand-Block. Die `.user-badge`-CSS-
+Regel definiert `display: inline-flex` — gewinnt gegen das User-Agent-
+`[hidden] { display: none }` (gleiche Spezifizität, Autor-CSS sticht
+User-Agent). Mit `background: var(--bg-elevated)` blieb eine leere
+weiße Pille sichtbar. Fix: globale Regel `[hidden] { display: none
+!important }` direkt nach den `:root`-Tokens — wirkt auch für alle
+`.icon-btn[hidden]` (F2 nebenbei mit erschlagen).
 
 ### F7 🔵 Design-Guide festschreiben
 
@@ -101,23 +133,26 @@ UI-Arbeiten.
 
 ## Modal: Route hinzufügen
 
-### F9 🟡 Netzwerk + Gateway vertikal unsauber ausgerichtet
+### F9 ✅ Netzwerk + Gateway vertikal unsauber ausgerichtet
 
 **Beobachtet**: Die zwei Spalten "Netzwerk (CIDR)" und "Gateway-Name"
 sind nicht oben bündig — Gateway scheint nach unten ausgerichtet, weil
 darunter noch der "Vorschläge laden"-Link sitzt.
 
-**Fix**: Grid-Items mit `align-items: start` ausrichten, statt
-implizitem `stretch`/`end`.
+**Resolution** (2026-06-01, `9e8bc8d`): `.form-row { align-items:
+flex-end }` → `flex-start`. Wirkt global für alle form-rows, da das
+Pattern in allen Modals identisch ist.
 
-### F10 🟡 Inkonsistenter Abstand der "Aktion wird auf X von Y…"-Box
+### F10 ✅ Inkonsistenter Abstand der "Aktion wird auf X von Y…"-Box
 
 **Beobachtet**: Die Info-Box am Modal-Boden hat einen anderen Abstand
 zur Trennlinie als andere Sektionen.
 
-**Fix**: Spacing-Token vereinheitlichen.
+**Resolution** (2026-06-01, `9e8bc8d`): `.selection-summary` mit
+expliziter `margin-top: 12px` versehen, deckt die zu enge 4px-
+Bottom-Margin des `form-divider` davor ab.
 
-### F11 🔴 Button-State nach Validation-Fehler kaputt
+### F11 ✅ Button-State nach Validation-Fehler kaputt
 
 **Beobachtet**: Bei ungültiger CIDR (z. B. `/36`) erscheint korrekt eine
 Fehlermeldung, **aber**:
@@ -125,49 +160,56 @@ Fehlermeldung, **aber**:
 - Stattdessen erscheint "Aktivieren"
 - "Aktivieren" funktioniert natürlich nicht (kein gültiger Plan da)
 
-**Erwartetes Verhalten**: Validation-Fehler darf den Button-State nicht
-von "Vorschau" auf "Aktivieren" wechseln. Erst nach erfolgreicher
-Vorschau soll der Apply-Button aktiv werden.
+**Resolution** (2026-06-01, `9e8bc8d`): `app.js` `submitPlanInput()`
+hatte `next.textContent = 'Aktivieren'` im `finally` — feuerte auch
+im Validation-Fehler-Pfad. Jetzt: `finally` setzt nur `disabled = false`,
+und falls `planPhase === 'input'` (Fehler-Fall) den Text auf
+`Vorschau anzeigen` zurück. `showPlanPhase('preview')` setzt ihn im
+Erfolgsfall korrekt auf `Aktivieren`.
 
-### F12 🟡 Modal schließt bei Klick außerhalb → Eingaben futsch
+### F12 ✅ Modal schließt bei Klick außerhalb → Eingaben futsch
 
 **Beobachtet**: Klick neben das Modal schließt es und löscht alle
 Eingaben. Schon 2x in 5 Minuten passiert.
 
-**Fix**: Bei Modals mit Eingabe-Pflicht den Backdrop-Click deaktivieren.
-Schließen nur via X-Button, "Abbrechen"-Button oder ESC. Bei rein
-informativen Modals (z. B. About) darf Backdrop-Click weiter schließen.
+**Resolution** (2026-06-01, `9e8bc8d`): Backdrop-Click bei Eingabe-
+Modals abgeschaltet (`plan-modal` außer in `result`-Phase, `add-modal`,
+`bulk-modal`, `pwself-modal`, `vault-settings-modal`). Audit/About/
+Device bleiben backdrop-schließbar (read-only).
 
 ---
 
 ## Modal: Alias hinzufügen
 
-### F13 🟡 Alias-Name + Typ vertikal unsauber (siehe F9)
+### F13 ✅ Alias-Name + Typ vertikal unsauber (siehe F9)
 
-Selbes Problem wie bei Route.
+Mitbehoben durch F9 (`flex-start` ist global). `9e8bc8d`.
 
-### F14 🟡 Inkonsistenter Abstand "Aktion wird ausgerollt"-Box (siehe F10)
+### F14 ✅ Inkonsistenter Abstand "Aktion wird ausgerollt"-Box (siehe F10)
 
-Selbes Problem.
+Mitbehoben durch F10 (`.selection-summary margin-top`). `9e8bc8d`.
 
-### F15 🔴 Button-State nach Validation-Fehler kaputt (siehe F11)
+### F15 ✅ Button-State nach Validation-Fehler kaputt (siehe F11)
 
-Selbes Problem.
+Mitbehoben durch F11 (selber Code-Pfad für Route + Alias). `9e8bc8d`.
 
-### F16 🟡 Modal schließt bei Klick außerhalb (siehe F12)
+### F16 ✅ Modal schließt bei Klick außerhalb (siehe F12)
 
-Selbes Problem.
+Mitbehoben durch F12. `9e8bc8d`.
 
-### F17 🟡 Typ wird beim Auswählen aus Suggestions nicht übernommen
+### F17 ✅ Typ wird beim Auswählen aus Suggestions nicht übernommen
 
 **Beobachtet**: User wählt einen vorhandenen Alias-Namen aus der
 Suggestion-Liste (z. B. Network-Alias), aber das Typ-Dropdown bleibt
 auf "host" (Default) stehen → Validation-Fehler beim Vorschau-Klick.
 
-**Fix**: Beim Suggestion-Click den passenden Typ aus dem Suggestion-
-Datensatz mit übernehmen.
+**Resolution** (2026-06-01, `9e8bc8d`): `loadAliasSuggestions`
+befüllt zusätzlich eine `aliasSuggestionTypes`-Map. Neue Funktion
+`syncAliasTypeFromSuggestion` hört auf `input`/`change` von
+`#pl-alias-name` und setzt das Typ-Dropdown, wenn der eingegebene
+Name exakt einer Suggestion entspricht.
 
-### F18 🔴 Alias-Append-Bug: Apply erfolgreich, aber Eintrag fehlt
+### F18 ✅ Alias-Append-Bug: Apply erfolgreich, aber Eintrag fehlt
 
 **Beobachtet**:
 1. Alias-Namen aus Suggestion-Liste gewählt
@@ -179,52 +221,64 @@ Datensatz mit übernehmen.
 **Ergebnis**: Result-Matrix zeigt Erfolg, aber der Eintrag taucht im
 Alias auf der OPNsense nicht auf.
 
-**Reproduktion nötig**: Aktion erneut durchspielen, dabei mitlesen:
-- Audit-Log: Was steht im `apply`-Event?
-- Browser DevTools: Welcher Payload ging an `/api/aliases/apply`?
-- OPNsense direkt: ist der Inhalt wirklich nicht drin, oder wurde
-  möglicherweise ein anderer Alias mit ähnlichem Namen geändert?
-- Konsole des Cockpit-Servers: hat der Read-back stattgefunden?
+**Resolution** (2026-06-01, zwei Stufen):
 
-**Hypothesen**:
-1. Append-Logik mergt Inhalte in einen anderen Eintrag (Casing-Bug?)
-2. Reconfigure wurde nicht ausgelöst (Schreibvorgang ohne Activate)
-3. Verify hat falsche Daten als „erfolgreich" gewertet
-4. Race-Condition: Verify lief gegen die alte Version (kein Cache-Bust
-   in der OPNsense-API)
+1. **`9e8bc8d`** — Erste Hälfte: OPNsense liefert bei Validation-
+   Fehlern HTTP 200 mit `{"result":"failed","validations":{...}}`.
+   Vorher wurde das als Erfolg gewertet. Neue Helper
+   `_raise_if_not_saved` (Aliase) bzw. Inline-Block (Routen) prüft
+   `result`-Feld und wirft `ApiError` mit Validations-Details.
+   Dadurch schaltet die Matrix korrekt auf FEHLGESCHLAGEN um.
 
-Priorität hoch — das ist ein Vertrauens-Brecher (Tool sagt "fertig",
-Realität nicht).
+2. **Runde 2** — Zweite Hälfte (die eigentliche Ursache warum der
+   OPNsense-Save überhaupt failed): `_row_to_spec` parste das
+   `type`-Feld aus `getItem` als `str(dict)`, weil OPNsense Select-
+   Felder als `{key: {value:..., selected:0|1}}` zurückgibt. Im
+   Append-Pfad wurde so der Typ als Müll-String an `setItem`
+   gesendet → OPNsense lehnte ab. Neue Helper `_selected_key` und
+   erweiterte `_content_from_api` extrahieren den `selected: 1`-
+   Key korrekt. Tests:
+   `test_append_decodes_opnsense_select_type_dict`.
+
+   Außerdem: `ApiError.context.summary` wird jetzt mit dem OPNsense-
+   Validations-String befüllt, damit die Result-Matrix und das
+   Audit-Log den OPNsense-Originalsatz zeigen (vorher nur der
+   Default „Schreibvorgang fehlgeschlagen.").
 
 ---
 
-## Bearbeitungs-Reihenfolge — Stand
+## Zusätzliche Befunde aus Test-Runde 2
 
-**Erledigt in dieser Session (Sprint 1 + F18):**
-- F1 ✅ Vault-Parent-mkdir (Commit f905ac4)
-- F6 ✅ `[hidden] { display:none !important }` — leere user-badge weg
-- F9/F13 ✅ `form-row align-items: flex-start`
-- F10/F14 ✅ `selection-summary margin-top: 12px`
-- F11/F15 ✅ Button-Text-Reset im finally korrigiert
-- F12/F16 ✅ Backdrop-Click off bei plan-/add-/bulk-/pwself-Modal
-- F17 ✅ Alias-Typ wird beim Suggestion-Select autogesetzt
-- F18 ✅ `result==failed` in `_create`+`_append` und `RouteAdapter.add`
-  wird jetzt als `ApiError` gemeldet — kein „Apply OK aber Eintrag fehlt"
-  mehr. **Bitte F18 morgen explizit nachstellen**, idealerweise mit dem
-  ursprünglichen Reproduktions-Szenario.
+### F19 ✅ Datalist-Dropdown nach Auswahl unbrauchbar
 
-**Noch offen (für morgen):**
-- F2 Single-User: User-Verwaltung ausblenden (siehe Hinweis unten)
-- F3 Label "Eigenes Passwort ändern" — Hinweis: Button ist im
-  Single-User-Mode korrekt versteckt (line app.js:624 `pwBtn.hidden = !isMulti`).
-  Mit dem F6-Fix sollte er nicht mehr sichtbar sein.
-- F4 Bulk-Import: Beispiel-Downloads
-- F5 Settings-Modal: Inaktivitäts-Timeout editierbar
-- F7 Design-Guide schreiben
-- F8 Logo + Favicon
+**Beobachtet** (Runde 2): Im Alias-Modal „Vorschläge laden" → Eintrag
+ausgewählt → das Datalist-Dropdown zeigt anschließend keine anderen
+Optionen mehr, bis der Input-Wert komplett gelöscht ist.
 
-**Hinweis zu F2/F3**: Der F6-Fix (`[hidden] { display:none !important }`) 
-sollte auch User-Verwaltungs-Button + Eigenes-Passwort-Button im 
-Single-User-Mode korrekt verschwinden lassen. Falls morgen immer noch 
-sichtbar → tiefer graben (eventuell wird `applyMultiUserVisibility()` 
-nicht aufgerufen).
+**Ursache**: Browser-Standard-Verhalten von `<datalist>`: wenn `input.
+value` exakt einer Option entspricht, wird die Liste ausgeblendet
+(„nichts mehr zum Vorschlagen").
+
+**Resolution** (2026-06-01, Runde 2): Zusätzlich zur Datalist wird
+unter dem Input eine Klick-Chip-Liste gerendert (`<button class=
+"suggestion-chip">`). Klick = Wert setzen + `input`-Event
+dispatchen (triggert F17 Auto-Typ). Wirkt auch für Gateway-
+Suggestions. CSS: `.suggestion-chips`/`.suggestion-chip` Pillen
+in der Calm-Precision-Linie, aktive Auswahl olive markiert.
+
+## Bearbeitungs-Reihenfolge — Stand 2026-06-01 21:00
+
+**Erledigt** (✅ in den Items oben):
+
+- **Runde 1** (Commit `f905ac4` + `9e8bc8d`): F1, F2, F3, F6, F9/F13,
+  F10/F14, F11/F15, F12/F16, F17, F18 (Stufe 1: result-Detection).
+- **Runde 2** (Commit folgt): F4, F5a, F5b, F18 (Stufe 2: Type-Dict-
+  Parsing + Summary-Detail), F19.
+
+**Noch offen**:
+
+- F7 🔵 Design-Guide schreiben (verbindlich für künftige UI-Arbeit).
+- F8 🔵 Logo / Favicon entwerfen.
+
+Die offenen Items sind kuratorische Größere — kein Blocker für die
+Test-Runden. Erst angehen wenn die Test-Runde stabil läuft.

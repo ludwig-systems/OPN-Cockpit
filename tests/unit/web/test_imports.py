@@ -33,6 +33,32 @@ DEVICES_JSON = """[
 """
 
 
+def test_example_devices_csv_serves_template() -> None:
+    """F4: Beispiel-CSV downloadbar ohne Login (reine Vorlage)."""
+    app = create_app()
+    with TestClient(app) as client:
+        r = client.get("/api/imports/examples/devices.csv")
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    assert "attachment" in r.headers["content-disposition"]
+    body = r.text
+    assert "name,host,port,tls_verify,tags,descr,api_key,api_secret" in body
+    assert "HQ Berlin" in body
+
+
+def test_example_devices_json_serves_template() -> None:
+    """F4: Beispiel-JSON downloadbar — valides JSON, gleiche Felder wie CSV."""
+    import json as _json
+    app = create_app()
+    with TestClient(app) as client:
+        r = client.get("/api/imports/examples/devices.json")
+    assert r.status_code == 200
+    parsed = _json.loads(r.text)
+    assert "devices" in parsed
+    assert len(parsed["devices"]) >= 2
+    assert parsed["devices"][0]["name"] == "HQ Berlin"
+
+
 def _make_vault(tmp_path: Path, existing: list[VaultDevice] | None = None) -> Path:
     path = tmp_path / "test.opnvault"
     create_vault(path, PASSWORD, VaultData(devices=existing or []))

@@ -336,6 +336,65 @@ class TestAppend:
             )
         assert exc.value.context.error_kind == "alias_not_found"
 
+    def test_append_decodes_opnsense_select_type_dict(self) -> None:
+        """F18 Doppelbug: OPNsense ``getItem`` liefert ``type`` und
+        ``content`` als Select-Map. _row_to_spec muss den selected-Key
+        extrahieren — sonst senden wir an setItem ``type=\"{host: {value:...\"``
+        und der Append scheitert mit ``alias.type: Invalid``."""
+        captured: dict[str, Any] = {}
+
+        def search(_r: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"rows": [{"uuid": "u1", "name": "ips"}]})
+
+        # Realistische OPNsense-getItem-Antwort: type und content als Map
+        # mit selected-Flag.
+        def get(_r: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "alias": {
+                        "name": "ips",
+                        "type": {
+                            "host":    {"value": "Host(s)",    "selected": 0},
+                            "network": {"value": "Network(s)", "selected": 1},
+                            "port":    {"value": "Port(s)",    "selected": 0},
+                        },
+                        "content": {
+                            "10.0.0.0/24": {"value": "10.0.0.0/24", "selected": 1},
+                        },
+                        "description": "Vorhandener Network-Alias",
+                    }
+                },
+            )
+
+        def setitem(request: httpx.Request) -> httpx.Response:
+            captured["body"] = _json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"result": "saved"})
+
+        api = (
+            MockApi()
+            .on("POST", ALIAS_SEARCH, search)
+            .on("GET", ALIAS_GET, get)
+            .on("POST", ALIAS_SET.split("{")[0], setitem)
+        )
+        client, ctx = _build_client(api)
+        adapter = AliasAdapter()
+        adapter.add(
+            client, ctx,
+            AliasSpec(
+                name="ips", type="host",  # User-Eingabe — wird ignoriert, Bestand gilt
+                content=("10.99.0.0/24",), merge_mode="append",
+            ),
+        )
+        # Wichtig: setItem-Payload muss type=\"network\" enthalten (Bestand),
+        # NICHT die str-Repraesentation des Dicts.
+        alias_payload = captured["body"]["alias"]
+        assert alias_payload["type"] == "network", (
+            f"type sollte 'network' sein (selected im getItem-Dict), war: {alias_payload['type']!r}"
+        )
+        # content gemerged: bestehendes 10.0.0.0/24 plus neues 10.99.0.0/24
+        assert alias_payload["content"] == "10.0.0.0/24\n10.99.0.0/24"
+
     def test_append_raises_when_setitem_returns_failed_result(self) -> None:
         """F18: 200 OK + ``{'result':'failed', 'validations':{...}}`` darf
         nicht mehr als Erfolg gelten — der Eintrag wurde nicht uebernommen."""

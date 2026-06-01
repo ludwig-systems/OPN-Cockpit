@@ -1589,6 +1589,13 @@
     $('#pl-alias-descr').value = '';
     $('#pl-alias-merge').checked = false;
     $('#pl-confirm').checked = false;
+    // F19: Chip-Listen bei Modal-Reset leeren — sonst zeigen sie Eintraege
+    // vom vorigen Geraet auch wenn der User das Modal frisch oeffnet.
+    const aliasChips = $('#pl-alias-chips');
+    if (aliasChips) { aliasChips.innerHTML = ''; aliasChips.hidden = true; }
+    const gwChips = $('#pl-gateway-chips');
+    if (gwChips) { gwChips.innerHTML = ''; gwChips.hidden = true; }
+    aliasSuggestionTypes = new Map();
   }
 
   function showPlanFieldSet(mode) {
@@ -2052,12 +2059,20 @@
       const data = await response.json();
       const dl = $('#pl-gateway-suggestions');
       dl.innerHTML = '';
+      const chipItems = [];
       for (const g of data.gateways) {
         const opt = document.createElement('option');
         opt.value = g.name;
         opt.label = g.address ? `${g.name} — ${g.address} (${g.status})` : g.name;
         dl.appendChild(opt);
+        chipItems.push({ value: g.name, meta: g.status || '' });
       }
+      renderSuggestionChips('pl-gateway-chips', chipItems, (picked) => {
+        const inp = $('#pl-route-gateway');
+        inp.value = picked;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.focus();
+      });
       showToast(`${data.gateways.length} Gateway(s) gefunden auf ${device.name}.`);
     } catch (err) {
       showToast(err.message, true);
@@ -2070,6 +2085,42 @@
   // Map<name, type> aus der letzten discover/aliases-Antwort, damit wir bei
   // Datalist-Auswahl den Typ automatisch ins Dropdown uebernehmen koennen.
   let aliasSuggestionTypes = new Map();
+
+  function renderSuggestionChips(containerId, items, onPick) {
+    // F19: ergaenzendes UI zur datalist — klickbare Chips erlauben Re-Browse
+    // nach Auswahl (datalist filtert nach value und blendet dann alles aus).
+    const c = $(`#${containerId}`);
+    if (!c) return;
+    c.innerHTML = '';
+    if (!items.length) {
+      c.hidden = true;
+      return;
+    }
+    c.hidden = false;
+    for (const item of items) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'suggestion-chip';
+      chip.dataset.value = item.value;
+      const name = document.createElement('span');
+      name.textContent = item.value;
+      chip.appendChild(name);
+      if (item.meta) {
+        const meta = document.createElement('span');
+        meta.className = 'suggestion-chip-type';
+        meta.textContent = item.meta;
+        chip.appendChild(meta);
+      }
+      chip.addEventListener('click', () => {
+        onPick(item.value);
+        // active-Markierung
+        for (const other of c.querySelectorAll('.suggestion-chip')) {
+          other.classList.toggle('active', other.dataset.value === item.value);
+        }
+      });
+      c.appendChild(chip);
+    }
+  }
 
   async function loadAliasSuggestions() {
     const device = _pickDiscoveryDevice();
@@ -2092,13 +2143,21 @@
       const dl = $('#pl-alias-suggestions');
       dl.innerHTML = '';
       aliasSuggestionTypes = new Map();
+      const chipItems = [];
       for (const a of data.aliases) {
         const opt = document.createElement('option');
         opt.value = a.name;
         opt.label = a.type ? `${a.name} (${a.type})` : a.name;
         dl.appendChild(opt);
         if (a.type) aliasSuggestionTypes.set(a.name, String(a.type).toLowerCase());
+        chipItems.push({ value: a.name, meta: a.type || '' });
       }
+      renderSuggestionChips('pl-alias-chips', chipItems, (picked) => {
+        const inp = $('#pl-alias-name');
+        inp.value = picked;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.focus();
+      });
       showToast(`${data.aliases.length} Alias(e) gefunden auf ${device.name}.`);
     } catch (err) {
       showToast(err.message, true);
@@ -2481,6 +2540,128 @@
     const box = $('#users-add-error');
     box.textContent = msg;
     box.hidden = false;
+  }
+
+  // -------------------- Tresor-Einstellungen (F5a + F5b) --------------------
+
+  async function openVaultSettingsModal() {
+    $('#vs-timeout').value = '';
+    $('#vs-pw-current').value = '';
+    $('#vs-pw-new1').value = '';
+    $('#vs-pw-new2').value = '';
+    $('#vs-timeout-error').hidden = true;
+    $('#vs-timeout-ok').hidden = true;
+    $('#vs-pw-error').hidden = true;
+    $('#vs-pw-ok').hidden = true;
+    $('#vault-settings-modal').hidden = false;
+    setTimeout(() => $('#vs-timeout').focus(), 0);
+    // Aktuelle Settings laden — kein blockierendes Warten
+    try {
+      const r = await apiGet('/api/vaults/settings');
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (r.ok) {
+        const data = await r.json();
+        $('#vs-timeout').value = data.inactivity_minutes;
+      }
+    } catch (_e) { /* Modal kann auch mit leerem Feld bedient werden */ }
+  }
+
+  function closeVaultSettingsModal() {
+    $('#vault-settings-modal').hidden = true;
+  }
+
+  async function saveInactivityTimeout() {
+    const errBox = $('#vs-timeout-error');
+    const okBox = $('#vs-timeout-ok');
+    errBox.hidden = true;
+    okBox.hidden = true;
+    const raw = $('#vs-timeout').value.trim();
+    const minutes = parseInt(raw, 10);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 240) {
+      errBox.textContent = 'Bitte eine Zahl zwischen 1 und 240 eingeben.';
+      errBox.hidden = false;
+      return;
+    }
+    const btn = $('#vs-timeout-save');
+    btn.disabled = true;
+    btn.textContent = 'Speichere…';
+    try {
+      const response = await apiPost('/api/vaults/settings', {
+        inactivity_minutes: minutes,
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        errBox.textContent = body.detail || `Fehler ${response.status}`;
+        errBox.hidden = false;
+        return;
+      }
+      okBox.hidden = false;
+      showToast(`Auto-Sperre auf ${minutes} Minuten gesetzt.`);
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Speichern';
+    }
+  }
+
+  async function changeVaultPassword() {
+    const errBox = $('#vs-pw-error');
+    const okBox = $('#vs-pw-ok');
+    errBox.hidden = true;
+    okBox.hidden = true;
+    const current = $('#vs-pw-current').value;
+    const n1 = $('#vs-pw-new1').value;
+    const n2 = $('#vs-pw-new2').value;
+    if (!current) {
+      errBox.textContent = 'Aktuelles Passwort eingeben.';
+      errBox.hidden = false;
+      return;
+    }
+    if (n1.length < 12) {
+      errBox.textContent = 'Neues Passwort muss mindestens 12 Zeichen lang sein.';
+      errBox.hidden = false;
+      return;
+    }
+    if (n1 !== n2) {
+      errBox.textContent = 'Die beiden neuen Passwoerter stimmen nicht ueberein.';
+      errBox.hidden = false;
+      return;
+    }
+    const btn = $('#vs-pw-submit');
+    btn.disabled = true;
+    btn.textContent = 'Aendere…';
+    try {
+      const response = await apiPost('/api/vaults/change-password', {
+        current_password: current,
+        new_password: n1,
+        new_password_repeat: n2,
+      });
+      if (response.status === 401) {
+        errBox.textContent = 'Aktuelles Passwort ist falsch.';
+        errBox.hidden = false;
+        return;
+      }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        errBox.textContent = body.detail || `Fehler ${response.status}`;
+        errBox.hidden = false;
+        return;
+      }
+      okBox.hidden = false;
+      $('#vs-pw-current').value = '';
+      $('#vs-pw-new1').value = '';
+      $('#vs-pw-new2').value = '';
+      showToast('Tresor-Master-Passwort geaendert.');
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Passwort aendern';
+    }
   }
 
   // -------------------- Vault-Switch (admin-only, Multi-Mode) --------------------
@@ -3318,6 +3499,17 @@
       $('#vault-switch-modal').addEventListener('click', (e) => {
         if (e.target.id === 'vault-switch-modal') closeVaultSwitchModal();
       });
+    }
+
+    // Tresor-Einstellungen (F5)
+    const vsBtn = $('#vault-settings-btn');
+    if (vsBtn) {
+      vsBtn.addEventListener('click', openVaultSettingsModal);
+      $('#vault-settings-close').addEventListener('click', closeVaultSettingsModal);
+      $('#vault-settings-cancel').addEventListener('click', closeVaultSettingsModal);
+      $('#vs-timeout-save').addEventListener('click', saveInactivityTimeout);
+      $('#vs-pw-submit').addEventListener('click', changeVaultPassword);
+      // Backdrop-Click bewusst nicht — Eingabe-Modal.
     }
 
     // Self-Service-Passwort-Modal

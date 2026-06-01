@@ -239,17 +239,19 @@ class RouteAdapter:
                     detail = "; ".join(
                         f"{k}: {v}" for k, v in validations.items() if v
                     )
+                msg = (
+                    f"OPNsense lehnte den Schreibvorgang ab "
+                    f"(result='{result}'{(': ' + detail) if detail else ''})."
+                )
                 raise ApiError(
-                    (
-                        f"OPNsense lehnte den Schreibvorgang ab "
-                        f"(result='{result}'{(': ' + detail) if detail else ''})."
-                    ),
+                    msg,
                     context=make_context(
                         host=ctx.target.host,
                         port=ctx.target.port,
                         method="POST",
                         path=ROUTES_ADD,
                         error_kind="opnsense_save_failed",
+                        summary=f"OPNsense lehnte ab: {detail}" if detail else msg,
                     ),
                 )
         uuid: str | None = None
