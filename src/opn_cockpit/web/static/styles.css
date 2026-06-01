@@ -95,6 +95,12 @@ html, body {
   overflow: hidden;
 }
 
+/* Garantiert, dass das hidden-Attribut wirklich versteckt — sonst gewinnt
+ * jede spaetere .klasse { display: inline-flex; ... } gegen den User-Agent-
+ * `[hidden] { display: none }`. Hat in der Praxis dazu gefuehrt, dass z. B.
+ * .user-badge[hidden] als leere weisse Pille im Brand-Block sichtbar war. */
+[hidden] { display: none !important; }
+
 body {
   font-family: var(--font-sans);
   background: var(--bg);
@@ -457,7 +463,7 @@ body {
 .form-row {
   display: flex;
   gap: 12px;
-  align-items: flex-end;
+  align-items: flex-start;
 }
 
 .form-row + .form-row { margin-top: 4px; }
@@ -1513,6 +1519,7 @@ a.card-open-link { text-decoration: none; }
 }
 
 .selection-summary {
+  margin-top: 12px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);

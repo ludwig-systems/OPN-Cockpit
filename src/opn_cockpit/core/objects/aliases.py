@@ -95,6 +95,41 @@ def _content_to_str(content: tuple[str, ...] | list[str]) -> str:
     return "\n".join(str(item) for item in content)
 
 
+def _raise_if_not_saved(body: Any, path: str, ctx: RequestContext) -> None:
+    """OPNsense ``addItem``/``setItem`` antworten oft mit ``200 OK`` plus
+    Body ``{"result":"failed","validations":{...}}``. Das ist ein stilles
+    No-Op — frueher haben wir das als Erfolg gemeldet, der Eintrag fehlte
+    aber spaeter. Hier wird der Body geprueft und im Fehlerfall ein
+    sprechender ``ApiError`` geworfen.
+
+    Akzeptiert wird alles, was nicht explizit ein ``failed`` enthaelt — manche
+    Endpunkte liefern ``saved``, andere bloss ``uuid``-Felder oder leere Bodies.
+    """
+    if not isinstance(body, dict):
+        return
+    result = body.get("result")
+    if isinstance(result, str) and result.lower() in {"failed", "error"}:
+        validations = body.get("validations")
+        detail = ""
+        if isinstance(validations, dict) and validations:
+            detail = "; ".join(
+                f"{k}: {v}" for k, v in validations.items() if v
+            )
+        raise ApiError(
+            (
+                f"OPNsense lehnte den Schreibvorgang ab "
+                f"(result='{result}'{(': ' + detail) if detail else ''})."
+            ),
+            context=make_context(
+                host=ctx.target.host,
+                port=ctx.target.port,
+                method="POST",
+                path=path,
+                error_kind="opnsense_save_failed",
+            ),
+        )
+
+
 def _content_from_api(value: Any) -> tuple[str, ...]:
     """Normalisiert das Content-Feld der OPNsense-API.
 
@@ -227,11 +262,12 @@ class AliasAdapter:
             "POST", ALIAS_ADD,
             json=payload,
         )
-        uuid: str | None = None
         try:
             body = response.json()
         except ValueError:
             body = {}
+        _raise_if_not_saved(body, ALIAS_ADD, ctx)
+        uuid: str | None = None
         if isinstance(body, dict):
             candidate = body.get("uuid")
             if isinstance(candidate, str) and candidate:
@@ -266,11 +302,17 @@ class AliasAdapter:
             merge_mode="append",
         )
         payload = {"alias": self.to_payload(merged_spec)}
+        set_path = ALIAS_SET.format(uuid=existing_uuid)
         response = client.call(
             ctx.target, ctx.key, ctx.secret,
-            "POST", ALIAS_SET.format(uuid=existing_uuid),
+            "POST", set_path,
             json=payload,
         )
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        _raise_if_not_saved(body, set_path, ctx)
         return AddOutcome(uuid=existing_uuid, raw_status=response.status_code)
 
     # ----- diff -----

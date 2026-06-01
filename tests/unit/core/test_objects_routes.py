@@ -388,6 +388,32 @@ class TestAdd:
                 RouteSpec(network="10.0.0.0/24", gateway="WAN_GW"),
             )
 
+    def test_raises_when_addroute_returns_failed_result(self) -> None:
+        """F18: 200 OK + ``{'result':'failed', 'validations':{...}}`` darf
+        nicht als Erfolg gewertet werden — die Route waere sonst nicht
+        angelegt aber als geschrieben markiert."""
+        from opn_cockpit.core.errors import ApiError
+
+        api = MockApi().on(
+            ROUTES_ADD,
+            lambda _r: httpx.Response(
+                200,
+                json={
+                    "result": "failed",
+                    "validations": {"route.gateway": "Gateway not found"},
+                },
+            ),
+        )
+        client, ctx = _build_client(api)
+        adapter = RouteAdapter()
+        with pytest.raises(ApiError) as exc:
+            adapter.add(
+                client, ctx,
+                RouteSpec(network="10.0.0.0/24", gateway="WAN_GW"),
+            )
+        assert exc.value.context.error_kind == "opnsense_save_failed"
+        assert "route.gateway" in str(exc.value)
+
 
 # ---------------------------------------------------------------------------
 # verify

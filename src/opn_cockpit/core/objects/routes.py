@@ -223,15 +223,40 @@ class RouteAdapter:
             ROUTES_ADD,
             json=payload,
         )
-        uuid: str | None = None
         try:
             body = response.json()
-            if isinstance(body, dict):
-                candidate = body.get("uuid")
-                if isinstance(candidate, str) and candidate:
-                    uuid = candidate
         except ValueError:
-            pass
+            body = {}
+        # OPNsense liefert bei Validation-Fehlern 200 OK plus
+        # {"result":"failed", "validations":{...}} — sonst wuerde der
+        # Apply als Erfolg gelten und der Eintrag waere doch nicht da.
+        if isinstance(body, dict):
+            result = body.get("result")
+            if isinstance(result, str) and result.lower() in {"failed", "error"}:
+                validations = body.get("validations")
+                detail = ""
+                if isinstance(validations, dict) and validations:
+                    detail = "; ".join(
+                        f"{k}: {v}" for k, v in validations.items() if v
+                    )
+                raise ApiError(
+                    (
+                        f"OPNsense lehnte den Schreibvorgang ab "
+                        f"(result='{result}'{(': ' + detail) if detail else ''})."
+                    ),
+                    context=make_context(
+                        host=ctx.target.host,
+                        port=ctx.target.port,
+                        method="POST",
+                        path=ROUTES_ADD,
+                        error_kind="opnsense_save_failed",
+                    ),
+                )
+        uuid: str | None = None
+        if isinstance(body, dict):
+            candidate = body.get("uuid")
+            if isinstance(candidate, str) and candidate:
+                uuid = candidate
         return AddOutcome(uuid=uuid, raw_status=response.status_code)
 
     def verify(

@@ -241,6 +241,30 @@ class TestCreate:
                 AliasSpec(name="ips", type="host", content=("1.1.1.1",)),
             )
 
+    def test_create_raises_when_addItem_returns_failed_result(self) -> None:
+        """F18 (create-Pfad): wie beim Append darf 200 + failed nicht als
+        Erfolg gewertet werden."""
+        from opn_cockpit.core.errors import ApiError
+
+        api = MockApi().on(
+            "POST", ALIAS_ADD,
+            lambda _r: httpx.Response(
+                200,
+                json={
+                    "result": "failed",
+                    "validations": {"alias.name": "Already exists"},
+                },
+            ),
+        )
+        client, ctx = _build_client(api)
+        adapter = AliasAdapter()
+        with pytest.raises(ApiError) as exc:
+            adapter.add(
+                client, ctx,
+                AliasSpec(name="dup", type="host", content=("1.1.1.1",)),
+            )
+        assert exc.value.context.error_kind == "opnsense_save_failed"
+
 
 # ---------------------------------------------------------------------------
 # add (append mode / Merge)
@@ -311,6 +335,48 @@ class TestAppend:
                 AliasSpec(name="missing", type="host", content=("x",), merge_mode="append"),
             )
         assert exc.value.context.error_kind == "alias_not_found"
+
+    def test_append_raises_when_setitem_returns_failed_result(self) -> None:
+        """F18: 200 OK + ``{'result':'failed', 'validations':{...}}`` darf
+        nicht mehr als Erfolg gelten — der Eintrag wurde nicht uebernommen."""
+        from opn_cockpit.core.errors import ApiError
+
+        def search(_r: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"rows": [{"uuid": "u1", "name": "ips"}]})
+
+        def get(_r: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"alias": {"name": "ips", "type": "host", "content": "1.1.1.1"}},
+            )
+
+        def setitem(_r: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "result": "failed",
+                    "validations": {"alias.content": "Invalid content"},
+                },
+            )
+
+        api = (
+            MockApi()
+            .on("POST", ALIAS_SEARCH, search)
+            .on("GET", ALIAS_GET, get)
+            .on("POST", ALIAS_SET.split("{")[0], setitem)
+        )
+        client, ctx = _build_client(api)
+        adapter = AliasAdapter()
+        with pytest.raises(ApiError) as exc:
+            adapter.add(
+                client, ctx,
+                AliasSpec(
+                    name="ips", type="host",
+                    content=("not-a-host-name!!",), merge_mode="append",
+                ),
+            )
+        assert exc.value.context.error_kind == "opnsense_save_failed"
+        assert "alias.content" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

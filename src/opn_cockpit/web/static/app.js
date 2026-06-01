@@ -1702,7 +1702,12 @@
       showPlanError(err.message);
     } finally {
       next.disabled = false;
-      next.textContent = 'Aktivieren';
+      // Bei Erfolg setzt showPlanPhase('preview') den Text auf 'Aktivieren'.
+      // Bei Validation-/Netz-Fehler bleiben wir in 'input' und muessen den
+      // Erzeuge-Plan…-Zwischentext wieder auf 'Vorschau anzeigen' zuruecknehmen.
+      if (planPhase === 'input') {
+        next.textContent = 'Vorschau anzeigen';
+      }
     }
   }
 
@@ -2062,6 +2067,10 @@
     }
   }
 
+  // Map<name, type> aus der letzten discover/aliases-Antwort, damit wir bei
+  // Datalist-Auswahl den Typ automatisch ins Dropdown uebernehmen koennen.
+  let aliasSuggestionTypes = new Map();
+
   async function loadAliasSuggestions() {
     const device = _pickDiscoveryDevice();
     if (!device) {
@@ -2082,11 +2091,13 @@
       const data = await response.json();
       const dl = $('#pl-alias-suggestions');
       dl.innerHTML = '';
+      aliasSuggestionTypes = new Map();
       for (const a of data.aliases) {
         const opt = document.createElement('option');
         opt.value = a.name;
         opt.label = a.type ? `${a.name} (${a.type})` : a.name;
         dl.appendChild(opt);
+        if (a.type) aliasSuggestionTypes.set(a.name, String(a.type).toLowerCase());
       }
       showToast(`${data.aliases.length} Alias(e) gefunden auf ${device.name}.`);
     } catch (err) {
@@ -2095,6 +2106,21 @@
       btn.disabled = false;
       btn.textContent = 'Vorschläge laden';
     }
+  }
+
+  function syncAliasTypeFromSuggestion() {
+    // F17: Wenn der eingegebene Name exakt einer Suggestion entspricht,
+    // setze das Typ-Dropdown automatisch — der bestehende Alias-Typ ist
+    // bindend (siehe aliases._append), Default 'host' ist sonst meistens falsch.
+    const nameInput = $('#pl-alias-name');
+    const typeSelect = $('#pl-alias-type');
+    if (!nameInput || !typeSelect) return;
+    const t = aliasSuggestionTypes.get(nameInput.value.trim());
+    if (!t) return;
+    // Nur setzen wenn der Wert in den vorhandenen Options-Wert existiert,
+    // sonst bleibt das Dropdown auf dem User-gewaehlten Wert.
+    const known = Array.from(typeSelect.options).some((o) => o.value === t);
+    if (known) typeSelect.value = t;
   }
 
   // -------------------- Bulk-Import (Firewalls) --------------------
@@ -3303,9 +3329,7 @@
       $('#pwself-new2').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') submitSelfPassword();
       });
-      $('#pwself-modal').addEventListener('click', (e) => {
-        if (e.target.id === 'pwself-modal') closeSelfPasswordModal();
-      });
+      // Backdrop-Click bewusst nicht — Eingabe-Modal, kein Datenverlust durch Klick.
     }
 
     // Audit-Modal
@@ -3345,9 +3369,7 @@
     $('#bk-fmt-csv').addEventListener('change', updateBulkFormatHint);
     $('#bk-fmt-json').addEventListener('change', updateBulkFormatHint);
     $('#bk-fmt-vault').addEventListener('change', updateBulkFormatHint);
-    $('#bulk-modal').addEventListener('click', (e) => {
-      if (e.target.id === 'bulk-modal') closeBulkModal();
-    });
+    // Bulk-Modal: Backdrop-Click bewusst nicht — Eingabe-Modal.
 
     // Plan-Modal
     $('#plan-modal-close').addEventListener('click', closePlanModal);
@@ -3356,6 +3378,9 @@
     $('#plan-next-btn').addEventListener('click', planNextOrApply);
     $('#pl-load-gateways').addEventListener('click', loadGatewaySuggestions);
     $('#pl-load-aliases').addEventListener('click', loadAliasSuggestions);
+    // F17: Datalist-Auswahl feuert ein input-Event mit dem fertigen Wert.
+    $('#pl-alias-name').addEventListener('input', syncAliasTypeFromSuggestion);
+    $('#pl-alias-name').addEventListener('change', syncAliasTypeFromSuggestion);
     $('#pl-profile-select').addEventListener('change', (e) => applyProfile(e.target.value));
     $('#pl-profile-delete').addEventListener('click', deleteCurrentProfile);
     $('#pl-save-profile-btn') || null;  // Button id ist plan-save-profile-btn
@@ -3363,17 +3388,19 @@
     $('#pl-confirm').addEventListener('change', (e) => {
       $('#plan-next-btn').disabled = !e.target.checked;
     });
+    // Backdrop-Click schliesst Eingabe-Phasen NICHT (User-Frust durch
+    // verlorene Eingaben). In der Result-Phase ist es ein reines Read-Only-
+    // Modal, da darf ein Klick daneben schliessen.
     $('#plan-modal').addEventListener('click', (e) => {
-      if (e.target.id === 'plan-modal') closePlanModal();
+      if (e.target.id !== 'plan-modal') return;
+      if (planPhase === 'result') closePlanModal();
     });
 
     // Add-Modal
     $('#add-modal-close').addEventListener('click', closeAddModal);
     $('#add-modal-cancel').addEventListener('click', closeAddModal);
     $('#add-modal-confirm').addEventListener('click', doAddOrEditDevice);
-    $('#add-modal').addEventListener('click', (e) => {
-      if (e.target.id === 'add-modal') closeAddModal();
-    });
+    // Backdrop-Click bewusst nicht — Eingabe-Modal, X / Abbrechen reichen.
 
     // Device-Modal
     $('#device-modal-close').addEventListener('click', closeDeviceModal);
