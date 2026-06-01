@@ -3,7 +3,7 @@ name: Release
 # Baut automatisch einen Windows-Installer + GitHub-Release sobald ein
 # Tag der Form v*.*.* gepusht wird (z. B. `git tag v0.7.0 && git push --tags`).
 #
-# Manueller Trigger via workflow_dispatch ist ebenfalls moeglich — dann
+# Manueller Trigger via workflow_dispatch ist ebenfalls moeglich - dann
 # muss die Version als Input mitgegeben werden.
 #
 # Ergebnis im Release:
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version (z. B. 0.7.0) — ohne v-Praefix'
+        description: 'Version (z. B. 0.7.0) - ohne v-Praefix'
         required: true
 
 permissions:
@@ -144,6 +144,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $v = '${{ steps.version.outputs.version }}'
           $sha = '${{ steps.hash.outputs.sha256 }}'
+          $repo = '${{ github.repository }}'
           $changelogSnippet = ''
           if (Test-Path CHANGELOG.md) {
             $changelog = Get-Content CHANGELOG.md -Raw
@@ -156,29 +157,32 @@ jobs:
               $changelogSnippet = "`n### Changelog-Auszug`n`n$section`n"
             }
           }
-          $body = @"
-## OPN-Cockpit $v
-
-Embedded-Python-Setup für Windows. Keine separate Python-Installation auf dem Zielsystem notwendig.
-
-### Installation
-
-1. ``Install-OPN-Cockpit-$v.exe`` herunterladen.
-2. Doppelklick. Windows SmartScreen zeigt eine Warnung (Tool ist nicht code-signiert).
-3. **„Weitere Informationen" → „Trotzdem ausführen"**.
-4. Setup-Wizard folgen (Single-User oder Multi-User-Server wählen).
-
-Mehr dazu in [docs/INSTALLATION-WINDOWS.md](https://github.com/${{ github.repository }}/blob/v$v/docs/INSTALLATION-WINDOWS.md).
-
-### Checksum
-
-``````
-SHA256 ($v): $sha
-``````
-$changelogSnippet
----
-🤖 Automatisch via GitHub Actions gebaut.
-"@
+          $bt = [char]0x60
+          $fence = "$bt$bt$bt"
+          $lines = @(
+            "## OPN-Cockpit $v",
+            "",
+            "Embedded-Python-Setup fuer Windows. Keine separate Python-Installation auf dem Zielsystem notwendig.",
+            "",
+            "### Installation",
+            "",
+            "1. ${bt}Install-OPN-Cockpit-${v}.exe${bt} herunterladen.",
+            "2. Doppelklick. Windows SmartScreen zeigt eine Warnung (Tool ist nicht code-signiert).",
+            "3. ``Weitere Informationen`` -> ``Trotzdem ausfuehren``.",
+            "4. Setup-Wizard folgen (Single-User oder Multi-User-Server waehlen).",
+            "",
+            "Mehr dazu in [docs/INSTALLATION-WINDOWS.md](https://github.com/${repo}/blob/v${v}/docs/INSTALLATION-WINDOWS.md).",
+            "",
+            "### Checksum",
+            "",
+            $fence,
+            "SHA256 (${v}): $sha",
+            $fence,
+            $changelogSnippet,
+            "---",
+            "Automatisch via GitHub Actions gebaut."
+          )
+          $body = ($lines -join "`n")
           $bodyFile = "$env:RUNNER_TEMP/release-body.md"
           Set-Content -Path $bodyFile -Value $body -Encoding utf8
           "path=$bodyFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
