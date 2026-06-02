@@ -32,7 +32,11 @@ from opn_cockpit.vault.errors import (
     VaultIOError,
     VaultVersionError,
 )
-from opn_cockpit.web.auth.dependencies import require_admin
+from opn_cockpit.web.auth.dependencies import (
+    get_session_manager,
+    require_admin,
+)
+from opn_cockpit.web.auth.manager import SessionManager
 from opn_cockpit.web.rate_limit import RateLimiter
 from opn_cockpit.web.server_state import ServerState, ServerStateError
 from opn_cockpit.web.vault_path import (
@@ -92,6 +96,31 @@ class BootstrapVaultRequest(BaseModel):
     admin_username: str = Field(..., min_length=1)
     admin_password: str = Field(..., min_length=1)
     new_admin_password: str | None = Field(None, min_length=12)
+
+
+class BootstrapVaultResponse(BaseModel):
+    """Antwort auf ``POST /api/bootstrap/vault``.
+
+    Enthaelt jetzt eine fertige Session — der Wizard hat den Admin
+    schon per Username + Passwort + Master-PW autorisiert, ein
+    direkt anschliessender Multi-User-Login waere redundant.
+
+    Frontend nimmt ``token`` + ``vault_path`` etc. wie eine normale
+    ``UnlockResponse`` und springt direkt in den Main-View.
+
+    ``token`` und die anschliessenden Felder sind optional, damit
+    die Antwort auch dann ein Schema hat, wenn die Session-Erzeugung
+    aus irgendeinem Grund nicht klappt — Frontend faellt dann auf
+    den expliziten Login-Pfad zurueck.
+    """
+
+    status: str
+    created: str
+    token: str | None = None
+    vault_path: str | None = None
+    vault_filename: str | None = None
+    inactivity_timeout_s: int | None = None
+    seconds_until_expiry: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -204,13 +233,15 @@ def bootstrap_admin_gone() -> dict[str, str]:
 
 @router.post(
     "/vault",
+    response_model=BootstrapVaultResponse,
     status_code=status.HTTP_200_OK,
 )
 def bootstrap_vault(
     payload: BootstrapVaultRequest,
     request: Request,
     server: ServerState = Depends(get_server_state),
-) -> dict[str, str]:
+    manager: SessionManager = Depends(get_session_manager),
+) -> BootstrapVaultResponse:
     """Entsperrt den zentralen Multi-User-Vault.
 
     Seit F28: Endpoint pruef ``admin_username`` + ``admin_password`` direkt
@@ -317,7 +348,39 @@ def bootstrap_vault(
         _audit_vault_created(path)
     else:
         _audit_vault_bootstrap(path)
-    return {"status": server.bootstrap_status, "created": "true" if created else "false"}
+    # Direkt eine Session fuer den Admin anlegen, der gerade autorisiert hat -
+    # spart dem User den separaten Multi-User-Login Sekunden spaeter. Der
+    # Server hat hier alle drei Faktoren bekommen: User-DB-Login + Master-PW +
+    # (optional) neues Admin-PW. Quaequivalent zu einem expliziten Login.
+    token: str | None = None
+    vault_filename: str | None = None
+    inactivity_timeout_s: int | None = None
+    seconds_until_expiry: int | None = None
+    try:
+        effective_pw = payload.new_admin_password or payload.admin_password
+        backend = server.auth_backend()
+        auth_result = backend.authenticate({
+            "username": payload.admin_username,
+            "password": effective_pw,
+        })
+        if auth_result is not None:
+            token, session = manager.create_from(auth_result)
+            vault_filename = auth_result.vault_path.name
+            inactivity_timeout_s = int(session.inactivity_timeout_s)
+            seconds_until_expiry = int(session.seconds_until_expiry())
+    except Exception:  # noqa: BLE001 - Session-Erzeugung darf den Bootstrap-Erfolg nie aushebeln
+        # Fallback: kein Token mit zurueck, Frontend zeigt regulaeren Login.
+        # Wir lassen das Unlock-Ergebnis stehen, der Vault ist offen.
+        token = None
+    return BootstrapVaultResponse(
+        status=server.bootstrap_status,
+        created="true" if created else "false",
+        token=token,
+        vault_path=str(path) if token else None,
+        vault_filename=vault_filename,
+        inactivity_timeout_s=inactivity_timeout_s,
+        seconds_until_expiry=seconds_until_expiry,
+    )
 
 
 # ---------------------------------------------------------------------------

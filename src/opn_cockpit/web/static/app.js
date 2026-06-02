@@ -335,7 +335,24 @@
         const body = await response.json().catch(() => ({}));
         throw new Error(body.detail || `Fehler ${response.status}`);
       }
-      // Server ist ready — auf Multi-User-Login schwenken.
+      const data = await response.json().catch(() => ({}));
+      if (data && data.token) {
+        // Server hat den Wizard-Schritt als vollwertige Authentifizierung
+        // gewertet (User-DB-Login + Master-PW) und uns direkt eine Session
+        // mitgegeben. Token speichern und ohne zweiten Login in den Main-View.
+        setToken(data.token);
+        // serverMode + adminRequiresPwChange aktualisieren, sonst zeigt das
+        // Frontend Multi-User-spezifische Buttons falsch.
+        try { await fetchBootstrapStatus(); } catch (_e) {}
+        await enterMain({
+          vault_path: data.vault_path,
+          vault_filename: data.vault_filename,
+          inactivity_timeout_s: data.inactivity_timeout_s,
+          seconds_until_expiry: data.seconds_until_expiry,
+        });
+        return;
+      }
+      // Fallback: kein Token -> normaler Multi-User-Login als zweiter Schritt.
       await fetchBootstrapStatus();
       enterBootstrapPhase();
     } catch (err) {
