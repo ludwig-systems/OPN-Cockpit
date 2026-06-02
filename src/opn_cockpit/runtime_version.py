@@ -41,11 +41,11 @@ def _package_repo_dir() -> Path | None:
     return None
 
 
-def _git_describe_tag(repo: Path) -> str | None:
-    """Liefert das aktuellste reachable Tag, oder ``None``."""
+def _run_git(repo: Path, *args: str) -> str | None:
+    """Helfer: laeuft 'git -C repo args'. None bei Fehler/Timeout/leerer Output."""
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo), "describe", "--tags", "--abbrev=0"],
+            ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
             timeout=_TIMEOUT_S,
@@ -55,8 +55,31 @@ def _git_describe_tag(repo: Path) -> str | None:
         return None
     if result.returncode != 0:
         return None
-    tag = result.stdout.strip()
-    return tag or None
+    out = result.stdout.strip()
+    return out or None
+
+
+def _git_describe_tag(repo: Path) -> str | None:
+    """Liefert das aktuellste reachable Release-Tag, oder ``None``.
+
+    Zwei Stufen:
+    1. ``git describe --tags --abbrev=0`` - semantisch korrekt ("auf
+       welchem Tag basiert HEAD"), braucht aber History + Tag-Refs.
+    2. ``git tag --list 'v*' --sort=-v:refname | head -1`` - Fallback,
+       liefert hoechstes v-Tag aus dem Tag-Universum. Funktioniert
+       auch bei shallow Clones, solange Tag-Refs vorhanden sind.
+
+    Bei Shallow-Clones (--depth 1) ohne --tags gibt's beide nicht;
+    dann liefern wir None und der Caller faellt auf __version__ zurueck.
+    """
+    tag = _run_git(repo, "describe", "--tags", "--abbrev=0")
+    if tag:
+        return tag
+    tags = _run_git(repo, "tag", "--list", "v*", "--sort=-v:refname")
+    if tags:
+        # Erstes Tag der Liste = hoechste Version (--sort=-v:refname)
+        return tags.split("\n")[0].strip() or None
+    return None
 
 
 @lru_cache(maxsize=1)
