@@ -44,6 +44,7 @@ from opn_cockpit.web.acl import (
 from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     ConnectionTestResponse,
+    DeviceApiKeyResponse,
     DeviceCreateRequest,
     DeviceResponse,
     DeviceUpdateRequest,
@@ -331,6 +332,56 @@ def test_connection(
         reachable=result.reachable,
         authenticated=result.authenticated,
         summary=result.summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/api-key
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/api-key",
+    response_model=DeviceApiKeyResponse,
+)
+def reveal_device_api_key(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> DeviceApiKeyResponse:
+    """Liefert den API-Key (nicht das Secret) fuer den Edit-Dialog.
+
+    Der Key ist semantisch ein Identifier, nicht ein Secret - er taucht
+    auf der OPNsense im Trust-Section sichtbar auf, ohne dass man als
+    User extra Privilegien braucht. Trotzdem audit-logged, damit
+    Reveal-Vorgaenge nachweisbar bleiben.
+
+    Secret bleibt unsichtbar: kein Endpoint, kein Schema, kein Frontend-
+    Pfad.
+    """
+    require_write_role(session)
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+    get_audit_backend().append(
+        AuditEventKind.API_KEY_REVEALED,
+        actor=audit_actor(session),
+        action="api_key_revealed",
+        target_device_id=device_id,
+        target_device_name=vault_device.name,
+        summary=(
+            f"API-Key fuer Geraet '{vault_device.name}' im Edit-Dialog sichtbar gemacht."
+        ),
+    )
+    session.touch()
+    return DeviceApiKeyResponse(
+        device_id=device_id,
+        api_key=vault_device.api_key,
     )
 
 

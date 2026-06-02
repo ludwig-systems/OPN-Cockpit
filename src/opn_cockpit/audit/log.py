@@ -63,6 +63,7 @@ class AuditEventKind(StrEnum):
     USER_UPDATED = "user_updated"
     USER_DELETED = "user_deleted"
     BACKUP_DOWNLOADED = "backup_downloaded"
+    API_KEY_REVEALED = "api_key_revealed"
 
 
 # ---------------------------------------------------------------------------

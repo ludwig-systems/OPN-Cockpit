@@ -6,7 +6,29 @@ moeglich) und Tests eine Single Source of Truth haben.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _strip_or_none(value: str | None) -> str | None:
+    """Trimmt Whitespace und mappt leere Strings auf None.
+
+    Greift bei API-Credentials-Feldern in Device-Schemas: ein per Paste
+    eingefuegter Key/Secret aus ``apikey.txt`` kann trailing newline oder
+    Tabulator-Reste haben. OPNsense vergleicht bytewise, weshalb solche
+    Reste zu "Authentication failed" fuehren obwohl der Wert sonst korrekt
+    ist. Defensive Strip am Schema-Eingang verhindert das auch fuer
+    Bulk-Import-CSV oder API-Direkt-Aufrufe.
+    """
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _strip_required(value: str) -> str:
+    """Strip-Variante fuer Pflichtfelder. Leerer String bleibt leer (Pydantic
+    rejected ihn dann ueber min_length=1)."""
+    return value.strip()
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -250,6 +272,11 @@ class DeviceCreateRequest(BaseModel):
     api_key: str = Field(..., min_length=1, max_length=255)
     api_secret: str = Field(..., min_length=1, max_length=500)
 
+    @field_validator("api_key", "api_secret", mode="before")
+    @classmethod
+    def _strip_credentials(cls, value: str) -> str:
+        return _strip_required(value) if isinstance(value, str) else value
+
 
 class DeviceUpdateRequest(BaseModel):
     """Aenderung eines Geraets im Tresor.
@@ -268,6 +295,18 @@ class DeviceUpdateRequest(BaseModel):
     descr: str | None = Field(None, max_length=500)
     api_key: str | None = Field(None, max_length=255)
     api_secret: str | None = Field(None, max_length=500)
+
+    @field_validator("api_key", "api_secret", mode="before")
+    @classmethod
+    def _strip_credentials(cls, value: str | None) -> str | None:
+        return _strip_or_none(value) if isinstance(value, str) else value
+
+
+class DeviceApiKeyResponse(BaseModel):
+    """Antwort des Reveal-Endpunkts (nur Key, kein Secret)."""
+
+    device_id: str
+    api_key: str
 
 
 class HeartbeatRequest(BaseModel):

@@ -1363,9 +1363,16 @@
     setTimeout(() => $('#ad-name').focus(), 0);
   }
 
+  // Beim Edit-Open vom Server geladener Key - wird beim Submit-Vergleich
+  // genutzt: nur wenn der User wirklich was geaendert hat, schicken wir
+  // api_key mit; sonst kein PATCH-Wert (vermeidet sinnlosen Schreibvorgang
+  // + Audit-Rauschen).
+  let prefilledApiKey = '';
+
   function openEditModal(device) {
     modalMode = 'edit';
     editingDeviceId = device.id;
+    prefilledApiKey = '';
     $('#ad-name').value = device.name;
     $('#ad-host').value = device.host;
     $('#ad-port').value = String(device.port);
@@ -1374,7 +1381,7 @@
     $('#ad-tls').checked = device.tls_verify;
     $('#ad-apikey').value = '';
     $('#ad-apisecret').value = '';
-    $('#ad-apikey').placeholder = '(unverändert)';
+    $('#ad-apikey').placeholder = 'Lade…';
     $('#ad-apisecret').placeholder = '(unverändert)';
     $('#ad-credentials-hint').hidden = false;
     $('#add-modal-title').textContent = `„${device.name}" bearbeiten`;
@@ -1382,6 +1389,31 @@
     $('#add-modal-error').hidden = true;
     $('#add-modal').hidden = false;
     setTimeout(() => $('#ad-name').focus(), 0);
+    // API-Key sichtbar vorladen, damit der Admin verifizieren kann was
+    // im Tresor steht (Secret bleibt unsichtbar). Server-Aufruf laeuft
+    // im Hintergrund - bei Fehler placeholder zurueck auf "(unveraendert)".
+    loadDeviceApiKeyIntoEditForm(device.id);
+  }
+
+  async function loadDeviceApiKeyIntoEditForm(deviceId) {
+    try {
+      const response = await apiGet(
+        `/api/inventory/devices/${encodeURIComponent(deviceId)}/api-key`
+      );
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        $('#ad-apikey').placeholder = '(unverändert)';
+        return;
+      }
+      const data = await response.json();
+      // Modal koennte in der Zwischenzeit geschlossen worden sein
+      if (modalMode !== 'edit' || editingDeviceId !== deviceId) return;
+      prefilledApiKey = data.api_key || '';
+      $('#ad-apikey').value = prefilledApiKey;
+      $('#ad-apikey').placeholder = '';
+    } catch (_e) {
+      $('#ad-apikey').placeholder = '(unverändert)';
+    }
   }
 
   function closeAddModal() {
@@ -1401,7 +1433,10 @@
     const descr = $('#ad-descr').value.trim();
     const tlsVerify = $('#ad-tls').checked;
     const apiKey = $('#ad-apikey').value.trim();
-    const apiSecret = $('#ad-apisecret').value;
+    // Secret genauso trimmen wie Key. apikey.txt-Pastes haben oft
+    // trailing-Whitespace/Newline; OPNsense's Auth-Vergleich ist
+    // bytewise und kippt dann mit "Authentication failed".
+    const apiSecret = $('#ad-apisecret').value.trim();
 
     if (modalMode === 'add') {
       if (!name || !host || !apiKey || !apiSecret) {
@@ -1441,7 +1476,10 @@
           tls_verify: tlsVerify,
           tags, descr,
         };
-        if (apiKey) body.api_key = apiKey;
+        // Key nur senden wenn der User ihn wirklich geaendert hat - der
+        // Edit-Dialog laedt den aktuellen Key vor, sodass die meisten
+        // Saves den Key unveraendert lassen wuerden.
+        if (apiKey && apiKey !== prefilledApiKey) body.api_key = apiKey;
         if (apiSecret) body.api_secret = apiSecret;
         response = await apiPatch(
           `/api/inventory/devices/${encodeURIComponent(editingDeviceId)}`,
