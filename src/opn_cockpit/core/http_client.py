@@ -424,9 +424,15 @@ class HttpClient:
     def _short_body_summary(response: httpx.Response, max_len: int = 200) -> str:
         """Liefert eine maximal ``max_len`` Zeichen lange, deliberate Zusammenfassung.
 
-        Versucht zuerst JSON-Inhalte zu parsen und nur die ersten Schlüssel
-        zu zeigen — vermeidet, dass komplette Rohdaten in die Exception
-        rutschen. Bei nicht-JSON-Antworten wird der Text vorne abgeschnitten.
+        Bei JSON-Dict-Antworten werden gezielt OPNsense's bekannte
+        Fehlerbeschreibungs-Felder herausgegriffen (``status``, ``message``,
+        ``error``, ``detail``) - das sind die Werte, die der Admin sehen
+        muss, um zu verstehen warum die Box etwas ablehnt. Andere Schluessel
+        werden NICHT weitergegeben, damit z. B. Validations-Bodies mit
+        Passwoertern nicht in Logs landen.
+
+        Wenn keiner der bekannten Felder gefuellt ist, fallen wir auf das
+        Keys-Only-Verhalten zurueck.
         """
         try:
             data = response.json()
@@ -434,6 +440,17 @@ class HttpClient:
             text = response.text
             return text if len(text) <= max_len else text[: max_len - 1] + "…"
         if isinstance(data, dict):
+            snippets: list[str] = []
+            for key in ("status", "message", "error", "detail"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    snippets.append(f"{key}={value.strip()}")
+            if snippets:
+                summary = "; ".join(snippets)
+                return (
+                    summary if len(summary) <= max_len
+                    else summary[: max_len - 1] + "…"
+                )
             keys = ",".join(sorted(data.keys())[:6])
             return f"json-keys={keys}"
         if isinstance(data, list):
