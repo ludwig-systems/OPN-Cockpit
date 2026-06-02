@@ -18,13 +18,23 @@ pro Gerät, APPLY_COMPLETED am Ende — alle mit maskierten Parametern.
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from opn_cockpit.audit.backend import AuditBackend
 from opn_cockpit.audit.log import AuditEventKind
+from opn_cockpit.backups import (
+    BackupRecord,
+    BackupStoreError,
+    append_backup,
+    prune_backups,
+)
+from opn_cockpit.core.device_info import download_backup
 from opn_cockpit.core.errors import (
     OpnCockpitError,
     ReconfigureError,
@@ -50,6 +60,8 @@ from opn_cockpit.inventory.model import Device
 from opn_cockpit.orchestration.planner import Plan, PlannedDeviceAction
 from opn_cockpit.security.masking import mask_dict
 from opn_cockpit.security.session import Session
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # DevicePipeline
@@ -97,11 +109,15 @@ class Executor:
 
     Bekommt Session (für Credentials), Audit-Log und HttpClient bei der
     Anwendung — keine versteckten Mitglieder, die Tests umgehen müssen.
+
+    ``backup_storage_root`` ist eine Test-Injection — produktiv None,
+    dann nutzt der Backup-Layer ``get_app_data_dir() / "backups"``.
     """
 
     session: Session
     audit: AuditBackend
     max_workers: int = 8
+    backup_storage_root: Path | None = field(default=None)
 
     def apply(
         self,
@@ -140,6 +156,7 @@ class Executor:
                     controller=controller,
                     client=client,
                     action_name=plan.action,
+                    plan_id=plan.plan_id,
                 ): pipeline
                 for pipeline in pipelines
             }
@@ -171,6 +188,7 @@ class Executor:
         controller: SubsystemController,
         client: HttpClient,
         action_name: str,
+        plan_id: str,
     ) -> Result:
         """Phasen-Pipeline für genau ein Gerät. Wirft NIE eine Exception."""
         start = time.monotonic()
@@ -181,6 +199,7 @@ class Executor:
                 adapter=adapter,
                 controller=controller,
                 client=client,
+                plan_id=plan_id,
                 start=start,
             )
         except OpnCockpitError as exc:
@@ -212,6 +231,7 @@ class Executor:
         adapter: ObjectAdapter[Any, Any],
         controller: SubsystemController,
         client: HttpClient,
+        plan_id: str,
         start: float,
     ) -> Result:
         device = pipeline.device
@@ -240,6 +260,31 @@ class Executor:
             )
         ctx = RequestContext(target=target, key=key, secret=secret)
         try:
+            # Pre-Apply-Backup (Safety-Net): wenn aktiv und Backup
+            # scheitert, wird der Apply auf diesem Geraet blockiert -
+            # erfolgreicher Apply braucht einen Rollback-Anker.
+            settings = self.session.opened.data.settings
+            if settings.auto_backup_before_apply:
+                backup_failure = self._take_pre_apply_backup(
+                    client=client,
+                    target=target,
+                    key=key,
+                    secret=secret,
+                    device=device,
+                    plan_id=plan_id,
+                )
+                if backup_failure is not None:
+                    return _make_failed(
+                        device=device,
+                        subsystem=adapter.subsystem,
+                        phase=Phase.WRITE,
+                        error_kind="backup_blocked",
+                        summary=(
+                            "Pre-Apply-Backup fehlgeschlagen, Apply blockiert: "
+                            + backup_failure
+                        ),
+                        start=start,
+                    )
             return self._write_activate_verify(
                 device=device,
                 adapter=adapter,
@@ -253,6 +298,98 @@ class Executor:
             # Klartext-Credentials sollen die Funktion nicht überleben.
             del secret
             del key
+
+    def _take_pre_apply_backup(
+        self,
+        *,
+        client: HttpClient,
+        target: HttpTarget,
+        key: str,
+        secret: str,
+        device: Device,
+        plan_id: str,
+    ) -> str | None:
+        """Zieht ein Backup vor dem WRITE-Phase. Liefert None bei Erfolg,
+        sonst eine Fehlermeldung fuer das Result.
+
+        Reihenfolge:
+        1. ``download_backup`` (XML-Bytes von der OPNsense).
+        2. ``append_backup`` (gzip-Persistenz + Index-Update).
+        3. Audit-Eintrag PRE_APPLY_BACKUP (success oder failed).
+        4. ``prune_backups`` als Best-Effort - bei Pruning-Fehlern wird
+           der Apply NICHT blockiert; lieber ein paar Backups zuviel als
+           ein verhinderter Rollout.
+        """
+        try:
+            content = download_backup(client, target, key, secret)
+        except OpnCockpitError as exc:
+            reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+            self.audit.append(
+                AuditEventKind.PRE_APPLY_BACKUP,
+                action="pre_apply_backup",
+                target_device_id=device.id,
+                target_device_name=device.name,
+                error_kind=exc.context.error_kind,
+                summary=(
+                    f"Pre-Apply-Backup FEHLGESCHLAGEN bei '{device.name}' "
+                    f"(Plan {plan_id}): {reason}"
+                ),
+            )
+            return reason
+
+        try:
+            record: BackupRecord = append_backup(
+                device.id,
+                content,
+                trigger="pre-apply",
+                related_plan_id=plan_id,
+                device_name_at_creation=device.name,
+                storage_root=self.backup_storage_root,
+            )
+        except BackupStoreError as exc:
+            reason = str(exc)
+            self.audit.append(
+                AuditEventKind.PRE_APPLY_BACKUP,
+                action="pre_apply_backup",
+                target_device_id=device.id,
+                target_device_name=device.name,
+                error_kind="store_error",
+                summary=(
+                    f"Pre-Apply-Backup KONNTE NICHT GESPEICHERT werden bei "
+                    f"'{device.name}' (Plan {plan_id}): {reason}"
+                ),
+            )
+            return reason
+
+        self.audit.append(
+            AuditEventKind.PRE_APPLY_BACKUP,
+            action="pre_apply_backup",
+            target_device_id=device.id,
+            target_device_name=device.name,
+            summary=(
+                f"Pre-Apply-Backup ok fuer '{device.name}' "
+                f"(Plan {plan_id}, {record.size_bytes} Bytes -> "
+                f"{record.size_compressed} Bytes gzip)."
+            ),
+        )
+
+        # Pruning: Best-Effort. Fehler hier sollen den Apply nicht stoppen,
+        # nur ins Log fuer Operations-Visibility.
+        settings = self.session.opened.data.settings
+        with contextlib.suppress(BackupStoreError):
+            try:
+                prune_backups(
+                    device.id,
+                    retention_pre_apply=settings.backup_retention_pre_apply,
+                    retention_scheduled=settings.backup_retention_scheduled,
+                    storage_root=self.backup_storage_root,
+                )
+            except Exception:
+                _log.exception(
+                    "Backup-Pruning fuer device_id=%s schlug fehl - Apply laeuft trotzdem.",
+                    device.id,
+                )
+        return None
 
     def _write_activate_verify(
         self,
