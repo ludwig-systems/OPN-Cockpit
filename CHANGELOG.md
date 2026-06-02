@@ -117,8 +117,7 @@ Public-Release auf GitHub.
 Komplette Umstellung der Präsentations-Schicht von PySide6-Desktop-GUI auf
 lokale **FastAPI + Web-Frontend**. Core, Orchestrierung, Vault, Audit
 bleiben unverändert. User-Entscheidung nach Mockup-Vergleich zugunsten
-einer publikations-tauglichen Optik („Calm Precision"-Aesthetik, siehe
-[mockups/web-mockup.html](mockups/web-mockup.html)).
+einer publikations-tauglichen Optik („Calm Precision"-Aesthetik).
 
 ### Iterations-Plan
 

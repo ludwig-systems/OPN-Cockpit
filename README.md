@@ -115,30 +115,14 @@ Details pro Plattform:
 
 ## Entwicklung
 
-```powershell
-# Windows / PAW
-.\scripts\setup-venv.ps1     # erzeugt .venv\, installiert Runtime + Dev-Tooling, läuft pytest -q
-.\start.bat                  # killt alte Cockpit-Instanzen, startet Server, öffnet Browser
-```
+Voraussetzung: Python 3.11+ und [uv](https://docs.astral.sh/uv/).
 
-```bash
-# Linux / macOS
-uv sync                      # Dev-Dependencies installieren
-uv run python -m opn_cockpit # Server starten (Browser-Auto-Open)
+```powershell
+uv sync                              # Runtime + Dev-Tooling
+uv run python -m opn_cockpit         # Server starten (Browser-Auto-Open)
 ```
 
 Vollständiger Dev-Walkthrough: [docs/QUICKSTART.md](docs/QUICKSTART.md).
-
-### Tests
-
-```powershell
-pytest -q                    # Unit-Tests (~580)
-pytest --cov                 # mit Coverage-Report
-pytest -m live               # Integrationstests gegen Test-OPNsense
-```
-
-100 % Coverage im Web-Layer, ≥ 90 % in Core und Orchestrierung,
-ruff + mypy strict clean.
 
 ## CLI (Headless / Automation)
 

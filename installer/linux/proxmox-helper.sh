@@ -94,21 +94,22 @@ if [[ "$MODE" == "update" ]]; then
     INSTALL_DIR="/opt/opn-cockpit"
     DATA_DIR="/var/lib/opn-cockpit"
 
-    # Aktuelle Version aus __init__.py + Commit-Hash. Git als opncockpit
-    # ausfuehren, weil das Repo dem User gehoert - modernes Git lehnt
-    # "dubious ownership" ab wenn als root ausgefuehrt, Output verschwand
-    # im 2>/dev/null und Fallback "?" wurde sichtbar.
+    # Versions-Anzeige: bevorzugt der letzte Release-Tag den der HEAD-Commit
+    # erreicht (git describe --tags --abbrev=0). Damit sieht man "v0.6.2 ->
+    # v0.6.4" statt "0.6.3.dev0 -> 0.6.3.dev0" - __version__ in main wird
+    # zwischen Releases nicht jedes Mal nachgezogen.
+    # Git als opncockpit ausfuehren, weil das Repo dem User gehoert -
+    # modernes Git lehnt "dubious ownership" ab wenn als root ausgefuehrt,
+    # Output verschwand im 2>/dev/null und Fallback "?" wurde sichtbar.
     CURRENT_COMMIT=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
-    CURRENT_DESCRIBE=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --always 2>/dev/null || echo "?")
-    CURRENT_VERSION=$(grep -oP '__version__ = "\K[^"]+' \
-        "$INSTALL_DIR/src/opn_cockpit/__init__.py" 2>/dev/null || echo "?")
+    CURRENT_TAG=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --abbrev=0 2>/dev/null || echo "?")
 
     # TUI: Bestaetigen + explizit Code-vs-Daten klar machen.
     # Wichtig fuer User-Vertrauen: Admin-Login wird NICHT zurueckgesetzt.
     whiptail --backtitle "$BACKTITLE" --title "Update" --yesno \
 "OPN-Cockpit-Installation gefunden.
 
-Aktuell:    $CURRENT_VERSION  (git: $CURRENT_DESCRIBE)
+Aktuell:    $CURRENT_TAG  (Commit $CURRENT_COMMIT)
 Repository: $REPO_URL
 Branch:     $REPO_BRANCH
 
@@ -155,16 +156,14 @@ Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
 
     if systemctl is-active --quiet opn-cockpit.service; then
         NEW_COMMIT=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
-        NEW_DESCRIBE=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --always 2>/dev/null || echo "?")
-        NEW_VERSION=$(grep -oP '__version__ = "\K[^"]+' \
-            "$INSTALL_DIR/src/opn_cockpit/__init__.py" 2>/dev/null || echo "?")
+        NEW_TAG=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --abbrev=0 2>/dev/null || echo "?")
         HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 
         whiptail --backtitle "$BACKTITLE" --title "Update fertig" --msgbox \
 "Update erfolgreich.
 
-Vorher:    $CURRENT_VERSION  (git: $CURRENT_DESCRIBE)
-Jetzt:     $NEW_VERSION  (git: $NEW_DESCRIBE)
+Vorher:    $CURRENT_TAG  (Commit $CURRENT_COMMIT)
+Jetzt:     $NEW_TAG  (Commit $NEW_COMMIT)
 
 Service:   running
 URL:       http://${HOST_IP}:9876
@@ -172,7 +171,7 @@ URL:       http://${HOST_IP}:9876
 User-Daten und Login bleiben unveraendert. Du kannst dich direkt
 mit deinem bestehenden Admin-Konto wieder einloggen." 18 78 || true
 
-        log "Update fertig: $CURRENT_VERSION ($CURRENT_DESCRIBE) -> $NEW_VERSION ($NEW_DESCRIBE)"
+        log "Update fertig: $CURRENT_TAG ($CURRENT_COMMIT) -> $NEW_TAG ($NEW_COMMIT)"
     else
         err "Service ist nach Update nicht aktiv.\n\njournalctl -u opn-cockpit -n 50"
     fi

@@ -5,27 +5,27 @@ in ca. 10 Minuten.
 
 ## 1. Setup (einmalig)
 
-Voraussetzung: Python 3.11+ und [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Endnutzer installieren über den fertigen Installer — siehe
+[INSTALLATION-WINDOWS.md](INSTALLATION-WINDOWS.md) oder
+[../installer/linux/README.md](../installer/linux/README.md).
+
+Aus dem Source-Tree für Dev-Arbeit:
+
+Voraussetzung: Python 3.11+ und
+[uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```powershell
-# Im Repo-Root:
-.\scripts\setup-venv.ps1
+uv sync                              # erzeugt .venv\ + installiert Runtime + Dev-Tooling
 ```
-
-Erzeugt `.venv\`, installiert das Paket samt Dev-Tooling und führt
-`pytest -q` als Sanity-Check.
 
 ## 2. App starten
 
 ```powershell
-.\start.bat
+uv run python -m opn_cockpit
 ```
 
-Doppelklick funktioniert auch. Die Batch:
-- Prüft ob Port 9876 von einer alten Cockpit-Instanz belegt ist und beendet
-  sie sauber
-- Startet den lokalen FastAPI-Server
-- Öffnet automatisch den Browser auf `http://127.0.0.1:9876`
+- Startet den lokalen FastAPI-Server auf `http://127.0.0.1:9876`
+- Öffnet automatisch den Browser
 
 Beim allerersten Start klickst du im Login-Screen **„Neuen Tresor anlegen…"**
 und vergibst ein Master-Passwort (min. 12 Zeichen). Pfad wird vorgeschlagen
