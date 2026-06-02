@@ -312,6 +312,11 @@ class FirmwareStatusEntry(BaseModel):
     update_available: bool
     summary: str
     checked_at_iso: str
+    new_version: str = ""
+    """Zielversion eines verfuegbaren Updates, leer wenn keins ansteht."""
+
+    status_msg: str = ""
+    """OPNsense-eigene Status-Beschreibung fuer Tooltip auf der Karte."""
 
 
 class FirmwareStatusResponse(BaseModel):

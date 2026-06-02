@@ -26,6 +26,7 @@ from opn_cockpit.core.errors import (
     AuthError,
     OpnCockpitError,
     UnreachableError,
+    make_context,
 )
 from opn_cockpit.core.http_client import HttpClient, HttpTarget
 
@@ -47,6 +48,12 @@ class FirmwareStatus:
     ``status`` ist das von OPNsense gemeldete Update-Status-Wort —
     typische Werte: ``none``, ``update``, ``upgrade``, ``ok``. Fuer
     Frontend-Anzeigen nutzen wir ``update_available`` als bool.
+
+    ``new_version`` ist die Zielversion, falls OPNsense ein Update meldet,
+    sonst leer. Ueberblickskachel zeigt das als ``Update: v25.7.2``.
+
+    ``status_msg`` ist OPNsense's eigene Beschreibung des Update-Status
+    ("There are 12 packages to be upgraded.") - fuer Tooltip auf der Karte.
     """
 
     reachable: bool
@@ -55,6 +62,8 @@ class FirmwareStatus:
     status: str
     update_available: bool
     summary: str
+    new_version: str = ""
+    status_msg: str = ""
 
 
 def _extract_version(body: Any) -> str:
@@ -90,6 +99,45 @@ def _extract_status(body: Any) -> tuple[str, bool]:
     # `none` / `ok` = aktuell, `update` / `upgrade` = etwas verfuegbar.
     update_available = status in {"update", "upgrade"}
     return status, update_available
+
+
+def _extract_new_version(body: Any) -> str:
+    """Zielversion eines verfuegbaren Updates, oder leer.
+
+    Mehrere bekannte Quellen, in Praeferenz-Reihenfolge:
+
+    1. ``product.product_target_version`` (24.x / 25.x)
+    2. ``upgrade_packages[*].new`` fuer das ``opnsense``-Hauptpaket
+    3. ``product.product_nickname`` als letzte Fallback-Zeile
+    """
+    if not isinstance(body, dict):
+        return ""
+    product = body.get("product")
+    if isinstance(product, dict):
+        target = product.get("product_target_version") or product.get("target_version")
+        if isinstance(target, str) and target.strip():
+            return target.strip()
+    upgrade_pkgs = body.get("upgrade_packages")
+    if isinstance(upgrade_pkgs, list):
+        for entry in upgrade_pkgs:
+            if not isinstance(entry, dict):
+                continue
+            name = (entry.get("name") or "").strip().lower()
+            if name == "opnsense":
+                new = entry.get("new")
+                if isinstance(new, str) and new.strip():
+                    return new.strip()
+    return ""
+
+
+def _extract_status_msg(body: Any) -> str:
+    """Frei-Text-Beschreibung des Update-Status, fuer Tooltip auf der Karte."""
+    if not isinstance(body, dict):
+        return ""
+    raw = body.get("status_msg")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return ""
 
 
 def fetch_firmware_status(
@@ -130,11 +178,23 @@ def fetch_firmware_status(
         body = None
     version = _extract_version(body)
     status_word, update_available = _extract_status(body)
+    new_version = _extract_new_version(body) if update_available else ""
+    status_msg = _extract_status_msg(body)
+    # Summary kompakt mit Zielversion wenn bekannt, sonst Generik.
+    if update_available:
+        suffix = (
+            f" — Update v{new_version} verfuegbar" if new_version
+            else " — Update verfuegbar"
+        )
+    else:
+        suffix = ""
     return FirmwareStatus(
         reachable=True, authenticated=True,
         version=version, status=status_word,
         update_available=update_available,
-        summary=f"v{version}" + (" — Update verfuegbar" if update_available else ""),
+        summary=f"v{version}{suffix}",
+        new_version=new_version,
+        status_msg=status_msg,
     )
 
 
@@ -151,7 +211,6 @@ def download_backup(
     Fehler, weil OPNsense bei korrektem GET immer mindestens ein
     ``<opnsense>``-Root liefert.
     """
-    from opn_cockpit.core.errors import make_context
     response = client.call(target, key, secret, "GET", BACKUP_DOWNLOAD_ENDPOINT)
     content = response.content
     if not content:

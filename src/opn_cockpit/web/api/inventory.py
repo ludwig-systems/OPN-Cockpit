@@ -385,6 +385,8 @@ def firmware_status(
             update_available=fw.update_available,
             summary=fw.summary,
             checked_at_iso=timestamp,
+            new_version=fw.new_version,
+            status_msg=fw.status_msg,
         )
 
     workers = min(HEARTBEAT_MAX_WORKERS, len(targets))

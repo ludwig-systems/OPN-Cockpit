@@ -786,6 +786,8 @@
           version: r.version,
           status: r.status,
           update_available: r.update_available,
+          new_version: r.new_version || '',
+          status_msg: r.status_msg || '',
           summary: r.summary,
           reachable: r.reachable,
           authenticated: r.authenticated,
@@ -1084,7 +1086,17 @@
       if (fw.update_available) {
         const badge = document.createElement('span');
         badge.className = 'card-firmware-update';
-        badge.textContent = 'Update verfuegbar';
+        // Wenn OPNsense uns die Zielversion verraet, zeigen wir die direkt
+        // - sonst der Generik-Text wie bisher.
+        badge.textContent = fw.new_version
+          ? `Update v${fw.new_version}`
+          : 'Update verfuegbar';
+        // OPNsense-eigene Beschreibung als Tooltip - bewusst kein Modal,
+        // calm-precision-Linie. Fallback auf die Generik-Zeile.
+        const tooltip = fw.status_msg || (fw.new_version
+          ? `Update von v${fw.version} auf v${fw.new_version} verfuegbar`
+          : 'Update verfuegbar');
+        badge.title = tooltip;
         fwRow.appendChild(badge);
       }
       article.appendChild(fwRow);
