@@ -1651,7 +1651,7 @@
         checked_at_iso: data.checked_at_iso,
       };
       result.textContent = data.summary;
-      renderInventory();
+      renderGrid();
       const toastMsg = data.update_available
         ? `Update verfuegbar: v${data.new_version || '(unbekannt)'}`
         : 'Aktuell — kein Update verfuegbar.';
@@ -2010,14 +2010,15 @@
       discard.hidden = true;
     } else if (phase === 'preview') {
       cancel.textContent = 'Abbrechen';
-      back.hidden = false;
+      // Im Retry-Flow (Plan via Offen-Badge geoeffnet) macht "Bearbeiten"
+      // keinen Sinn - der Plan ist persistiert, die Input-Felder wuerden
+      // leer aufgehen weil das Form nicht aus dem Plan vorgeladen wird.
+      // Da bleibt nur Apply oder "Plan verwerfen".
+      back.hidden = retryDeviceIds !== null;
       next.hidden = false;
       next.textContent = 'Aktivieren';
       next.disabled = !$('#pl-confirm').checked;
       saveProfile.hidden = true;
-      // Plan verwerfen ist nur sichtbar wenn es einen Plan gibt - also
-      // immer im Preview-Phase ausser bei reinen Retry-Flows die im
-      // Preview eines bereits applied Plans landen koennten.
       discard.hidden = false;
     } else if (phase === 'result') {
       cancel.textContent = 'Schließen';
