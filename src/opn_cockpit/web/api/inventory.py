@@ -8,6 +8,7 @@ nur waehrend der Session und wird beim Lock/Auto-Lock geloescht.
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ from opn_cockpit.core.device_info import (
     FirmwareStatus,
     download_backup,
     fetch_firmware_status,
+    trigger_firmware_check,
 )
 from opn_cockpit.core.errors import (
     ApiError,
@@ -445,6 +447,119 @@ def firmware_status(
         results = list(pool.map(probe, targets))
     session.touch()
     return FirmwareStatusResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/inventory/devices/{id}/firmware-check
+# ---------------------------------------------------------------------------
+
+# OPNsense's Check laeuft asynchron auf der Box. Nach dem POST warten wir
+# kurz und holen den frischen Status. Defaults sind so gewaehlt, dass die
+# meisten Boxes in 6-10s fertig sind; gross verzoegerte Mirrors kommen
+# evtl. nicht durch und der User klickt halt nochmal.
+FIRMWARE_CHECK_INITIAL_WAIT_S = 3.0
+FIRMWARE_CHECK_POLL_INTERVAL_S = 2.0
+FIRMWARE_CHECK_POLL_TIMEOUT_S = 20.0
+
+
+@router.post(
+    "/devices/{device_id}/firmware-check",
+    response_model=FirmwareStatusEntry,
+)
+def trigger_device_firmware_check(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> FirmwareStatusEntry:
+    """Stoesst OPNsense's "Check for updates" an und liefert frischen Status.
+
+    Synchron: triggert den Check (POST /api/core/firmware/check), wartet
+    auf den Hintergrund-Job (Anfangs-Sleep + Polling), und gibt den
+    aktualisierten Firmware-Status zurueck. Frontend braucht keinen
+    zweiten Aufruf - die "Update verfuegbar"-Badge wird sofort mit dem
+    Ergebnis aktualisiert.
+
+    Blockiert die Verbindung typischerweise 5-12 Sekunden. Bewusst nicht
+    fire-and-forget, weil das User-Erlebnis "klick - kurz warten - Badge
+    aktualisiert" sauberer ist als "klick - irgendwann mal manuell
+    nachladen".
+    """
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+    target = HttpTarget(
+        host=vault_device.host,
+        port=vault_device.port,
+        verify=vault_device.tls_verify,
+    )
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+    timestamp = _iso_now()
+    with HttpClient(targets=[target], tuning=tuning) as client:
+        ok, msg = trigger_firmware_check(
+            client, target, vault_device.api_key, vault_device.api_secret,
+        )
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Update-Check konnte nicht angestossen werden: {msg}",
+            )
+        fw = _wait_for_firmware_check(
+            client, target, vault_device.api_key, vault_device.api_secret,
+        )
+    session.touch()
+    return FirmwareStatusEntry(
+        device_id=vault_device.id,
+        reachable=fw.reachable,
+        authenticated=fw.authenticated,
+        version=fw.version,
+        status=fw.status,
+        update_available=fw.update_available,
+        summary=fw.summary,
+        checked_at_iso=timestamp,
+        new_version=fw.new_version,
+        status_msg=fw.status_msg,
+    )
+
+
+def _wait_for_firmware_check(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> FirmwareStatus:
+    """Pollt OPNsense's firmware/status nach erfolgtem Check.
+
+    Strategie:
+    1. Kurz schlafen (Anfangs-Wait), weil OPNsense's Job-Queue meist
+       schon nach ~3s Resultate hat.
+    2. Status holen. Wenn status_msg signalisiert "Currently checking"
+       (oder leer ist), weiter pollen bis Timeout.
+    3. Letzte Antwort zurueckgeben - lieber etwas Stalefood als haengen.
+    """
+    time.sleep(FIRMWARE_CHECK_INITIAL_WAIT_S)
+    deadline = time.monotonic() + FIRMWARE_CHECK_POLL_TIMEOUT_S
+    fw = fetch_firmware_status(client, target, key, secret)
+    while time.monotonic() < deadline:
+        # OPNsense signalisiert laufenden Check teils ueber "Currently checking"
+        # im status_msg oder ueber leeren status_msg + status="" - wenn wir
+        # einen "fertigen" Status-Wort wie update/none/ok/upgrade haben,
+        # akzeptieren wir das als fertig.
+        if fw.status and fw.status.lower() in {"ok", "none", "update", "upgrade"}:
+            return fw
+        time.sleep(FIRMWARE_CHECK_POLL_INTERVAL_S)
+        fw = fetch_firmware_status(client, target, key, secret)
+    return fw
 
 
 # ---------------------------------------------------------------------------

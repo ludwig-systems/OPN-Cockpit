@@ -31,6 +31,7 @@ from opn_cockpit.core.errors import (
 from opn_cockpit.core.http_client import HttpClient, HttpTarget
 
 FIRMWARE_STATUS_ENDPOINT = "/api/core/firmware/status"
+FIRMWARE_CHECK_ENDPOINT = "/api/core/firmware/check"
 BACKUP_DOWNLOAD_ENDPOINT = "/api/core/backup/download/this"
 
 
@@ -203,6 +204,47 @@ def fetch_firmware_status(
         new_version=new_version,
         status_msg=status_msg,
     )
+
+
+def trigger_firmware_check(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> tuple[bool, str]:
+    """Stoesst auf OPNsense den "Check for Updates"-Vorgang an.
+
+    Aequivalent zum Klick auf "Check for updates" im OPNsense-Firmware-View.
+    Der Vorgang ist auf OPNsense-Seite asynchron - die Antwort kommt
+    typischerweise sofort, die eigentliche Aktualisierung der Status-Cache
+    laeuft fuer 5-30 Sekunden im Hintergrund.
+
+    Liefert ``(success, message)``. ``success=False`` heisst entweder Auth/
+    Netzwerkfehler oder OPNsense hat die Aktion abgelehnt. ``message`` ist
+    eine kurze Diagnose fuer das Frontend.
+    """
+    try:
+        response = client.call(target, key, secret, "POST", FIRMWARE_CHECK_ENDPOINT)
+    except AuthError as exc:
+        return False, f"Auth abgelehnt: {exc.context.summary or 'Schluessel/Secret falsch'}"
+    except UnreachableError as exc:
+        if exc.context.error_kind == "tls":
+            reason = exc.context.summary or "Cert ungueltig"
+            return False, f"TLS-Verifikation fehlgeschlagen: {reason}"
+        return False, f"nicht erreichbar: {exc.context.summary or exc.context.error_kind}"
+    except OpnCockpitError as exc:
+        return False, f"Antwort ungewoehnlich: {exc.context.error_kind}"
+    # OPNsense liefert typischerweise {"status": "ok"}; wir akzeptieren
+    # alles im 2xx-Bereich (HttpClient hat das schon gefiltert) als OK.
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict):
+        status_str = body.get("status")
+        if isinstance(status_str, str) and status_str.lower() in {"ok", "running"}:
+            return True, "Check angestossen."
+    return True, "Check angestossen."
 
 
 def download_backup(

@@ -1007,7 +1007,7 @@
     openLink.href = `https://${device.host}:${device.port}/`;
     openLink.target = '_blank';
     openLink.title = 'OPNsense-Weboberfläche öffnen';
-    openLink.innerHTML = `<svg width="12" height="12" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    openLink.innerHTML = `<svg width="17" height="17" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
       <path d="M6.5 2H3a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V6.5"/>
       <path d="M8 1.5h3.5V5"/>
       <line x1="6" y1="7" x2="11.5" y2="1.5"/>
@@ -1607,6 +1607,58 @@
       result.textContent = data.summary;
     } catch (err) {
       result.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+      if (labelSpan) labelSpan.textContent = originalLabel;
+    }
+  }
+
+  async function doFirmwareCheck() {
+    // Stoesst auf der OPNsense den "Check for updates"-Vorgang an. Backend
+    // blockiert ~5-12s waehrend der Check durchlaeuft, danach kommt der
+    // frische Firmware-Status zurueck und die Kachel-Badge aktualisiert sich.
+    if (!currentDeviceId) return;
+    const btn = $('#device-update-check-btn');
+    const result = $('#device-test-result');
+    const labelSpan = btn.querySelector('span');
+    const originalLabel = labelSpan ? labelSpan.textContent : btn.textContent;
+    btn.disabled = true;
+    if (labelSpan) labelSpan.textContent = 'Pruefe…';
+    result.textContent = 'OPNsense pruefend (bis ~15s)…';
+    try {
+      const response = await apiPost(
+        `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/firmware-check`,
+      );
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        result.textContent = body.detail || `Fehler ${response.status}`;
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      const data = await response.json();
+      // State aktualisieren, damit die Kachel beim naechsten Render den
+      // neuen Stand zeigt (Badge erscheint/verschwindet sofort).
+      state.firmware[data.device_id] = {
+        version: data.version,
+        status: data.status,
+        update_available: data.update_available,
+        new_version: data.new_version || '',
+        status_msg: data.status_msg || '',
+        summary: data.summary,
+        reachable: data.reachable,
+        authenticated: data.authenticated,
+        checked_at_iso: data.checked_at_iso,
+      };
+      result.textContent = data.summary;
+      renderInventory();
+      const toastMsg = data.update_available
+        ? `Update verfuegbar: v${data.new_version || '(unbekannt)'}`
+        : 'Aktuell — kein Update verfuegbar.';
+      showToast(toastMsg);
+    } catch (err) {
+      result.textContent = err.message;
+      showToast(err.message, true);
     } finally {
       btn.disabled = false;
       if (labelSpan) labelSpan.textContent = originalLabel;
@@ -4038,6 +4090,7 @@
     $('#device-edit-btn').addEventListener('click', doEditFromDetail);
     $('#device-duplicate-btn').addEventListener('click', doDuplicate);
     $('#device-backup-btn').addEventListener('click', doBackupDownload);
+    $('#device-update-check-btn').addEventListener('click', doFirmwareCheck);
     $('#device-url-copy').addEventListener('click', doCopyUrl);
     $('#device-modal').addEventListener('click', (e) => {
       if (e.target.id === 'device-modal') closeDeviceModal();
