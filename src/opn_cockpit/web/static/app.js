@@ -12,52 +12,77 @@
 (function () {
   'use strict';
 
-  // -------------------- LastPass-Modal-Killer (Holzhammer) --------------------
+  // -------------------- LastPass-Modal-Killer (Holzhammer v2) --------------------
   //
-  // LastPass injiziert sein Save-Popup direkt in <body>, unabhaengig von
-  // data-lpignore-Hints auf den Eingabefeldern (Verhalten seit LP 4.130).
-  // Auch die statische CSS-Regel display:none reicht in manchen LP-Versionen
-  // nicht weil LP via inline-style oder Shadow-DOM ueberschreibt.
-  // Workaround: MutationObserver auf document.body, jedes neu angefuegte
-  // Element mit [data-lastpass-root]/[data-lastpass-icon-root] und einer
-  // tatsaechlichen visuellen Groesse wird sofort aus dem DOM entfernt.
-  // 0x0-Indikatoren (LP-internes Auto-Fill-Marker) lassen wir in Ruhe
-  // damit LP nicht permanent re-injiziert.
+  // LastPass-Save-Popup steckt in einer CLOSED Shadow-DOM unter
+  // <div data-lastpass-root>. Der Host selbst ist 0x0 Pixel gross
+  // (deshalb hat ihn die v1-Regel mit Groessen-Filter ignoriert).
+  // Der Iframe IM Shadow ist position:fixed/full-viewport — visuell
+  // der Modal-Inhalt. CSS und JS koennen den Iframe NICHT direkt
+  // erreichen (closed shadow), aber wenn der Host weg ist, geht
+  // Shadow+Iframe mit.
+  //
+  // Strategy: Host UNCONDITIONAL entfernen sobald er auftaucht.
+  // Throttle gegen LP-Re-Inject-Loop (max ~5 Entfernungen pro Sekunde).
+  //
+  // Auswirkung: LastPass-Auto-Fill-Icons + Save-Popup beide weg auf
+  // diesem Tab. Wer LP fuer das Cockpit haben will, deaktiviert den
+  // Killer per LASTPASS_KILL_OFF localStorage-Flag (siehe unten).
+  let lpRemovedThisTick = 0;
+  let lpResetTimer = null;
+  const LP_MAX_REMOVALS_PER_SEC = 5;
+  const LP_SELECTORS = [
+    '[data-lastpass-root]',
+    '[data-lastpass-icon-root]',
+    '[data-bitwarden-watching]',
+    '[data-onepassword-overlay-root]',
+    '[data-dashlane-rid]',
+  ].join(',');
   function killLastPassModals(root) {
+    if (lpRemovedThisTick >= LP_MAX_REMOVALS_PER_SEC) return;
     if (!root || typeof root.querySelectorAll !== 'function') return;
-    const sels = [
-      '[data-lastpass-root]',
-      '[data-lastpass-icon-root]',
-      '[data-bitwarden-watching]',
-      '[data-onepassword-overlay-root]',
-      '[data-dashlane-rid]',
-    ];
-    for (const sel of sels) {
-      root.querySelectorAll(sel).forEach((el) => {
-        try {
-          const r = el.getBoundingClientRect();
-          // Nur sichtbare Modal-Container entfernen (Breite ODER Hoehe > 4 px).
-          // 0x0-Hilfsmarker bleiben drin.
-          if (r.width > 4 || r.height > 4) {
-            el.remove();
-          }
-        } catch (_e) {
-          /* ignore */
-        }
-      });
+    let found;
+    try { found = root.querySelectorAll(LP_SELECTORS); } catch (_e) { return; }
+    for (const el of found) {
+      if (lpRemovedThisTick >= LP_MAX_REMOVALS_PER_SEC) break;
+      try {
+        el.remove();
+        lpRemovedThisTick++;
+      } catch (_e) {
+        /* ignore */
+      }
+    }
+    if (!lpResetTimer && lpRemovedThisTick > 0) {
+      lpResetTimer = setTimeout(() => {
+        lpRemovedThisTick = 0;
+        lpResetTimer = null;
+      }, 1000);
     }
   }
   function setupLastPassKiller() {
     if (!document.body || typeof MutationObserver === 'undefined') return;
-    killLastPassModals(document.body);
+    // Opt-out fuer User die LP doch wollen
+    try {
+      if (localStorage.getItem('LASTPASS_KILL_OFF') === '1') return;
+    } catch (_e) { /* private mode */ }
+    killLastPassModals(document.documentElement);
     const obs = new MutationObserver((mutations) => {
       for (const m of mutations) {
-        for (const node of m.addedNodes) {
-          if (node.nodeType === 1) killLastPassModals(node);
+        if (m.type === 'childList') {
+          for (const node of m.addedNodes) {
+            if (node.nodeType === 1) {
+              // Pruefe Node selbst + Subtree
+              if (node.matches && node.matches(LP_SELECTORS)) {
+                try { node.remove(); lpRemovedThisTick++; } catch (_e) {}
+              } else {
+                killLastPassModals(node);
+              }
+            }
+          }
         }
       }
     });
-    obs.observe(document.body, { childList: true, subtree: true });
+    obs.observe(document.documentElement, { childList: true, subtree: true });
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', setupLastPassKiller, { once: true });
