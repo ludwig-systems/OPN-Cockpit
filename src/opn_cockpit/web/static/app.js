@@ -3318,37 +3318,97 @@
   async function openAboutModal() {
     const modal = $('#about-modal');
     modal.hidden = false;
-    if (aboutLoaded) return;
-    try {
-      const response = await fetch('/api/about');
-      if (!response.ok) return;
-      const data = await response.json();
-      $('#about-name').textContent = data.name || 'OPN-Cockpit';
-      // 'version' ist die effektive Release-Version (Git-Tag wenn verfuegbar,
-      // sonst __version__). 'version_source' ist die rohe Source-Konstante.
-      // Wenn beide unterschiedlich sind, zeigen wir die effektive prominent
-      // und die Source in Klammern - das macht klar dass der Container von
-      // main mit einem reachable Tag laeuft.
-      const effective = data.version || '—';
-      const source = data.version_source || effective;
-      $('#about-version').textContent =
-        (effective !== source) ? `${effective} (Source: ${source})` : effective;
-      $('#about-author').textContent = data.author || '—';
-      const email = $('#about-email');
-      if (data.author_email) {
-        email.textContent = data.author_email;
-        email.href = `mailto:${data.author_email}`;
+    // About-Stammdaten (Version, Author, etc.) sind statisch und brauchen
+    // nicht jedes Mal nachgeladen werden.
+    if (!aboutLoaded) {
+      try {
+        const response = await fetch('/api/about');
+        if (response.ok) {
+          const data = await response.json();
+          $('#about-name').textContent = data.name || 'OPN-Cockpit';
+          // 'version' ist die effektive Release-Version (Git-Tag wenn verfuegbar,
+          // sonst __version__). 'version_source' ist die rohe Source-Konstante.
+          // Wenn beide unterschiedlich sind, zeigen wir die effektive prominent
+          // und die Source in Klammern - das macht klar dass der Container von
+          // main mit einem reachable Tag laeuft.
+          const effective = data.version || '—';
+          const source = data.version_source || effective;
+          $('#about-version').textContent =
+            (effective !== source) ? `${effective} (Source: ${source})` : effective;
+          $('#about-author').textContent = data.author || '—';
+          const email = $('#about-email');
+          if (data.author_email) {
+            email.textContent = data.author_email;
+            email.href = `mailto:${data.author_email}`;
+          }
+          const repo = $('#about-github');
+          if (data.github_url) {
+            repo.textContent = data.github_url;
+            repo.href = data.github_url;
+          }
+          $('#about-license').textContent = data.license || '—';
+          aboutLoaded = true;
+        }
+      } catch (_err) {
+        /* still show what's in the markup; nothing fatal */
       }
-      const repo = $('#about-github');
-      if (data.github_url) {
-        repo.textContent = data.github_url;
-        repo.href = data.github_url;
-      }
-      $('#about-license').textContent = data.license || '—';
-      aboutLoaded = true;
-    } catch (_err) {
-      /* still show what's in the markup; nothing fatal */
     }
+    // Update-Status JEDES Mal frisch holen (force=true, kein Cache).
+    // Macht das About-Modal zur natuerlichen "ist was Neues da?"-Stelle.
+    refreshAboutUpdateStatus();
+  }
+
+  async function refreshAboutUpdateStatus() {
+    const block = $('#about-update-block');
+    const value = $('#about-update-value');
+    const link = $('#about-update-link');
+    if (!block || !value) return;
+    // Loading-Zustand setzen
+    block.dataset.status = 'loading';
+    value.innerHTML = '<span class="about-update-spinner" aria-hidden="true"></span>Pruefe Update-Quelle …';
+    if (link) link.hidden = true;
+    let data;
+    try {
+      const response = await fetch('/api/updates/check?force=true', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      data = await response.json();
+    } catch (_err) {
+      block.dataset.status = 'error';
+      value.textContent = 'Update-Quelle nicht erreichbar.';
+      return;
+    }
+    const current = data.current_version || '—';
+    const latest = data.latest_version || '';
+    if (data.status === 'available' && latest) {
+      block.dataset.status = 'available';
+      value.innerHTML = `<strong>${escapeHtml(latest)}</strong> verfuegbar (du hast ${escapeHtml(current)}).`;
+      if (link && data.html_url) {
+        link.href = data.html_url;
+        link.hidden = false;
+      }
+      // Banner oben auf der Seite zusaetzlich anstossen
+      checkForUpdate();
+    } else if (data.status === 'up-to-date') {
+      block.dataset.status = 'up-to-date';
+      value.textContent = `Du hast die neueste Version (${current}).`;
+    } else if (data.status === 'disabled') {
+      block.dataset.status = 'disabled';
+      value.textContent = 'Update-Check ist deaktiviert (Settings).';
+    } else {
+      block.dataset.status = 'unknown';
+      value.textContent = data.last_checked_iso
+        ? `Konnte den Status nicht ermitteln (letzter erfolgreicher Check: ${data.last_checked_iso}).`
+        : 'Konnte den Status nicht ermitteln.';
+    }
+  }
+
+  function escapeHtml(s) {
+    if (typeof s !== 'string') return '';
+    return s.replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
   }
 
   function closeAboutModal() {

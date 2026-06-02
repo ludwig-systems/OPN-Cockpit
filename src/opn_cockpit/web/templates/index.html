@@ -1092,6 +1092,19 @@
             <dd id="about-license">—</dd>
           </dl>
 
+          <!-- Update-Status: wird bei jedem Oeffnen des Modals frisch geprueft
+               (force=true, kein Cache). Macht das Modal zur intuitiven Stelle
+               um "gibt's was Neues?" zu beantworten. -->
+          <div class="about-update" id="about-update-block">
+            <div class="about-update-label">Update-Status</div>
+            <div class="about-update-value" id="about-update-value">
+              <span class="about-update-spinner" aria-hidden="true"></span>
+              Pruefe Update-Quelle …
+            </div>
+            <a class="about-update-link" id="about-update-link" href="#"
+               target="_blank" rel="noopener noreferrer" hidden>Release-Notes</a>
+          </div>
+
           <p class="form-hint">
             Dieses Tool ist ein Side-Project und wird laufend weiterentwickelt.
             Issues und Verbesserungsvorschläge gehören in das GitHub-Repository.
