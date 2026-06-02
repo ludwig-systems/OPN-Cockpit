@@ -67,6 +67,20 @@ def check_device(
             summary=f"erreichbar, aber Auth abgelehnt: {reason}",
         )
     except UnreachableError as exc:
+        # TLS-Cert-Probleme verdienen einen eigenen Wortlaut - Host ist
+        # technisch erreichbar, wir vertrauen ihm aber nicht. Sonst denkt der
+        # Admin "Netzwerk weg" obwohl in Wirklichkeit das Zertifikat fehlt.
+        if exc.context.error_kind == "tls":
+            return HealthResult(
+                reachable=True,
+                authenticated=False,
+                summary=(
+                    f"TLS-Verifikation fehlgeschlagen: "
+                    f"{exc.context.summary or 'Zertifikat nicht vertrauenswuerdig'}. "
+                    "Fixe das Zertifikat auf der OPNsense oder schalte "
+                    "TLS-Pruefung fuer dieses Geraet ab (Risiko-Markierung)."
+                ),
+            )
         return HealthResult(
             reachable=False,
             authenticated=False,

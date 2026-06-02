@@ -473,6 +473,16 @@ def _download_device_backup_impl(device_id: str, session: Session) -> Response:
             ),
         ) from exc
     except UnreachableError as exc:
+        if exc.context.error_kind == "tls":
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    f"TLS-Verifikation fehlgeschlagen: "
+                    f"{exc.context.summary or 'Zertifikat nicht vertrauenswuerdig'}. "
+                    "Fixe das Zertifikat auf der OPNsense (SAN/Hostname pruefen) "
+                    "oder schalte TLS-Pruefung fuer dieses Geraet im Inventar ab."
+                ),
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Geraet nicht erreichbar: {exc.context.summary or exc.context.error_kind}.",

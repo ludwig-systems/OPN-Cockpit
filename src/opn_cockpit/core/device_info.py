@@ -161,6 +161,13 @@ def fetch_firmware_status(
             summary=f"Auth abgelehnt: {exc.context.summary or 'Schluessel/Secret falsch'}",
         )
     except UnreachableError as exc:
+        if exc.context.error_kind == "tls":
+            tls_reason = exc.context.summary or "Cert ungueltig"
+            return FirmwareStatus(
+                reachable=True, authenticated=False,
+                version="unknown", status="unknown", update_available=False,
+                summary=f"TLS-Verifikation fehlgeschlagen: {tls_reason}",
+            )
         return FirmwareStatus(
             reachable=False, authenticated=False,
             version="unknown", status="unknown", update_available=False,

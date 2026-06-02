@@ -141,7 +141,8 @@ def _is_selected(entry: Any) -> bool:
     if not isinstance(entry, dict):
         return False
     raw = entry.get("selected")
-    return raw in {1, "1", True}
+    # Python: True == 1, daher reicht {1, "1"} - True wird durch 1 abgedeckt.
+    return raw in {1, "1"}
 
 
 def _selected_key(value: Any, default: str) -> str:

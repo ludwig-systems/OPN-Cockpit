@@ -21,6 +21,7 @@ Keine GUI-, ``keyring``- oder Logging-Imports.
 from __future__ import annotations
 
 import base64
+import ssl
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -70,6 +71,34 @@ class HttpTuning:
     def backoff_delay_s(self, attempt: int) -> float:
         """Verzögerung vor dem nächsten Retry (0-indizierter Attempt)."""
         return self.retry_backoff_base_s * (self.retry_backoff_factor**attempt)
+
+
+# ---------------------------------------------------------------------------
+# SSL-Fehler-Erkennung
+# ---------------------------------------------------------------------------
+
+
+def _ssl_error_reason(exc: BaseException) -> str | None:
+    """Wenn in der Exception-Kette ein SSLError steckt, liefere eine kurze
+    Beschreibung. Sonst None.
+
+    httpx wickelt SSL-Fehler in ``httpx.ConnectError`` ein; die echte
+    Ursache steckt in ``__cause__`` (oder ``__context__``). Wir wandern die
+    Kette ab und liefern eine **adminfreundliche** Kurzfassung, die in einem
+    Toast sinnvoll lesbar ist (Hostname mismatch / cert expired / self-signed).
+    """
+    cur: BaseException | None = exc
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, ssl.SSLCertVerificationError):
+            reason = (cur.verify_message or "").strip() or str(cur)
+            return f"Zertifikat ungueltig ({reason})"
+        if isinstance(cur, ssl.SSLError):
+            short = (cur.reason or "").strip() or str(cur)
+            return f"TLS-Handshake-Fehler ({short})"
+        cur = cur.__cause__ or cur.__context__
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +303,23 @@ class HttpClient:
                 ) from exc
             except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as exc:
                 last_exc = exc
+                # TLS-Verifikations-Fehler sind nicht durch Wiederholung heilbar
+                # und brauchen eine eigene Fehlerkategorie, damit das Frontend
+                # gezielt sagen kann "Cert passt nicht, nicht: Netzwerk weg".
+                ssl_reason = _ssl_error_reason(exc)
+                if ssl_reason is not None:
+                    raise UnreachableError(
+                        f"TLS-Verifikation gegen {target.host}:{target.port}"
+                        f" fehlgeschlagen: {ssl_reason}",
+                        context=make_context(
+                            host=target.host,
+                            port=target.port,
+                            method=method,
+                            path=url,
+                            error_kind="tls",
+                            summary=ssl_reason,
+                        ),
+                    ) from exc
                 if attempt < attempts - 1:
                     self._sleep(self._tuning.backoff_delay_s(attempt))
                     continue
@@ -288,7 +334,22 @@ class HttpClient:
                     ),
                 ) from exc
             except httpx.HTTPError as exc:
-                # Sonstige httpx-Fehler (z. B. TLS) — als unerreichbar einstufen.
+                # Sonstige httpx-Fehler — falls TLS drin steckt, das auch hier
+                # erkennen (theoretisch deckt httpx das oben ab, aber defensive).
+                ssl_reason = _ssl_error_reason(exc)
+                if ssl_reason is not None:
+                    raise UnreachableError(
+                        f"TLS-Verifikation gegen {target.host}:{target.port}"
+                        f" fehlgeschlagen: {ssl_reason}",
+                        context=make_context(
+                            host=target.host,
+                            port=target.port,
+                            method=method,
+                            path=url,
+                            error_kind="tls",
+                            summary=ssl_reason,
+                        ),
+                    ) from exc
                 raise UnreachableError(
                     f"HTTP-Fehler gegen {target.host}:{target.port}: {exc.__class__.__name__}",
                     context=make_context(
