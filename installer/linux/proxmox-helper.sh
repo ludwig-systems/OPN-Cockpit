@@ -94,8 +94,12 @@ if [[ "$MODE" == "update" ]]; then
     INSTALL_DIR="/opt/opn-cockpit"
     DATA_DIR="/var/lib/opn-cockpit"
 
-    # Aktuelle Version aus __init__.py + Commit-Hash
-    CURRENT_COMMIT=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+    # Aktuelle Version aus __init__.py + Commit-Hash. Git als opncockpit
+    # ausfuehren, weil das Repo dem User gehoert - modernes Git lehnt
+    # "dubious ownership" ab wenn als root ausgefuehrt, Output verschwand
+    # im 2>/dev/null und Fallback "?" wurde sichtbar.
+    CURRENT_COMMIT=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+    CURRENT_DESCRIBE=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --always 2>/dev/null || echo "?")
     CURRENT_VERSION=$(grep -oP '__version__ = "\K[^"]+' \
         "$INSTALL_DIR/src/opn_cockpit/__init__.py" 2>/dev/null || echo "?")
 
@@ -104,7 +108,7 @@ if [[ "$MODE" == "update" ]]; then
     whiptail --backtitle "$BACKTITLE" --title "Update" --yesno \
 "OPN-Cockpit-Installation gefunden.
 
-Aktuell:    $CURRENT_VERSION  (Commit $CURRENT_COMMIT)
+Aktuell:    $CURRENT_VERSION  (git: $CURRENT_DESCRIBE)
 Repository: $REPO_URL
 Branch:     $REPO_BRANCH
 
@@ -150,7 +154,8 @@ Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
     done
 
     if systemctl is-active --quiet opn-cockpit.service; then
-        NEW_COMMIT=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+        NEW_COMMIT=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+        NEW_DESCRIBE=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --always 2>/dev/null || echo "?")
         NEW_VERSION=$(grep -oP '__version__ = "\K[^"]+' \
             "$INSTALL_DIR/src/opn_cockpit/__init__.py" 2>/dev/null || echo "?")
         HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -158,8 +163,8 @@ Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
         whiptail --backtitle "$BACKTITLE" --title "Update fertig" --msgbox \
 "Update erfolgreich.
 
-Vorher:    $CURRENT_VERSION  (Commit $CURRENT_COMMIT)
-Jetzt:     $NEW_VERSION  (Commit $NEW_COMMIT)
+Vorher:    $CURRENT_VERSION  (git: $CURRENT_DESCRIBE)
+Jetzt:     $NEW_VERSION  (git: $NEW_DESCRIBE)
 
 Service:   running
 URL:       http://${HOST_IP}:9876
@@ -167,7 +172,7 @@ URL:       http://${HOST_IP}:9876
 User-Daten und Login bleiben unveraendert. Du kannst dich direkt
 mit deinem bestehenden Admin-Konto wieder einloggen." 18 78 || true
 
-        log "Update fertig: $CURRENT_VERSION ($CURRENT_COMMIT) -> $NEW_VERSION ($NEW_COMMIT)"
+        log "Update fertig: $CURRENT_VERSION ($CURRENT_DESCRIBE) -> $NEW_VERSION ($NEW_DESCRIBE)"
     else
         err "Service ist nach Update nicht aktiv.\n\njournalctl -u opn-cockpit -n 50"
     fi
