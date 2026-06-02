@@ -16,8 +16,9 @@ from pathlib import Path
 
 import httpx
 
-from opn_cockpit import __github_url__, __version__
+from opn_cockpit import __github_url__
 from opn_cockpit.config import AppSettings
+from opn_cockpit.runtime_version import get_runtime_version
 from opn_cockpit.updates.cache import UpdateCache, default_update_cache_path
 from opn_cockpit.updates.github import (
     GitHubReleaseError,
@@ -99,7 +100,7 @@ class UpdateChecker:
     def _disabled_result() -> UpdateCheckResult:
         return UpdateCheckResult(
             status="disabled",
-            current_version=__version__,
+            current_version=get_runtime_version(),
             latest_version=None,
             html_url=None,
             last_checked_iso=None,
@@ -110,7 +111,7 @@ class UpdateChecker:
     def _error_result(*, last_checked_iso: str | None) -> UpdateCheckResult:
         return UpdateCheckResult(
             status="unknown",
-            current_version=__version__,
+            current_version=get_runtime_version(),
             latest_version=None,
             html_url=None,
             last_checked_iso=last_checked_iso,
@@ -122,17 +123,17 @@ class UpdateChecker:
         if not latest:
             return UpdateCheckResult(
                 status="unknown",
-                current_version=__version__,
+                current_version=get_runtime_version(),
                 latest_version=None,
                 html_url=cache.html_url,
                 last_checked_iso=cache.last_checked_iso,
                 source="cache",
             )
-        cmp_result = compare_versions(__version__, latest)
+        cmp_result = compare_versions(get_runtime_version(), latest)
         status: UpdateStatus = "available" if cmp_result < 0 else "up-to-date"
         return UpdateCheckResult(
             status=status,
-            current_version=__version__,
+            current_version=get_runtime_version(),
             latest_version=latest,
             html_url=cache.html_url,
             last_checked_iso=cache.last_checked_iso,

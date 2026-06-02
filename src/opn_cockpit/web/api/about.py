@@ -17,16 +17,27 @@ from opn_cockpit import (
     __license_label__,
     __version__,
 )
+from opn_cockpit.runtime_version import get_runtime_version
 
 router = APIRouter(prefix="/api", tags=["about"])
 
 
 @router.get("/about", include_in_schema=False)
 def about() -> dict[str, str]:
-    """Versionsstand + Entwickler-Kontakt + Repo-URL."""
+    """Versionsstand + Entwickler-Kontakt + Repo-URL.
+
+    ``version`` ist die *effektive* Version: Git-Tag wenn der Container
+    von main gepullt hat (z.B. ``v0.6.4``), sonst die Source-Konstante
+    ``__version__`` aus __init__.py (z.B. ``0.6.4`` beim Windows-
+    Installer der vom Workflow gepatcht wurde).
+
+    ``version_source`` ist die rohe ``__version__``-Konstante, fuer
+    Debugging / Anzeige als sekundaere Info.
+    """
     return {
         "name": "OPN-Cockpit",
-        "version": __version__,
+        "version": get_runtime_version(),
+        "version_source": __version__,
         "author": __author__,
         "author_email": __author_email__,
         "github_url": __github_url__,

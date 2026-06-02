@@ -3324,7 +3324,15 @@
       if (!response.ok) return;
       const data = await response.json();
       $('#about-name').textContent = data.name || 'OPN-Cockpit';
-      $('#about-version').textContent = data.version || '—';
+      // 'version' ist die effektive Release-Version (Git-Tag wenn verfuegbar,
+      // sonst __version__). 'version_source' ist die rohe Source-Konstante.
+      // Wenn beide unterschiedlich sind, zeigen wir die effektive prominent
+      // und die Source in Klammern - das macht klar dass der Container von
+      // main mit einem reachable Tag laeuft.
+      const effective = data.version || '—';
+      const source = data.version_source || effective;
+      $('#about-version').textContent =
+        (effective !== source) ? `${effective} (Source: ${source})` : effective;
       $('#about-author').textContent = data.author || '—';
       const email = $('#about-email');
       if (data.author_email) {
