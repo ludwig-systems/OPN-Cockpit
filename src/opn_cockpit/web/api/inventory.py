@@ -519,7 +519,8 @@ def _download_device_backup_impl(device_id: str, session: Session) -> Response:
         AuditEventKind.BACKUP_DOWNLOADED,
         actor=audit_actor(session),
         action="backup_download",
-        device_id=device_id,
+        target_device_id=device_id,
+        target_device_name=vault_device.name,
         summary=f"Konfig-Backup geladen von {vault_device.name} ({len(content)} Bytes)",
     )
     session.touch()
