@@ -112,6 +112,7 @@
     selectedDeviceIds: new Set(),  // globale Multi-Auswahl fuer Plan/Apply
     outstandingByDevice: {},       // device_id -> { count, plans[] }
     backupsByDevice: {},           // device_id -> { count, latestTs }
+    certsByDevice: {},             // device_id -> { count, soonestDays, certs[], summary }
     firmware: {},                  // device_id -> { version, status, update_available, summary, checked_at_iso }
     firmwareLoading: false,
     serverMode: 'vault',           // 'vault' (single) | 'user-db' (multi)
@@ -772,6 +773,30 @@
     // nach Inventar-Laden + manuelles Refresh in der Karten-Action.
     loadFirmwareStatus().catch(() => {});
     loadBackupCounts().catch(() => {});
+    loadCertStatus().catch(() => {});
+  }
+
+  async function loadCertStatus(deviceIds = null) {
+    // Holt pro Geraet die OPNsense-Cert-Inventur. Einmal pro Inventar-
+    // Load - kein 30s-Polling (Audit-Eintraege in der OPNsense).
+    try {
+      const body = deviceIds ? { device_ids: deviceIds } : { device_ids: [] };
+      const r = await apiPost('/api/inventory/cert-status', body);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) return;
+      const data = await r.json();
+      for (const entry of data.results || []) {
+        state.certsByDevice[entry.device_id] = {
+          count: (entry.certs || []).length,
+          soonestDays: entry.soonest_days,
+          certs: entry.certs || [],
+          summary: entry.summary,
+          reachable: entry.reachable,
+          authenticated: entry.authenticated,
+        };
+      }
+      renderGrid();
+    } catch (_e) { /* still */ }
   }
 
   async function loadBackupCounts() {
@@ -1127,6 +1152,41 @@
         fwRow.appendChild(badge);
       }
       article.appendChild(fwRow);
+    }
+
+    // Cert-Ablauf-Indikator - nur sichtbar wenn das fruehste Cert
+    // weniger als 30 Tage Restlaufzeit hat. <7 Tage = rot, <30 = gelb.
+    // Hinter Ablauf = rot mit Minus-Tagen ("Cert abgelaufen vor 12d").
+    const certInfo = state.certsByDevice[device.id];
+    if (certInfo && certInfo.soonestDays !== null && certInfo.soonestDays !== undefined
+        && certInfo.soonestDays < 30) {
+      const certBadge = document.createElement('button');
+      certBadge.type = 'button';
+      const severity = certInfo.soonestDays < 7 ? 'critical' : 'warning';
+      certBadge.className = `card-cert-badge card-cert-badge-${severity}`;
+      const days = certInfo.soonestDays;
+      let label;
+      if (days < 0) {
+        label = `Cert abgelaufen (${Math.abs(days)}d)`;
+      } else if (days === 0) {
+        label = 'Cert laeuft heute ab';
+      } else if (days === 1) {
+        label = 'Cert laeuft morgen ab';
+      } else {
+        label = `Cert ${days}d`;
+      }
+      certBadge.title = (
+        `${certInfo.count} Cert(s) inventarisiert. Klick fuer Details.`
+      );
+      certBadge.innerHTML = `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 1l4 1.5v3c0 2.6-1.7 5-4 5.7-2.3-.7-4-3.1-4-5.7v-3L6 1z"/>
+        <path d="M4.5 6L5.7 7.2 8 4.5"/>
+      </svg><span>${label}</span>`;
+      certBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openCertDetailModal(device.id);
+      });
+      article.appendChild(certBadge);
     }
 
     // Backup-Indikator - nur sichtbar wenn lokal Backups existieren
@@ -3234,6 +3294,77 @@
     currentBackupDeviceId = null;
   }
 
+  // -------------------- Cert-Detail-Modal --------------------
+
+  function openCertDetailModal(deviceId) {
+    const device = state.devices.find((d) => d.id === deviceId);
+    const info = state.certsByDevice[deviceId];
+    $('#cd-title').textContent = device
+      ? `Zertifikate: ${device.name}`
+      : 'Zertifikate';
+    if (!info || !info.certs || info.certs.length === 0) {
+      $('#cd-list').innerHTML = (
+        '<div class="form-hint">Keine Zertifikate fuer dieses Geraet inventarisiert '
+        + 'oder OPNsense nicht erreichbar.</div>'
+      );
+    } else {
+      renderCertList(info.certs);
+    }
+    $('#cert-detail-modal').hidden = false;
+  }
+
+  function renderCertList(certs) {
+    const list = $('#cd-list');
+    list.innerHTML = '';
+    // Sortieren: kuerzeste Restlaufzeit zuerst (abgelaufen ganz oben)
+    const sorted = [...certs].sort((a, b) => {
+      const aDays = a.days_until_expiry ?? 999999;
+      const bDays = b.days_until_expiry ?? 999999;
+      return aDays - bDays;
+    });
+    for (const c of sorted) {
+      const row = document.createElement('div');
+      row.className = 'cert-row';
+      let severityClass = '';
+      let daysLabel = '–';
+      if (c.days_until_expiry !== null && c.days_until_expiry !== undefined) {
+        const d = c.days_until_expiry;
+        if (d < 0) {
+          severityClass = 'cert-row-critical';
+          daysLabel = `abgelaufen vor ${Math.abs(d)}d`;
+        } else if (d < 7) {
+          severityClass = 'cert-row-critical';
+          daysLabel = `${d}d Restlaufzeit`;
+        } else if (d < 30) {
+          severityClass = 'cert-row-warning';
+          daysLabel = `${d}d Restlaufzeit`;
+        } else {
+          daysLabel = `${d}d Restlaufzeit`;
+        }
+      }
+      if (severityClass) row.classList.add(severityClass);
+      row.innerHTML = `
+        <div class="cert-row-main">
+          <div class="cert-row-name">${c.descr || c.common_name || '(ohne Beschreibung)'}</div>
+          <div class="cert-row-meta">
+            <span>CN: ${c.common_name || '–'}</span>
+            <span>Aussteller: ${c.issuer || '–'}</span>
+            ${c.in_use ? '<span class="cert-row-inuse">IN USE</span>' : ''}
+          </div>
+          <div class="cert-row-expiry">
+            <span class="cert-row-date">${c.not_after_iso || 'kein Ablauf-Datum'}</span>
+            <span class="cert-row-days">${daysLabel}</span>
+          </div>
+        </div>
+      `;
+      list.appendChild(row);
+    }
+  }
+
+  function closeCertDetailModal() {
+    $('#cert-detail-modal').hidden = true;
+  }
+
   async function saveInactivityTimeout() {
     const errBox = $('#vs-timeout-error');
     const okBox = $('#vs-timeout-ok');
@@ -4237,6 +4368,11 @@
       $('#bh-cancel').addEventListener('click', closeBackupHistoryModal);
       $('#backup-history-modal').addEventListener('click', (e) => {
         if (e.target.id === 'backup-history-modal') closeBackupHistoryModal();
+      });
+      $('#cd-close').addEventListener('click', closeCertDetailModal);
+      $('#cd-cancel').addEventListener('click', closeCertDetailModal);
+      $('#cert-detail-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'cert-detail-modal') closeCertDetailModal();
       });
       $('#vs-timeout-save').addEventListener('click', saveInactivityTimeout);
       $('#vs-backup-save').addEventListener('click', saveBackupSettings);
