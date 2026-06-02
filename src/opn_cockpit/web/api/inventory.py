@@ -110,8 +110,10 @@ def add_device(
     require_write_role(session)
     vault_path = _require_vault_path(session)
     # Plausibilitaetspruefung Host (IP oder Hostname) vor dem Anlegen.
+    # validate_host normalisiert (https://...-Praefix, Pfade weg) - den
+    # bereinigten Wert nehmen wir ab hier statt payload.host.
     try:
-        validate_host(payload.host)
+        clean_host = validate_host(payload.host)
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -127,7 +129,7 @@ def add_device(
         new_device = VaultDevice(
             id=VaultDevice.new_id(),
             name=payload.name,
-            host=payload.host,
+            host=clean_host,
             port=payload.port,
             tls_verify=payload.tls_verify,
             tags=list(payload.tags),
@@ -162,9 +164,11 @@ def update_device(
     require_write_role(session)
     vault_path = _require_vault_path(session)
     # Host-Plausibilitaet pruefen, falls Host geaendert werden soll.
+    # validate_host normalisiert (Schema/Pfad weg); wir schreiben den
+    # bereinigten Wert zurueck in payload damit _apply_device_update ihn nutzt.
     if payload.host is not None:
         try:
-            validate_host(payload.host)
+            payload.host = validate_host(payload.host)
         except ValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

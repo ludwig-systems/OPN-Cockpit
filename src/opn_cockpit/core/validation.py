@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from urllib.parse import urlsplit
 
 from opn_cockpit.core.errors import ValidationError, make_context
 
@@ -157,31 +158,69 @@ PORT_MIN = 1
 PORT_MAX = 65535
 
 
+def _strip_url_wrapper(value: str) -> str:
+    """Holt den reinen Host raus, wenn der User eine ganze URL eingegeben hat.
+
+    Admins kopieren oft die URL ihrer OPNsense aus dem Browser, z.B.::
+
+        https://sg1.xl9/        -> sg1.xl9
+        https://10.1.2.3:8443/  -> 10.1.2.3
+        http://hq-berlin.lab    -> hq-berlin.lab
+        [2001:db8::1]           -> 2001:db8::1
+
+    Port und Pfad gehoeren nicht in dieses Feld (Port hat ein eigenes
+    Feld in der UI), deshalb verwerfen wir sie hier still und ohne Fehler.
+    Wenn der Eingabewert weder Schema noch Pfad enthaelt, kommt er
+    unveraendert zurueck.
+
+    Interne TLDs (``.xl9``, ``.lan``, ``.intern``, …) sind ausdruecklich
+    erlaubt — wir pruefen NICHT gegen eine Public-Suffix-Liste, nur
+    RFC-1035-Form pro Label.
+    """
+    cleaned = value.strip()
+    if not cleaned:
+        return cleaned
+    # IPv6 in eckigen Klammern direkt entpacken.
+    if cleaned.startswith("[") and cleaned.endswith("]") and ":" in cleaned:
+        return cleaned[1:-1]
+    # Hat er ein URL-Schema? Dann urlsplit korrekt einsetzen.
+    if "://" in cleaned:
+        host = urlsplit(cleaned).hostname or ""
+        return host.strip()
+    # Kein Schema, aber moeglicherweise trailing /pfad/abc oder ?query.
+    for sep in ("/", "?", "#"):
+        idx = cleaned.find(sep)
+        if idx >= 0:
+            cleaned = cleaned[:idx]
+    return cleaned.strip()
+
+
 def validate_host(value: str) -> str:
     """Validiert einen Host (IPv4, IPv6 oder DNS-Hostname / FQDN).
 
-    Liefert den getrimmten Wert. Wirft ``ValidationError`` bei
-    ungueltigen Eingaben. Akzeptiert:
+    Liefert den **normalisierten** Wert (ohne ``https://``-Praefix,
+    ohne Pfad, ohne eckige Klammern bei IPv6). Wirft ``ValidationError``
+    bei ungueltigen Eingaben. Akzeptiert:
 
     * IPv4: ``10.0.0.1``
     * IPv6: ``2001:db8::1`` (auch in eckigen Klammern)
-    * Hostname: ``opn-1.lab``, ``hq-berlin``
+    * Hostname: ``opn-1.lab``, ``hq-berlin``, ``sg1.xl9`` (interne TLD)
+    * Browser-URL: ``https://sg1.xl9/`` (Schema + Pfad werden entfernt)
     """
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(
             "Hostname / IP darf nicht leer sein.",
             context=make_context(error_kind="host_empty"),
         )
-    cleaned = value.strip()
-    # IPv6 oft in eckigen Klammern in URLs — wir akzeptieren das
-    cleaned_inner = (
-        cleaned[1:-1]
-        if cleaned.startswith("[") and cleaned.endswith("]")
-        else cleaned
-    )
+    cleaned = _strip_url_wrapper(value)
+    if not cleaned:
+        raise ValidationError(
+            "Hostname / IP darf nicht leer sein.",
+            context=make_context(error_kind="host_empty"),
+        )
     # IP-Versuch zuerst
     try:
-        ipaddress.ip_address(cleaned_inner)
+        ipaddress.ip_address(cleaned)
         return cleaned
     except ValueError:
         pass
