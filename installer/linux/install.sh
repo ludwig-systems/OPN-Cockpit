@@ -68,11 +68,18 @@ if [[ -n "$SOURCE_DIR" ]]; then
           --exclude='__pycache__' "$SOURCE_DIR/" "$INSTALL_DIR/"
 elif [[ -d "$INSTALL_DIR/.git" ]]; then
     log "Repo unter '$INSTALL_DIR' auf Branch '$REPO_BRANCH' aktualisieren..."
-    git -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+    # --depth 50 statt 1: braucht der Updater fuer 'git describe --tags'
+    # damit er auch den naechst-aelteren Tag findet, nicht nur HEAD.
+    git -C "$INSTALL_DIR" fetch --depth 50 --tags origin "$REPO_BRANCH"
     git -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH"
 else
     log "Repo nach '$INSTALL_DIR' klonen (Branch '$REPO_BRANCH')..."
-    git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR"
+    # --depth 50: behalten ein bisschen History damit der Updater spaeter
+    # 'git describe --tags' machen kann. Voll-Clone braucht niemand,
+    # aber depth 1 macht describe blind.
+    git clone --depth 50 --branch "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR"
+    # Tag-Refs explizit nachziehen (Shallow-Clone holt sie nicht automatisch).
+    git -C "$INSTALL_DIR" fetch --tags origin
 fi
 
 chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR"

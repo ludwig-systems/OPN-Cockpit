@@ -98,11 +98,16 @@ if [[ "$MODE" == "update" ]]; then
     # erreicht (git describe --tags --abbrev=0). Damit sieht man "v0.6.2 ->
     # v0.6.4" statt "0.6.3.dev0 -> 0.6.3.dev0" - __version__ in main wird
     # zwischen Releases nicht jedes Mal nachgezogen.
+    # Fallback: wenn der Clone zu shallow ist um einen Tag zu erreichen,
+    # zeigen wir __version__ aus __init__.py.
     # Git als opncockpit ausfuehren, weil das Repo dem User gehoert -
-    # modernes Git lehnt "dubious ownership" ab wenn als root ausgefuehrt,
-    # Output verschwand im 2>/dev/null und Fallback "?" wurde sichtbar.
+    # modernes Git lehnt "dubious ownership" ab wenn als root ausgefuehrt.
     CURRENT_COMMIT=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
-    CURRENT_TAG=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --abbrev=0 2>/dev/null || echo "?")
+    CURRENT_TAG=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --abbrev=0 2>/dev/null || true)
+    if [[ -z "$CURRENT_TAG" ]]; then
+        CURRENT_TAG=$(grep -oP '__version__ = "\K[^"]+' \
+            "$INSTALL_DIR/src/opn_cockpit/__init__.py" 2>/dev/null || echo "?")
+    fi
 
     # TUI: Bestaetigen + explizit Code-vs-Daten klar machen.
     # Wichtig fuer User-Vertrauen: Admin-Login wird NICHT zurueckgesetzt.
@@ -138,7 +143,10 @@ Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
     log "Code aktualisieren (git fetch + reset)..."
     # runuser statt sudo -u: sudo ist in LXC-Minimal-Templates nicht
     # installiert, runuser ist Teil von util-linux und immer da.
-    runuser -u opncockpit -- git -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+    # --depth 50 + --tags: ohne Tags zeigt der Update-Dialog '?' statt
+    # 'v0.6.2 -> v0.6.4', und --depth 1 macht 'git describe' blind weil
+    # die Tag-Commits nicht in der lokalen Historie liegen.
+    runuser -u opncockpit -- git -C "$INSTALL_DIR" fetch --depth 50 --tags --force origin "$REPO_BRANCH"
     runuser -u opncockpit -- git -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH"
 
     log "Python-Dependencies aktualisieren..."
@@ -156,7 +164,11 @@ Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
 
     if systemctl is-active --quiet opn-cockpit.service; then
         NEW_COMMIT=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
-        NEW_TAG=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --abbrev=0 2>/dev/null || echo "?")
+        NEW_TAG=$(runuser -u opncockpit -- git -C "$INSTALL_DIR" describe --tags --abbrev=0 2>/dev/null || true)
+        if [[ -z "$NEW_TAG" ]]; then
+            NEW_TAG=$(grep -oP '__version__ = "\K[^"]+' \
+                "$INSTALL_DIR/src/opn_cockpit/__init__.py" 2>/dev/null || echo "?")
+        fi
         HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 
         whiptail --backtitle "$BACKTITLE" --title "Update fertig" --msgbox \
