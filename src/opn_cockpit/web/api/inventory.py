@@ -7,11 +7,13 @@ nur waehrend der Session und wird beim Lock/Auto-Lock geloescht.
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import Response
 
 from opn_cockpit.audit.backend import audit_actor, get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
@@ -23,6 +25,8 @@ from opn_cockpit.core.device_info import (
 from opn_cockpit.core.errors import (
     ApiError,
     AuthError,
+    EgressDeniedError,
+    OpnCockpitError,
     UnreachableError,
     ValidationError,
 )
@@ -55,6 +59,8 @@ from opn_cockpit.web.api.schemas import (
 from opn_cockpit.web.auth.dependencies import require_session
 from opn_cockpit.web.server_state import ServerState
 from opn_cockpit.web.vault_writes import persist_session_vault
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
@@ -393,15 +399,40 @@ def firmware_status(
 def download_device_backup(
     device_id: str,
     session: Session = Depends(require_session),
-) -> "Response":
+) -> Response:
     """Laedt die aktuelle OPNsense-Konfiguration als XML-Download.
 
     Streamed direkt zum Browser (Content-Disposition: attachment).
     Audit-Eintrag BACKUP_DOWNLOADED mit Device-ID + Datei-Groesse.
-    """
-    from datetime import datetime as _dt
 
-    from fastapi.responses import Response
+    Jede unerwartete Exception wird hier zentral gefangen und als 502 mit
+    sprechender Detail-Message zurueckgegeben — wir wollen niemals ein
+    nacktes FastAPI-500 an die UI durchreichen, weil das den User ohne
+    Diagnose stehen laesst.
+    """
+    try:
+        return _download_device_backup_impl(device_id, session)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Alles, was wir hier sehen, ist ein Bug oder eine Umgebungsstoerung
+        # (DB-Lock im Audit, Disk voll, OPNsense-Antwort die wir nicht
+        # einordnen koennen). Vollen Traceback ins Server-Log; nur den
+        # Exception-Typ + kurze Message an den Client.
+        _log.exception(
+            "Backup-Download fuer device_id=%s unerwartet fehlgeschlagen",
+            device_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"Backup-Download fehlgeschlagen ({exc.__class__.__name__}): "
+                f"{str(exc) or 'kein Detail'}. Details im Server-Log."
+            ),
+        ) from exc
+
+
+def _download_device_backup_impl(device_id: str, session: Session) -> Response:
     vault_device = next(
         (d for d in session.opened.data.devices if d.id == device_id), None
     )
@@ -429,22 +460,55 @@ def download_device_backup(
     except AuthError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Backup abgelehnt: {exc.context.summary or 'API-Schluessel ungueltig'}.",
+            detail=(
+                f"Backup abgelehnt: {exc.context.summary or 'API-Schluessel ungueltig'}. "
+                "Pruefe in OPNsense unter System -> Access -> Users, ob der API-User "
+                "das Privileg 'Diagnostics: Configuration History' besitzt."
+            ),
         ) from exc
     except UnreachableError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Geraet nicht erreichbar: {exc.context.summary or exc.context.error_kind}.",
         ) from exc
+    except ValidationError as exc:
+        # OPNsense lehnt den Request strukturell ab (404/405/400). Haeufigster
+        # Grund: Endpunkt /api/core/backup/download/this existiert auf dieser
+        # OPNsense-Version nicht oder der User darf ihn nicht aufrufen.
+        sc = exc.context.status_code or "?"
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"Backup-Endpunkt antwortet HTTP {sc}: "
+                f"{exc.context.summary or exc.context.error_kind}. "
+                "Vermutlich fehlt dem API-User das Privileg "
+                "'Diagnostics: Configuration History' oder die OPNsense-Version "
+                "kennt /api/core/backup/download/this nicht (zu alt)."
+            ),
+        ) from exc
+    except EgressDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Egress verweigert: {exc.context.summary or exc.context.error_kind}.",
+        ) from exc
     except ApiError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"OPNsense-Antwort fehlerhaft: {exc.context.summary or exc.context.error_kind}.",
         ) from exc
+    except OpnCockpitError as exc:
+        # Defense-in-depth: weitere Core-Fehlertypen sauber auf 502 mappen
+        # statt FastAPI 500 zuruecksenden zu lassen.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Backup-Download fehlgeschlagen ({exc.context.error_kind}): "
+                   f"{exc.context.summary or '-'}.",
+        ) from exc
 
     # Datei-Name: device-name + ISO-Datum (ohne Doppelpunkte, sonst meckert Windows).
-    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in vault_device.name).strip("_") or "device"
-    ts = _dt.now().strftime("%Y-%m-%d_%H%M%S")
+    safe_chars = (c if c.isalnum() or c in "_-" else "_" for c in vault_device.name)
+    safe_name = "".join(safe_chars).strip("_") or "device"
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     filename = f"opnsense-config-{safe_name}-{ts}.xml"
 
     get_audit_backend().append(

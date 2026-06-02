@@ -1,7 +1,7 @@
 # OPN-Cockpit
 
 Multi-Site-Management für OPNsense-Firewalls. Zentrale, ferngesteuerte
-Konfiguration mehrerer Standorte (bis ca. 25 Geräte) über die OPNsense-
+Konfiguration mehrerer Standorte über die OPNsense-
 REST-API: Routen, Aliase, Bulk-Import, Audit-Log, Read-back-Verifikation
 und Plan/Apply-Vorschau vor jedem Rollout.
 
@@ -30,6 +30,42 @@ Details pro Plattform:
 
 - [docs/INSTALLATION-WINDOWS.md](docs/INSTALLATION-WINDOWS.md) — Windows-Installer + SmartScreen + Auto-Update + Multi-User-Server
 - [installer/linux/README.md](installer/linux/README.md) — Linux-Server, Proxmox-LXC, Docker
+
+## API-Key + Secret in OPNsense erzeugen
+
+Pro OPNsense-Instanz braucht OPN-Cockpit ein **API-Key/Secret-Paar**, das
+einem eigens dafür angelegten User zugeordnet ist. Empfehlung: **nicht**
+den `root`-Account verwenden, sondern einen dedizierten Service-User mit
+minimalen Rechten.
+
+1. In der OPNsense-Weboberfläche: **System → Access → Users → +** (neuer User)
+   - Username: z. B. `opn-cockpit`
+   - Passwort: nicht relevant für API-Nutzung (langes Zufallspasswort genügt,
+     Login wird nicht gebraucht)
+   - **Privileges** je nach geplantem Einsatz (Beispiel-Set für Routen,
+     Aliase, Backup, Firmware-Status):
+     - `Diagnostics: Configuration History` *(Backup-Download)*
+     - `Firewall: Aliases: Edit`
+     - `System: Firmware`
+     - `System: Static Routes: Edit`
+2. User speichern → ihn nochmal öffnen → unten bei **API keys** auf **+** klicken.
+3. OPNsense lädt eine Datei `apikey.txt` mit zwei Zeilen herunter:
+   ```
+   key=AbCdEf…XyZ==
+   secret=1234…abcd==
+   ```
+4. Diese beiden Werte beim **Gerät anlegen** in OPN-Cockpit eintragen
+   (Inventar → *Gerät hinzufügen*). Sie werden direkt verschlüsselt im
+   Tresor abgelegt, niemals im Klartext gespeichert.
+5. Vor dem Anlegen empfiehlt sich ein **Test-Connection-Klick** — OPN-Cockpit
+   ruft damit den Firmware-Status-Endpunkt und meldet Erreichbarkeit + Auth
+   zurück.
+
+> Tipp für TLS-Verifikation: Wenn die OPNsense ein selbstsigniertes Web-GUI-
+> Zertifikat nutzt, kann pro Gerät die TLS-Prüfung abgeschaltet werden — das
+> Tool markiert diese Geräte dann **rot** im Inventar. Sauberer ist: das
+> OPNsense-Web-GUI auf ein vertrauenswürdiges Zertifikat (interne CA oder
+> ACME/Let's Encrypt) umstellen und TLS-Prüfung aktiv lassen.
 
 ## Was du im Browser hast
 
