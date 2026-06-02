@@ -650,6 +650,12 @@ body {
 
 .btn-link:hover { color: var(--text); }
 
+/* Danger-Variante des btn-link - fuer "Plan verwerfen" o.ae. destruktive
+   Sekundaer-Aktionen. Bleibt visuell zurueckhaltend (kein Buttonrahmen),
+   aber farbig klar als "Achtung" markiert. */
+.btn-link.btn-danger-text { color: var(--danger); }
+.btn-link.btn-danger-text:hover { color: var(--danger); background: var(--danger-bg); }
+
 .login-secondary-row {
   display: flex;
   align-items: center;

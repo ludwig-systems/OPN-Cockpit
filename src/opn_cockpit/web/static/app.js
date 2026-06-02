@@ -1813,12 +1813,55 @@
     }, 0);
   }
 
-  function closePlanModal() {
+  async function discardPlanOnServer(planId) {
+    // Stilles DELETE - der Plan ist nur lokal sichtbar gewesen, ein
+    // Fehler beim Loeschen blockiert das UI nicht (Toast zeigt es an).
+    try {
+      const response = await fetch(`/api/plans/${encodeURIComponent(planId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getToken() || ''}` },
+      });
+      if (response.status === 401) { handleSessionLost(); return false; }
+      if (!response.ok && response.status !== 404) {
+        // 404 = schon weg, ist OK
+        const body = await response.json().catch(() => ({}));
+        showToast(`Plan konnte nicht entfernt werden: ${body.detail || response.status}`, true);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      showToast(`Plan konnte nicht entfernt werden: ${e.message}`, true);
+      return false;
+    }
+  }
+
+  function closePlanModal(opts) {
+    // opts.discardPlan: wenn true, wird der aktuelle (noch nicht angewandte)
+    // Plan auf dem Server geloescht. Bewusst Default false, weil der
+    // Result-Phase-Schliessen-Pfad den Plan bewusst stehen lassen will.
+    const shouldDiscard = !!(opts && opts.discardPlan);
+    const planIdToDiscard = shouldDiscard && currentPlan ? currentPlan.plan_id : null;
     $('#plan-modal').hidden = true;
     planMode = 'route';
     planPhase = 'input';
     currentPlan = null;
     retryDeviceIds = null;
+    if (planIdToDiscard) {
+      // Outstanding aktualisieren wenn das DELETE durch ist
+      discardPlanOnServer(planIdToDiscard).then((ok) => {
+        if (ok) loadOutstanding().catch(() => {});
+      });
+    }
+  }
+
+  function cancelPlanModal() {
+    // Vom Cancel-/X-Klick aufgerufen. Wenn wir gerade auf der Vorschau
+    // sitzen oder mit einem nicht-angewandten Plan im Input-Phase
+    // gelandet sind (Back), wegwerfen - sonst (Result-Phase oder reiner
+    // Input ohne Plan) einfach schliessen.
+    const inProgress = (planPhase === 'preview') ||
+      (planPhase === 'input' && currentPlan !== null);
+    closePlanModal({ discardPlan: inProgress });
   }
 
   async function openRetryForDevice(deviceId, planId) {
@@ -1904,6 +1947,7 @@
     const back = $('#plan-back-btn');
     const next = $('#plan-next-btn');
     const saveProfile = $('#plan-save-profile-btn');
+    const discard = $('#plan-discard-btn');
     if (phase === 'input') {
       cancel.textContent = 'Abbrechen';
       back.hidden = true;
@@ -1911,6 +1955,7 @@
       next.textContent = 'Vorschau anzeigen';
       next.disabled = false;
       saveProfile.hidden = false;
+      discard.hidden = true;
     } else if (phase === 'preview') {
       cancel.textContent = 'Abbrechen';
       back.hidden = false;
@@ -1918,11 +1963,16 @@
       next.textContent = 'Aktivieren';
       next.disabled = !$('#pl-confirm').checked;
       saveProfile.hidden = true;
+      // Plan verwerfen ist nur sichtbar wenn es einen Plan gibt - also
+      // immer im Preview-Phase ausser bei reinen Retry-Flows die im
+      // Preview eines bereits applied Plans landen koennten.
+      discard.hidden = false;
     } else if (phase === 'result') {
       cancel.textContent = 'Schließen';
       back.hidden = true;
       next.hidden = true;
       saveProfile.hidden = true;
+      discard.hidden = true;
     }
   }
 
@@ -2140,7 +2190,34 @@
   }
 
   function planBack() {
+    // Beim Schritt zurueck den Preview-Plan auf dem Server entsorgen -
+    // sonst entsteht beim erneuten "Vorschau anzeigen" ein neuer Plan
+    // mit anderer ID und der alte verwaist als "Offen"-Eintrag.
+    if (planPhase === 'preview' && currentPlan?.plan_id) {
+      const oldId = currentPlan.plan_id;
+      currentPlan = null;
+      discardPlanOnServer(oldId).then((ok) => {
+        if (ok) loadOutstanding().catch(() => {});
+      });
+    }
     showPlanPhase('input');
+  }
+
+  function planDiscard() {
+    // Expliziter "Plan verwerfen"-Button in der Preview - laeuft durch
+    // dieselbe Discard-Logik wie Abbrechen, ist aber explizit benannt
+    // damit der User weiss dass er den Plan wegwirft (nicht nur das Modal).
+    if (!currentPlan?.plan_id) {
+      closePlanModal();
+      return;
+    }
+    const targetCount = currentPlan.target_count || (currentPlan.actions?.length ?? 0);
+    const msg = retryDeviceIds
+      ? 'Plan komplett verwerfen?\n\nDamit verschwindet die "offen"-Markierung von ALLEN Geräten dieses Plans, nicht nur dem aktuell ausgewählten.'
+      : `Plan komplett verwerfen?\n\nBetrifft ${targetCount} Gerät(e).`;
+    if (!confirm(msg)) return;
+    closePlanModal({ discardPlan: true });
+    showToast('Plan verworfen.');
   }
 
   async function doScheduleAutoRetry(report) {
@@ -3909,8 +3986,9 @@
     // Bulk-Modal: Backdrop-Click bewusst nicht — Eingabe-Modal.
 
     // Plan-Modal
-    $('#plan-modal-close').addEventListener('click', closePlanModal);
-    $('#plan-modal-cancel').addEventListener('click', closePlanModal);
+    $('#plan-modal-close').addEventListener('click', cancelPlanModal);
+    $('#plan-modal-cancel').addEventListener('click', cancelPlanModal);
+    $('#plan-discard-btn').addEventListener('click', planDiscard);
     $('#plan-back-btn').addEventListener('click', planBack);
     $('#plan-next-btn').addEventListener('click', planNextOrApply);
     $('#pl-load-gateways').addEventListener('click', loadGatewaySuggestions);
