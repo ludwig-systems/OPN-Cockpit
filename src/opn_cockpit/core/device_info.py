@@ -19,6 +19,7 @@ Aufrufer entscheidet ueber Speichern/Streamen.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from opn_cockpit.core.errors import (
@@ -33,6 +34,7 @@ from opn_cockpit.core.http_client import HttpClient, HttpTarget
 FIRMWARE_STATUS_ENDPOINT = "/api/core/firmware/status"
 FIRMWARE_CHECK_ENDPOINT = "/api/core/firmware/check"
 BACKUP_DOWNLOAD_ENDPOINT = "/api/core/backup/download/this"
+CERT_SEARCH_ENDPOINT = "/api/trust/cert/search"
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,3 +277,153 @@ def download_backup(
             ),
         )
     return content
+
+
+# ---------------------------------------------------------------------------
+# Zertifikats-Inventur (v0.7 Safety-Net #3)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CertificateEntry:
+    """Ein einzelnes Zertifikat im OPNsense-Trust-Store.
+
+    ``not_after_iso`` ist der UTC-ISO-String wie wir ihn parsen konnten;
+    ``days_until_expiry`` ist eine Vorberechnung fuer die UI (positiv =
+    laeuft noch, negativ = bereits abgelaufen, ``None`` = nicht parsbar).
+    """
+
+    uuid: str
+    descr: str
+    common_name: str
+    issuer: str
+    not_after_iso: str
+    days_until_expiry: int | None
+    in_use: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CertificateStatus:
+    """Zusammenfassender Zustand der Zertifikate eines Geraets."""
+
+    reachable: bool
+    authenticated: bool
+    certs: tuple[CertificateEntry, ...]
+    summary: str
+
+    @property
+    def soonest_days(self) -> int | None:
+        """Geringste Anzahl Tage bis Ablauf ueber alle parsebaren Certs."""
+        candidates = [c.days_until_expiry for c in self.certs if c.days_until_expiry is not None]
+        return min(candidates) if candidates else None
+
+
+def _parse_opnsense_datetime(value: Any) -> tuple[str, int | None]:
+    """Parst OPNsense's ``not_after``-Feld in (ISO-Stamm, Tage-bis-Ablauf).
+
+    Format ist typischerweise ``"YYYY-MM-DD HH:MM:SS"`` ohne Zeitzone -
+    wir interpretieren das als UTC (OPNsense generiert mit `date -u`
+    bei Cert-Erzeugung). Bei nicht parsbarer Eingabe ``("", None)``.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return "", None
+    raw = value.strip()
+    formats = (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%b %d %H:%M:%S %Y %Z",   # OpenSSL classic
+        "%Y-%m-%d",
+    )
+    parsed: datetime | None = None
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(raw, fmt)
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        return raw, None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    iso = parsed.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC)
+    delta_days = (parsed - now).days
+    return iso, delta_days
+
+
+def _extract_in_use(raw: Any) -> bool:
+    """OPNsense liefert 'in_use' als '0'/'1'/0/1/bool. Akzeptiert alles."""
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int):
+        return raw != 0
+    if isinstance(raw, str):
+        return raw.strip() in {"1", "true", "yes"}
+    return False
+
+
+def fetch_certificates(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> CertificateStatus:
+    """Liest die Zertifikats-Liste via ``/api/trust/cert/search``.
+
+    Wirft niemals - schiebt Fehler in ``reachable`` / ``authenticated`` /
+    ``summary``, damit Batch-Aufrufer ohne Try-Block weiterarbeiten koennen.
+    """
+    try:
+        response = client.call(
+            target, key, secret, "POST", CERT_SEARCH_ENDPOINT, json={},
+        )
+    except AuthError as exc:
+        return CertificateStatus(
+            reachable=True, authenticated=False, certs=(),
+            summary=f"Auth abgelehnt: {exc.context.summary or 'Schluessel/Secret falsch'}",
+        )
+    except UnreachableError as exc:
+        if exc.context.error_kind == "tls":
+            reason = exc.context.summary or "Cert ungueltig"
+            return CertificateStatus(
+                reachable=True, authenticated=False, certs=(),
+                summary=f"TLS-Verifikation fehlgeschlagen: {reason}",
+            )
+        return CertificateStatus(
+            reachable=False, authenticated=False, certs=(),
+            summary=f"nicht erreichbar: {exc.context.summary or exc.context.error_kind}",
+        )
+    except OpnCockpitError as exc:
+        return CertificateStatus(
+            reachable=True, authenticated=False, certs=(),
+            summary=f"Antwort ungewoehnlich: {exc.context.error_kind}",
+        )
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    rows: list[Any] = []
+    if isinstance(body, dict):
+        raw_rows = body.get("rows")
+        if isinstance(raw_rows, list):
+            rows = raw_rows
+    elif isinstance(body, list):
+        rows = body
+    entries: list[CertificateEntry] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        iso, days = _parse_opnsense_datetime(row.get("not_after"))
+        entries.append(CertificateEntry(
+            uuid=str(row.get("uuid", "")),
+            descr=str(row.get("descr", "")),
+            common_name=str(row.get("common_name", "")),
+            issuer=str(row.get("issuer", "")),
+            not_after_iso=iso,
+            days_until_expiry=days,
+            in_use=_extract_in_use(row.get("in_use")),
+        ))
+    return CertificateStatus(
+        reachable=True, authenticated=True, certs=tuple(entries),
+        summary=f"{len(entries)} Zertifikat(e) gefunden.",
+    )

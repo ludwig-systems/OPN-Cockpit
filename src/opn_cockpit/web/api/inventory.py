@@ -32,8 +32,10 @@ from opn_cockpit.backups.storage import (
     _default_storage_root,
 )
 from opn_cockpit.core.device_info import (
+    CertificateStatus,
     FirmwareStatus,
     download_backup,
+    fetch_certificates,
     fetch_firmware_status,
     trigger_firmware_check,
 )
@@ -60,6 +62,10 @@ from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     BackupListResponse,
     BackupResponse,
+    CertEntryResponse,
+    CertStatusEntry,
+    CertStatusRequest,
+    CertStatusResponse,
     ConnectionTestResponse,
     DeviceApiKeyResponse,
     DeviceCreateRequest,
@@ -462,6 +468,75 @@ def firmware_status(
         results = list(pool.map(probe, targets))
     session.touch()
     return FirmwareStatusResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/inventory/cert-status  - Batch-Cert-Inventur
+# ---------------------------------------------------------------------------
+
+
+@router.post("/cert-status", response_model=CertStatusResponse)
+def cert_status(
+    payload: CertStatusRequest,
+    session: Session = Depends(require_session),
+) -> CertStatusResponse:
+    """Batch-Abruf der Trust-Zertifikate pro Geraet.
+
+    Erscheint im OPNsense-Audit wie der Firmware-Status, also auch nicht
+    im 30s-Takt pollen - einmal pro Inventar-Load und manueller Refresh
+    reicht. Liefert pro Geraet die volle Cert-Liste + die geringste
+    Tagesanzahl bis Ablauf, die das Frontend fuer den Kachel-Badge nutzt.
+    """
+    visible_devices = filter_devices_for(session.opened.data.devices, session)
+    if payload.device_ids:
+        wanted = set(payload.device_ids)
+        targets = [d for d in visible_devices if d.id in wanted]
+    else:
+        targets = list(visible_devices)
+    if not targets:
+        return CertStatusResponse(results=[])
+
+    timestamp = _iso_now()
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+
+    def probe(vd: VaultDevice) -> CertStatusEntry:
+        tgt = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            cs: CertificateStatus = fetch_certificates(
+                client, tgt, vd.api_key, vd.api_secret,
+            )
+        return CertStatusEntry(
+            device_id=vd.id,
+            reachable=cs.reachable,
+            authenticated=cs.authenticated,
+            summary=cs.summary,
+            checked_at_iso=timestamp,
+            certs=[
+                CertEntryResponse(
+                    uuid=c.uuid,
+                    descr=c.descr,
+                    common_name=c.common_name,
+                    issuer=c.issuer,
+                    not_after_iso=c.not_after_iso,
+                    days_until_expiry=c.days_until_expiry,
+                    in_use=c.in_use,
+                )
+                for c in cs.certs
+            ],
+            soonest_days=cs.soonest_days,
+        )
+
+    workers = min(HEARTBEAT_MAX_WORKERS, len(targets))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(probe, targets))
+    session.touch()
+    return CertStatusResponse(results=results)
 
 
 # ---------------------------------------------------------------------------

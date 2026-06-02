@@ -374,6 +374,48 @@ class FirmwareStatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Cert-Inventur (v0.7 Safety-Net #3)
+# ---------------------------------------------------------------------------
+
+
+class CertEntryResponse(BaseModel):
+    """Einzelnes OPNsense-Trust-Cert mit Ablauf-Vorberechnung."""
+
+    uuid: str
+    descr: str
+    common_name: str
+    issuer: str
+    not_after_iso: str
+    days_until_expiry: int | None
+    """Negativ -> bereits abgelaufen. None -> nicht parsbar."""
+
+    in_use: bool
+
+
+class CertStatusRequest(BaseModel):
+    """Optional: Subset von Geraete-IDs. Leer = alle sichtbaren."""
+
+    device_ids: list[str] = Field(default_factory=list)
+
+
+class CertStatusEntry(BaseModel):
+    """Cert-Inventur eines Geraets fuer die Batch-Antwort."""
+
+    device_id: str
+    reachable: bool
+    authenticated: bool
+    summary: str
+    checked_at_iso: str
+    certs: list[CertEntryResponse]
+    soonest_days: int | None
+    """Geringste Tagesanzahl bis Ablauf - fuer Kachel-Badge."""
+
+
+class CertStatusResponse(BaseModel):
+    results: list[CertStatusEntry]
+
+
+# ---------------------------------------------------------------------------
 # Backups (v0.7 Safety-Nets)
 # ---------------------------------------------------------------------------
 
