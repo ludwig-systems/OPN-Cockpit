@@ -84,17 +84,18 @@ jobs:
             | Set-Content $file -Encoding utf8
           Select-String -Path $file -Pattern 'MyAppVersion'
 
-      - name: NSSM herunterladen (fuer Service-Mode)
+      - name: NSSM verifizieren (vendored im Repo)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $zip = "$env:RUNNER_TEMP/nssm.zip"
-          $extract = "$env:RUNNER_TEMP/nssm"
-          Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath $extract -Force
-          New-Item -ItemType Directory -Path "installer/bundle" -Force | Out-Null
-          Copy-Item -Path "$extract/nssm-2.24/win64/nssm.exe" -Destination "installer/bundle/nssm.exe" -Force
-          Get-Item "installer/bundle/nssm.exe" | Select-Object FullName, Length
+          $exe = "installer/vendor/nssm.exe"
+          if (-not (Test-Path $exe)) { throw "NSSM-Vendor-Binary fehlt: $exe" }
+          $expected = "eee9c44c29c2be011f1f1e43bb8c3fca888cb81053022ec5a0060035de16d848"
+          $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) {
+            throw "NSSM-Vendor-Binary SHA256 mismatch.`n  expected: $expected`n  actual:   $actual"
+          }
+          Write-Host "NSSM 2.24 win64 verifiziert: $exe"
 
       - name: Inno Setup installieren
         shell: pwsh

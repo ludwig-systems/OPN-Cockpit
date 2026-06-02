@@ -102,11 +102,12 @@ Source: "..\scripts\uninstall-service.ps1"; DestDir: "{app}\scripts"; Flags: ign
 ; alle Files entfernen kann.
 Source: "..\scripts\stop-processes.ps1";    DestDir: "{app}\scripts"; Flags: ignoreversion
 
-; NSSM-Bundle - Build-Schritt muss `installer\bundle\nssm.exe` vorlegen
-; (Download von nssm.cc, public domain). Optional: existiert nur wenn
-; Service-Komponente gewaehlt.
-Source: "bundle\nssm.exe";           DestDir: "{app}\bundle"; \
-  Flags: ignoreversion skipifsourcedoesntexist; Components: service
+; NSSM - vendored im Repo unter installer\vendor\nssm.exe (Public Domain,
+; SHA256 dokumentiert in installer\vendor\README.md). Frueher wurde
+; nssm.cc beim Build runtergeladen - das war fragil weil nssm.cc oft
+; HTTP 503 liefert.
+Source: "vendor\nssm.exe";           DestDir: "{app}\bundle"; \
+  Flags: ignoreversion; Components: service
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
