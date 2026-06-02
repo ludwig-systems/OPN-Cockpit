@@ -50,6 +50,19 @@ class VaultSettings:
     ``inactivity_minutes`` ist gemäß User-Anforderung änderbar — wer den
     Tresor öffnet, hat die im Tresor hinterlegte Inaktivitätszeit als
     Default.
+
+    Auto-Backup-Felder (v0.7-Theme "Safety Nets"):
+
+    * ``auto_backup_before_apply`` — wenn True, zieht der Executor vor
+      jedem schreibenden Apply ein Backup pro Geraet. Scheitert ein
+      Backup, wird das Apply auf dem Geraet **blockiert**. Default True;
+      kann pro Tresor abgeschaltet werden.
+    * ``backup_retention_pre_apply`` — Anzahl der zu behaltenden
+      pre-apply + manual Backups pro Geraet (gemeinsamer Pool, weil
+      User-Erwartung ist dass manuelle nicht durch scheduled rausfallen).
+    * ``backup_retention_scheduled`` — Anzahl der zu behaltenden
+      scheduled Backups pro Geraet (eigener Pool fuer kommende
+      Hintergrund-Snapshots).
     """
 
     inactivity_minutes: int = 10
@@ -58,6 +71,9 @@ class VaultSettings:
     read_timeout_s: float = 30.0
     reconfigure_timeout_s: float = 60.0
     retry_count: int = 2
+    auto_backup_before_apply: bool = True
+    backup_retention_pre_apply: int = 30
+    backup_retention_scheduled: int = 90
 
 
 @dataclass(slots=True)
@@ -130,4 +146,13 @@ def _settings_from_dict(raw: dict[str, Any]) -> VaultSettings:
             raw.get("reconfigure_timeout_s", defaults.reconfigure_timeout_s)
         ),
         retry_count=int(raw.get("retry_count", defaults.retry_count)),
+        auto_backup_before_apply=bool(
+            raw.get("auto_backup_before_apply", defaults.auto_backup_before_apply),
+        ),
+        backup_retention_pre_apply=int(
+            raw.get("backup_retention_pre_apply", defaults.backup_retention_pre_apply),
+        ),
+        backup_retention_scheduled=int(
+            raw.get("backup_retention_scheduled", defaults.backup_retention_scheduled),
+        ),
     )

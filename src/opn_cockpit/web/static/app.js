@@ -2959,11 +2959,16 @@
 
   async function openVaultSettingsModal() {
     $('#vs-timeout').value = '';
+    $('#vs-autobackup').checked = true;
+    $('#vs-retention-pre-apply').value = '30';
+    $('#vs-retention-scheduled').value = '90';
     $('#vs-pw-current').value = '';
     $('#vs-pw-new1').value = '';
     $('#vs-pw-new2').value = '';
     $('#vs-timeout-error').hidden = true;
     $('#vs-timeout-ok').hidden = true;
+    $('#vs-backup-error').hidden = true;
+    $('#vs-backup-ok').hidden = true;
     $('#vs-pw-error').hidden = true;
     $('#vs-pw-ok').hidden = true;
     $('#vault-settings-modal').hidden = false;
@@ -2975,8 +2980,65 @@
       if (r.ok) {
         const data = await r.json();
         $('#vs-timeout').value = data.inactivity_minutes;
+        $('#vs-autobackup').checked = data.auto_backup_before_apply !== false;
+        if (typeof data.backup_retention_pre_apply === 'number') {
+          $('#vs-retention-pre-apply').value = data.backup_retention_pre_apply;
+        }
+        if (typeof data.backup_retention_scheduled === 'number') {
+          $('#vs-retention-scheduled').value = data.backup_retention_scheduled;
+        }
       }
     } catch (_e) { /* Modal kann auch mit leerem Feld bedient werden */ }
+  }
+
+  async function saveBackupSettings() {
+    const errBox = $('#vs-backup-error');
+    const okBox = $('#vs-backup-ok');
+    errBox.hidden = true;
+    okBox.hidden = true;
+    const autobackup = $('#vs-autobackup').checked;
+    const preApply = parseInt($('#vs-retention-pre-apply').value, 10);
+    const scheduled = parseInt($('#vs-retention-scheduled').value, 10);
+    if (!Number.isFinite(preApply) || preApply < 1 || preApply > 500) {
+      errBox.textContent = 'Apply-Retention muss zwischen 1 und 500 liegen.';
+      errBox.hidden = false;
+      return;
+    }
+    if (!Number.isFinite(scheduled) || scheduled < 1 || scheduled > 500) {
+      errBox.textContent = 'Scheduled-Retention muss zwischen 1 und 500 liegen.';
+      errBox.hidden = false;
+      return;
+    }
+    // Timeout-Wert muss mitgeschickt werden weil das Schema ihn als Pflichtfeld
+    // hat. Wenn das Feld leer ist (User hat noch nichts geaendert), nehmen wir
+    // den aktuell angezeigten Wert oder fallen auf 10.
+    const minutes = parseInt($('#vs-timeout').value, 10) || 10;
+    const btn = $('#vs-backup-save');
+    btn.disabled = true;
+    btn.textContent = 'Speichere…';
+    try {
+      const response = await apiPost('/api/vaults/settings', {
+        inactivity_minutes: minutes,
+        auto_backup_before_apply: autobackup,
+        backup_retention_pre_apply: preApply,
+        backup_retention_scheduled: scheduled,
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        errBox.textContent = body.detail || `Fehler ${response.status}`;
+        errBox.hidden = false;
+        return;
+      }
+      okBox.hidden = false;
+      showToast('Backup-Einstellungen gespeichert.');
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Backup-Einstellungen speichern';
+    }
   }
 
   function closeVaultSettingsModal() {
@@ -3983,6 +4045,7 @@
       $('#vault-settings-close').addEventListener('click', closeVaultSettingsModal);
       $('#vault-settings-cancel').addEventListener('click', closeVaultSettingsModal);
       $('#vs-timeout-save').addEventListener('click', saveInactivityTimeout);
+      $('#vs-backup-save').addEventListener('click', saveBackupSettings);
       $('#vs-pw-submit').addEventListener('click', changeVaultPassword);
       // Backdrop-Click bewusst nicht — Eingabe-Modal.
     }

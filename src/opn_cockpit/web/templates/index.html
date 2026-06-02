@@ -828,6 +828,49 @@
 
           <div class="form-divider"></div>
 
+          <!-- Sektion: Auto-Backup vor Apply -->
+          <h3 class="modal-section-title">Backup vor Apply</h3>
+          <label class="form-checkbox">
+            <input id="vs-autobackup" type="checkbox" />
+            <span>Vor jedem Apply automatisch ein Backup ziehen</span>
+          </label>
+          <div class="form-hint">
+            Sicherheitsnetz fuer Routen- und Alias-Rollouts. Scheitert das Backup
+            auf einem Geraet, wird auch der Apply auf diesem Geraet uebersprungen
+            (Audit-Eintrag). Backups liegen lokal unter
+            <code>&lt;app_data&gt;/backups/&lt;device_id&gt;/</code> und sind per
+            Browser-Download wieder zugaenglich.
+          </div>
+
+          <label class="form-label" for="vs-retention-pre-apply" style="margin-top:14px;">
+            Behalten: Apply- und Manuelle Backups (pro Geraet)
+          </label>
+          <input id="vs-retention-pre-apply" class="form-input" type="number"
+                 min="1" max="500" step="1" />
+          <div class="form-hint">
+            Aelteste werden geloescht sobald das Limit ueberschritten ist.
+            Manuelle Downloads teilen sich diesen Pool, damit sie nicht durch
+            haeufige Apply-Backups verdraengt werden.
+          </div>
+
+          <label class="form-label" for="vs-retention-scheduled" style="margin-top:14px;">
+            Behalten: geplante Backups (pro Geraet)
+          </label>
+          <input id="vs-retention-scheduled" class="form-input" type="number"
+                 min="1" max="500" step="1" />
+          <div class="form-hint">
+            Eigener Pool fuer die kommenden Hintergrund-Snapshots (taegliche
+            Sicherung). Heute ohne Effekt, ab v0.7-#4 aktiv.
+          </div>
+
+          <div class="form-row" style="margin-top:12px;">
+            <button class="btn-secondary" id="vs-backup-save" type="button">Backup-Einstellungen speichern</button>
+          </div>
+          <div class="form-error" id="vs-backup-error" hidden></div>
+          <div class="form-success" id="vs-backup-ok" hidden>Gespeichert.</div>
+
+          <div class="form-divider"></div>
+
           <!-- Sektion: Master-Passwort -->
           <h3 class="modal-section-title">Master-Passwort aendern</h3>
           <label class="form-label" for="vs-pw-current">Aktuelles Passwort</label>

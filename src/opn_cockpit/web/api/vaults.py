@@ -29,7 +29,8 @@ from opn_cockpit.vault.errors import (
     VaultVersionError,
     WeakPasswordError,
 )
-from opn_cockpit.vault.model import VaultData
+from opn_cockpit.vault.model import VaultData, VaultSettings
+from opn_cockpit.vault.store import change_password as vault_change_password
 from opn_cockpit.vault.store import create_vault, open_vault
 from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
@@ -53,6 +54,7 @@ from opn_cockpit.web.auth.dependencies import (
 from opn_cockpit.web.auth.manager import SessionManager
 from opn_cockpit.web.server_state import ServerState, ServerStateError
 from opn_cockpit.web.vault_path import VaultPathError, resolve_safe_vault_path
+from opn_cockpit.web.vault_writes import persist_session_vault
 
 router = APIRouter(prefix="/api/vaults", tags=["vaults"])
 
@@ -400,6 +402,9 @@ def get_vault_settings(
     return VaultSettingsResponse(
         inactivity_minutes=int(s.inactivity_minutes),
         max_workers=int(s.max_workers),
+        auto_backup_before_apply=bool(s.auto_backup_before_apply),
+        backup_retention_pre_apply=int(s.backup_retention_pre_apply),
+        backup_retention_scheduled=int(s.backup_retention_scheduled),
     )
 
 
@@ -409,48 +414,65 @@ def update_vault_settings(
     request: Request,
     session: Session = Depends(require_session),
 ) -> VaultSettingsResponse:
-    """Aktualisiert die Tresor-Settings (aktuell nur Inaktivitaets-Timeout)
-    und persistiert. Wirkt sofort fuer die laufende Session.
+    """Aktualisiert die Tresor-Settings und persistiert.
 
-    Schreibreihenfolge wichtig: erst mutieren, dann ueber
-    ``persist_session_vault`` speichern — wenn der Save scheitert, faellt
-    der rollback() die In-Memory-Aenderung zurueck, sonst laeuft die Session
-    weiter mit einem Wert, der nirgends auf Platte steht.
+    Pydantic prueft die Wertebereiche schon. Felder die None sind, bleiben
+    auf ihrem alten Wert. Schreibreihenfolge wichtig: erst mutieren, dann
+    persistieren - bei Save-Fehler faellt der Rollback die In-Memory-
+    Aenderung zurueck.
     """
-    from opn_cockpit.vault.model import VaultSettings as _VS
-    from opn_cockpit.web.vault_writes import persist_session_vault as _persist
-    minutes = payload.inactivity_minutes
-    # Pydantic prueft 1..240 schon — Doppel-Check entfernt.
     if session.vault_path is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Aktiver Tresor-Pfad fehlt — bitte neu entsperren.",
         )
     old_settings = session.opened.data.settings
-    new_settings = _VS(
-        inactivity_minutes=minutes,
+    new_settings = VaultSettings(
+        inactivity_minutes=payload.inactivity_minutes,
         max_workers=old_settings.max_workers,
         connect_timeout_s=old_settings.connect_timeout_s,
         read_timeout_s=old_settings.read_timeout_s,
         reconfigure_timeout_s=old_settings.reconfigure_timeout_s,
         retry_count=old_settings.retry_count,
+        auto_backup_before_apply=(
+            payload.auto_backup_before_apply
+            if payload.auto_backup_before_apply is not None
+            else old_settings.auto_backup_before_apply
+        ),
+        backup_retention_pre_apply=(
+            payload.backup_retention_pre_apply
+            if payload.backup_retention_pre_apply is not None
+            else old_settings.backup_retention_pre_apply
+        ),
+        backup_retention_scheduled=(
+            payload.backup_retention_scheduled
+            if payload.backup_retention_scheduled is not None
+            else old_settings.backup_retention_scheduled
+        ),
     )
     session.opened.data.settings = new_settings
 
     def _rollback() -> None:
         session.opened.data.settings = old_settings
 
-    _persist(request, session, session.vault_path, rollback=_rollback)
+    persist_session_vault(request, session, session.vault_path, rollback=_rollback)
 
     get_audit_backend().append(
         AuditEventKind.VAULT_OPENED,
         actor=audit_actor(session),
         vault_path=str(session.vault_path),
-        summary=f"Tresor-Settings aktualisiert: inactivity_minutes={minutes}",
+        summary=(
+            f"Tresor-Settings aktualisiert: "
+            f"inactivity={new_settings.inactivity_minutes}min, "
+            f"auto_backup={new_settings.auto_backup_before_apply}"
+        ),
     )
     return VaultSettingsResponse(
         inactivity_minutes=int(new_settings.inactivity_minutes),
         max_workers=int(new_settings.max_workers),
+        auto_backup_before_apply=bool(new_settings.auto_backup_before_apply),
+        backup_retention_pre_apply=int(new_settings.backup_retention_pre_apply),
+        backup_retention_scheduled=int(new_settings.backup_retention_scheduled),
     )
 
 
@@ -465,7 +487,6 @@ def change_vault_password(
     durch offene Browser-Session). Bei Erfolg wird die Session unter dem
     neuen Passwort weitergefuehrt; Tabs muessen nicht neu einloggen.
     """
-    from opn_cockpit.vault.store import change_password as _change_password
     if session.vault_path is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -482,7 +503,7 @@ def change_vault_password(
             detail="Neues Passwort darf nicht mit dem aktuellen identisch sein.",
         )
     try:
-        new_opened = _change_password(
+        new_opened = vault_change_password(
             session.vault_path,
             payload.current_password,
             payload.new_password,

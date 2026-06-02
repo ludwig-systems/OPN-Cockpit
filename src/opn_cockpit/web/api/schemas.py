@@ -165,10 +165,21 @@ class CreateVaultResponse(BaseModel):
 class VaultSettingsResponse(BaseModel):
     inactivity_minutes: int
     max_workers: int
+    auto_backup_before_apply: bool = True
+    """v0.7: Pre-Apply-Backup an/aus. Default True bei alten Tresoren
+    (siehe vault.model._settings_from_dict)."""
+
+    backup_retention_pre_apply: int = 30
+    backup_retention_scheduled: int = 90
 
 
 class VaultSettingsUpdateRequest(BaseModel):
     inactivity_minutes: int = Field(..., ge=1, le=240)
+    auto_backup_before_apply: bool | None = None
+    """Wenn None bleibt der bestehende Wert; sonst wird er gesetzt."""
+
+    backup_retention_pre_apply: int | None = Field(None, ge=1, le=500)
+    backup_retention_scheduled: int | None = Field(None, ge=1, le=500)
 
 
 # F5a: Master-Passwort des aktiven Tresors aendern
