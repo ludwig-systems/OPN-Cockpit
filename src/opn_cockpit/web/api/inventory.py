@@ -18,6 +18,19 @@ from fastapi.responses import Response
 
 from opn_cockpit.audit.backend import audit_actor, get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
+from opn_cockpit.backups import (
+    BackupNotFoundError,
+    BackupRecord,
+    BackupStoreError,
+    append_backup,
+    list_backups,
+    prune_backups,
+    read_backup_content,
+)
+from opn_cockpit.backups.storage import (
+    BACKUP_FILE_SUFFIX,
+    _default_storage_root,
+)
 from opn_cockpit.core.device_info import (
     FirmwareStatus,
     download_backup,
@@ -45,6 +58,8 @@ from opn_cockpit.web.acl import (
 )
 from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
+    BackupListResponse,
+    BackupResponse,
     ConnectionTestResponse,
     DeviceApiKeyResponse,
     DeviceCreateRequest,
@@ -693,13 +708,49 @@ def _download_device_backup_impl(device_id: str, session: Session) -> Response:
     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     filename = f"opnsense-config-{safe_name}-{ts}.xml"
 
+    # Backup zusaetzlich lokal persistieren (trigger="manual"), damit er
+    # in der Backup-History auftaucht und spaeter aus Cockpit nochmal
+    # heruntergeladen werden kann. Fehler hier blockieren den User-Download
+    # NICHT - er kriegt seine Datei in jedem Fall.
+    persisted_record_id: str | None = None
+    try:
+        record = append_backup(
+            device_id,
+            content,
+            trigger="manual",
+            device_name_at_creation=vault_device.name,
+        )
+        persisted_record_id = record.id
+        # Best-Effort Prune mit den Vault-Settings.
+        try:
+            prune_backups(
+                device_id,
+                retention_pre_apply=settings.backup_retention_pre_apply,
+                retention_scheduled=settings.backup_retention_scheduled,
+            )
+        except BackupStoreError:
+            _log.exception(
+                "Backup-Pruning fuer device_id=%s nach manuellem Download fehlgeschlagen.",
+                device_id,
+            )
+    except BackupStoreError:
+        _log.exception(
+            "Manuelles Backup konnte nicht lokal persistiert werden fuer device_id=%s",
+            device_id,
+        )
+
+    audit_summary = (
+        f"Konfig-Backup geladen von {vault_device.name} ({len(content)} Bytes)"
+    )
+    if persisted_record_id:
+        audit_summary += f", lokal persistiert als {persisted_record_id}"
     get_audit_backend().append(
         AuditEventKind.BACKUP_DOWNLOADED,
         actor=audit_actor(session),
         action="backup_download",
         target_device_id=device_id,
         target_device_name=vault_device.name,
-        summary=f"Konfig-Backup geladen von {vault_device.name} ({len(content)} Bytes)",
+        summary=audit_summary,
     )
     session.touch()
     return Response(
@@ -708,6 +759,179 @@ def _download_device_backup_impl(device_id: str, session: Session) -> Response:
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/backups  - Liste lokaler Backups
+# GET /api/inventory/devices/{id}/backups/{backup_id}  - Download lokaler Backup
+# DELETE /api/inventory/devices/{id}/backups/{backup_id}  - Loeschen
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/backups",
+    response_model=BackupListResponse,
+)
+def list_device_backups(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> BackupListResponse:
+    """Liefert die lokal gespeicherten Backups eines Geraets, neueste zuerst."""
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+    try:
+        records = list_backups(device_id)
+    except BackupStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Backup-Index nicht lesbar: {exc}",
+        ) from exc
+    session.touch()
+    return BackupListResponse(
+        device_id=device_id,
+        backups=[_record_to_response(r) for r in records],
+    )
+
+
+@router.get("/devices/{device_id}/backups/{backup_id}")
+def download_stored_backup(
+    device_id: str,
+    backup_id: str,
+    session: Session = Depends(require_session),
+) -> Response:
+    """Liefert einen lokal gespeicherten Backup als XML-Download."""
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+    try:
+        content = read_backup_content(device_id, backup_id)
+    except BackupNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except BackupStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    # Trigger/Timestamp aus Index ziehen fuer den Dateinamen
+    records = list_backups(device_id)
+    record = next((r for r in records if r.id == backup_id), None)
+    safe_chars = (c if c.isalnum() or c in "_-" else "_" for c in vault_device.name)
+    safe_name = "".join(safe_chars).strip("_") or "device"
+    trigger_label = (record.trigger if record else "stored").replace("-", "_")
+    ts_for_name = (
+        (record.timestamp_utc if record else _iso_now())
+        .replace(":", "").replace("-", "").replace(".", "_")
+    )
+    filename = f"opnsense-config-{safe_name}-{trigger_label}-{ts_for_name}.xml"
+    get_audit_backend().append(
+        AuditEventKind.BACKUP_DOWNLOADED,
+        actor=audit_actor(session),
+        action="backup_download_stored",
+        target_device_id=device_id,
+        target_device_name=vault_device.name,
+        summary=(
+            f"Lokal gespeichertes Backup heruntergeladen "
+            f"({vault_device.name}, id={backup_id})"
+        ),
+    )
+    session.touch()
+    return Response(
+        content=content,
+        media_type="application/xml; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete(
+    "/devices/{device_id}/backups/{backup_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_stored_backup(
+    device_id: str,
+    backup_id: str,
+    session: Session = Depends(require_session),
+) -> None:
+    """Loescht ein einzelnes lokal gespeichertes Backup."""
+    require_write_role(session)
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+    # Storage hat kein "delete one" - wir lesen den Index, schreiben ihn ohne
+    # den Eintrag zurueck, und loeschen die Datei.
+    try:
+        records = list_backups(device_id)
+    except BackupStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    if not any(r.id == backup_id for r in records):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Backup '{backup_id}' nicht gefunden.",
+        )
+    # Vereinfachung: wir loeschen direkt die Datei und ueberlassen den
+    # naechsten prune-Run die Index-Bereinigung (orphans werden mit-gepruned).
+    device_dir = _default_storage_root() / device_id
+    file_path = device_dir / f"{backup_id}{BACKUP_FILE_SUFFIX}"
+    file_path.unlink(missing_ok=True)
+    # Index direkt mit-aufraeumen (orphan ist konsistent, aber der Index
+    # wuerde sonst kurzzeitig den geloeschten Eintrag noch zeigen).
+    try:
+        prune_backups(device_id)
+    except BackupStoreError:
+        _log.exception(
+            "Backup-Index-Update nach DELETE fehlgeschlagen fuer %s/%s",
+            device_id, backup_id,
+        )
+    get_audit_backend().append(
+        AuditEventKind.BACKUP_DOWNLOADED,
+        actor=audit_actor(session),
+        action="backup_deleted",
+        target_device_id=device_id,
+        target_device_name=vault_device.name,
+        summary=(
+            f"Lokales Backup geloescht ({vault_device.name}, id={backup_id})"
+        ),
+    )
+    session.touch()
+
+
+def _record_to_response(record: BackupRecord) -> BackupResponse:
+    return BackupResponse(
+        id=record.id,
+        device_id=record.device_id,
+        timestamp_utc=record.timestamp_utc,
+        trigger=record.trigger,
+        size_bytes=record.size_bytes,
+        size_compressed=record.size_compressed,
+        sha256=record.sha256,
+        related_plan_id=record.related_plan_id,
+        device_name_at_creation=record.device_name_at_creation,
     )
 
 

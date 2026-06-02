@@ -374,6 +374,32 @@ class FirmwareStatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Backups (v0.7 Safety-Nets)
+# ---------------------------------------------------------------------------
+
+
+class BackupResponse(BaseModel):
+    """Metadaten eines lokal gespeicherten Backups."""
+
+    id: str
+    device_id: str
+    timestamp_utc: str
+    trigger: str
+    size_bytes: int
+    size_compressed: int
+    sha256: str
+    related_plan_id: str = ""
+    device_name_at_creation: str = ""
+
+
+class BackupListResponse(BaseModel):
+    """Liste der lokal gespeicherten Backups eines Geraets, neueste zuerst."""
+
+    device_id: str
+    backups: list[BackupResponse]
+
+
+# ---------------------------------------------------------------------------
 # Plan / Apply
 # ---------------------------------------------------------------------------
 

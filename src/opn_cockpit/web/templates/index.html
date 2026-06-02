@@ -798,6 +798,32 @@
       </div>
     </div>
 
+    <!-- ================ MODAL: Backup-History ================ -->
+    <div class="modal-backdrop" id="backup-history-modal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="bh-title">
+        <div class="modal-header">
+          <h2 id="bh-title">Backups</h2>
+          <button class="icon-btn modal-close" id="bh-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-hint" style="margin-bottom:12px;">
+            Lokal gespeicherte Konfig-Backups dieses Geraets. Pre-Apply-
+            Backups entstehen vor jedem Schreibvorgang, manuelle beim
+            Klick auf "Backup herunterladen" im Geraete-Modal.
+          </div>
+          <div id="bh-list" class="backup-list"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="bh-cancel">Schliessen</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ================ MODAL: Tresor-Settings (F5a + F5b) ================ -->
     <div class="modal-backdrop" id="vault-settings-modal" hidden>
       <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="vault-settings-title">

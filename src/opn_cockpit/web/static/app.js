@@ -111,6 +111,7 @@
     heartbeatInFlight: false,
     selectedDeviceIds: new Set(),  // globale Multi-Auswahl fuer Plan/Apply
     outstandingByDevice: {},       // device_id -> { count, plans[] }
+    backupsByDevice: {},           // device_id -> { count, latestTs }
     firmware: {},                  // device_id -> { version, status, update_available, summary, checked_at_iso }
     firmwareLoading: false,
     serverMode: 'vault',           // 'vault' (single) | 'user-db' (multi)
@@ -770,6 +771,32 @@
     // ein authentifizierter Call und erscheint im OPNsense-Audit). Einmal
     // nach Inventar-Laden + manuelles Refresh in der Karten-Action.
     loadFirmwareStatus().catch(() => {});
+    loadBackupCounts().catch(() => {});
+  }
+
+  async function loadBackupCounts() {
+    // Pro sichtbares Geraet die Anzahl lokaler Backups holen, damit die
+    // Kachel den Indikator "X Backups" zeigt. Pro Geraet ein Aufruf, aber
+    // billig (Datei-Listing). Auf Bulk-Endpoint koennen wir spaeter
+    // optimieren wenn's bei 100+ Geraeten merkbar wird.
+    const counts = {};
+    await Promise.all((state.devices || []).map(async (d) => {
+      try {
+        const r = await apiGet(`/api/inventory/devices/${encodeURIComponent(d.id)}/backups`);
+        if (!r.ok) return;
+        const data = await r.json();
+        const backups = data.backups || [];
+        if (backups.length > 0) {
+          counts[d.id] = {
+            count: backups.length,
+            latestTs: backups[0].timestamp_utc,
+            latestTrigger: backups[0].trigger,
+          };
+        }
+      } catch (_e) { /* still */ }
+    }));
+    state.backupsByDevice = counts;
+    renderGrid();
   }
 
   async function loadFirmwareStatus(deviceIds = null) {
@@ -1100,6 +1127,29 @@
         fwRow.appendChild(badge);
       }
       article.appendChild(fwRow);
+    }
+
+    // Backup-Indikator - nur sichtbar wenn lokal Backups existieren
+    // (Design-Constraint: "ansprechend und simpel zugleich"; Zero-State
+    // wird bewusst nicht angezeigt um die Kachel ruhig zu halten).
+    const backupInfo = state.backupsByDevice[device.id];
+    if (backupInfo && backupInfo.count > 0) {
+      const backupBadge = document.createElement('button');
+      backupBadge.type = 'button';
+      backupBadge.className = 'card-backup-badge';
+      backupBadge.title = (
+        `${backupInfo.count} Backup(s) lokal gespeichert. `
+        + `Neuestes: ${backupInfo.latestTs} (${backupInfo.latestTrigger})`
+      );
+      backupBadge.innerHTML = `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="3" width="8" height="6.5" rx="0.8"/>
+        <line x1="2" y1="5" x2="10" y2="5"/>
+      </svg><span>${backupInfo.count} Backup${backupInfo.count === 1 ? '' : 's'}</span>`;
+      backupBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openBackupHistoryModal(device.id);
+      });
+      article.appendChild(backupBadge);
     }
 
     article.addEventListener('click', () => openDeviceModal(device.id));
@@ -3045,6 +3095,145 @@
     $('#vault-settings-modal').hidden = true;
   }
 
+  // -------------------- Backup-History-Modal --------------------
+
+  let currentBackupDeviceId = null;
+
+  async function openBackupHistoryModal(deviceId) {
+    currentBackupDeviceId = deviceId;
+    const device = state.devices.find((d) => d.id === deviceId);
+    $('#bh-title').textContent = device
+      ? `Backups: ${device.name}`
+      : 'Backups';
+    $('#bh-list').innerHTML = '<div class="form-hint">Lade…</div>';
+    $('#backup-history-modal').hidden = false;
+    await refreshBackupHistory();
+  }
+
+  async function refreshBackupHistory() {
+    if (!currentBackupDeviceId) return;
+    try {
+      const r = await apiGet(
+        `/api/inventory/devices/${encodeURIComponent(currentBackupDeviceId)}/backups`,
+      );
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        $('#bh-list').innerHTML = '<div class="form-error">Backup-Liste nicht abrufbar.</div>';
+        return;
+      }
+      const data = await r.json();
+      renderBackupList(data.backups || []);
+    } catch (e) {
+      $('#bh-list').innerHTML = `<div class="form-error">${e.message}</div>`;
+    }
+  }
+
+  function renderBackupList(backups) {
+    const list = $('#bh-list');
+    list.innerHTML = '';
+    if (backups.length === 0) {
+      list.innerHTML = '<div class="form-hint">Noch keine Backups fuer dieses Geraet.</div>';
+      return;
+    }
+    for (const b of backups) {
+      const row = document.createElement('div');
+      row.className = 'backup-row';
+      const triggerLabel = ({
+        'pre-apply': 'vor Apply',
+        'manual': 'manuell',
+        'scheduled': 'geplant',
+      })[b.trigger] || b.trigger;
+      const sizeKb = (b.size_compressed / 1024).toFixed(1);
+      row.innerHTML = `
+        <div class="backup-row-main">
+          <div class="backup-row-ts">${b.timestamp_utc}</div>
+          <div class="backup-row-meta">
+            <span class="backup-row-trigger">${triggerLabel}</span>
+            <span class="backup-row-size">${sizeKb} KB gzip</span>
+            ${b.related_plan_id ? `<span class="backup-row-plan">Plan ${b.related_plan_id}</span>` : ''}
+          </div>
+        </div>
+        <div class="backup-row-actions">
+          <button class="btn-link" data-action="download" data-id="${b.id}">Download</button>
+          <button class="btn-link btn-danger-text" data-action="delete" data-id="${b.id}">Loeschen</button>
+        </div>
+      `;
+      list.appendChild(row);
+    }
+    list.querySelectorAll('[data-action="download"]').forEach((btn) => {
+      btn.addEventListener('click', () => downloadStoredBackup(btn.dataset.id));
+    });
+    list.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+      btn.addEventListener('click', () => deleteStoredBackup(btn.dataset.id));
+    });
+  }
+
+  async function downloadStoredBackup(backupId) {
+    if (!currentBackupDeviceId) return;
+    const url = (
+      `/api/inventory/devices/${encodeURIComponent(currentBackupDeviceId)}`
+      + `/backups/${encodeURIComponent(backupId)}`
+    );
+    const t = getToken();
+    const headers = t ? { Authorization: `Bearer ${t}` } : {};
+    try {
+      const response = await fetch(url, { headers });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        showToast(`Download fehlgeschlagen (${response.status}).`, true);
+        return;
+      }
+      let filename = `opnsense-config-${backupId}.xml`;
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="?([^";]+)"?/i);
+      if (match) filename = match[1];
+      const blob = await response.blob();
+      const dlUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(dlUrl);
+      showToast(`${filename} (${formatBytes(blob.size)}) heruntergeladen.`);
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  async function deleteStoredBackup(backupId) {
+    if (!currentBackupDeviceId) return;
+    if (!confirm('Backup wirklich loeschen?\n\nDer lokale Snapshot wird endgueltig entfernt.')) {
+      return;
+    }
+    const url = (
+      `/api/inventory/devices/${encodeURIComponent(currentBackupDeviceId)}`
+      + `/backups/${encodeURIComponent(backupId)}`
+    );
+    const t = getToken();
+    const headers = t ? { Authorization: `Bearer ${t}` } : {};
+    try {
+      const response = await fetch(url, { method: 'DELETE', headers });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok && response.status !== 404) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Loeschen fehlgeschlagen (${response.status}).`, true);
+        return;
+      }
+      showToast('Backup geloescht.');
+      await refreshBackupHistory();
+      await loadBackupCounts();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  function closeBackupHistoryModal() {
+    $('#backup-history-modal').hidden = true;
+    currentBackupDeviceId = null;
+  }
+
   async function saveInactivityTimeout() {
     const errBox = $('#vs-timeout-error');
     const okBox = $('#vs-timeout-ok');
@@ -4044,6 +4233,11 @@
       vsBtn.addEventListener('click', openVaultSettingsModal);
       $('#vault-settings-close').addEventListener('click', closeVaultSettingsModal);
       $('#vault-settings-cancel').addEventListener('click', closeVaultSettingsModal);
+      $('#bh-close').addEventListener('click', closeBackupHistoryModal);
+      $('#bh-cancel').addEventListener('click', closeBackupHistoryModal);
+      $('#backup-history-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'backup-history-modal') closeBackupHistoryModal();
+      });
       $('#vs-timeout-save').addEventListener('click', saveInactivityTimeout);
       $('#vs-backup-save').addEventListener('click', saveBackupSettings);
       $('#vs-pw-submit').addEventListener('click', changeVaultPassword);
