@@ -13,6 +13,8 @@ schmaleren Endpunkt getauscht.
 from __future__ import annotations
 
 import socket
+import subprocess
+import sys
 from dataclasses import dataclass
 
 from opn_cockpit.core.errors import AuthError, OpnCockpitError, UnreachableError
@@ -20,6 +22,16 @@ from opn_cockpit.core.http_client import HttpClient, HttpTarget
 
 HEALTH_ENDPOINT = "/api/core/menu/tree"
 DEFAULT_TCP_PROBE_TIMEOUT_S = 3.0
+DEFAULT_ICMP_PROBE_TIMEOUT_S = 2.0
+
+# Klassen von Connection-Fehlern, bei denen ein zusaetzlicher ICMP-Probe
+# diagnostisch hilft: Host ist evtl. erreichbar, nur der TCP-Port nicht.
+_PROBE_WORTHY_ERROR_KINDS = frozenset({
+    "connect_timeout",
+    "connect_refused",
+    "connection_error",
+    "network",
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +93,22 @@ def check_device(
                     "TLS-Pruefung fuer dieses Geraet ab (Risiko-Markierung)."
                 ),
             )
+        # Layer-4-Diagnose: bei TCP-Timeout / Refused / Connection-Error
+        # zusaetzlich ICMP-Probe. Wenn der Host pingbar ist, ist das Problem
+        # nicht "Box down" sondern "Port zu" - Firewall, asymmetrisches
+        # Routing oder Dienst nicht aktiv. Lessons-Learned aus der XL9-Diag-
+        # Session: das Symptom "Timeout" allein war frueher unterspezifiziert.
+        if exc.context.error_kind in _PROBE_WORTHY_ERROR_KINDS and icmp_probe(target.host):
+            return HealthResult(
+                reachable=True,
+                authenticated=False,
+                summary=(
+                    f"Host antwortet auf Ping, aber Port {target.port} ist zu: "
+                    f"{exc.context.summary or exc.context.error_kind}. "
+                    "Pruefe Firewall-Regel, asymmetrisches Routing oder ob die "
+                    "OPNsense-WebGUI auf dem konfigurierten Interface laeuft."
+                ),
+            )
         return HealthResult(
             reachable=False,
             authenticated=False,
@@ -94,6 +122,43 @@ def check_device(
             authenticated=False,
             summary=f"Antwort ungewöhnlich: {exc.context.error_kind}",
         )
+
+
+def icmp_probe(
+    host: str,
+    *,
+    timeout_s: float = DEFAULT_ICMP_PROBE_TIMEOUT_S,
+) -> bool:
+    """ICMP-Ping-Probe via system ``ping`` (kein Raw-Socket noetig).
+
+    Cross-platform: Windows nutzt ``ping -n 1 -w <ms>``, Unix/BSD
+    ``ping -c 1 -W <s>``. Liefert True wenn ein Echo-Reply innerhalb
+    von ``timeout_s`` ankam, sonst False. Wirft niemals - jeder
+    Subprozess-Fehler wird als False gewertet.
+
+    Zweck: bei TCP-Timeout zusaetzlich pruefen ob der Host wenigstens
+    auf Layer 3 antwortet. Wenn ja, ist der Port zu (Firewall / Service
+    aus / asymmetrisches Routing) - das beheben ist eine andere Sorte
+    von Arbeit als "Host ist down".
+    """
+    if not host:
+        return False
+    if sys.platform == "win32":
+        # Windows: -n Anzahl, -w timeout in ms, -4 = IPv4 erzwingen
+        cmd = ["ping", "-n", "1", "-w", str(int(timeout_s * 1000)), "-4", host]
+    else:
+        # Linux/BSD: -c Anzahl, -W timeout in Sekunden
+        cmd = ["ping", "-c", "1", "-W", str(max(1, int(timeout_s))), host]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=timeout_s + 1.0,
+            check=False,
+        )
+        return result.returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        return False
 
 
 def tcp_probe(

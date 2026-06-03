@@ -46,10 +46,15 @@ done
 # ---------------------------------------------------------------------------
 # Pakete
 # ---------------------------------------------------------------------------
-log "Pakete installieren (python3, venv, git)..."
+# iputils-ping wird vom Asymmetric-Path-Diagnostic (core/health.py) genutzt -
+# bei TCP-Timeout schiebt Cockpit einen ICMP-Probe nach um L3-Erreichbarkeit
+# von L4-Block zu unterscheiden. Minimal-Debian-Templates haben das oft
+# nicht standardmaessig drin.
+log "Pakete installieren (python3, venv, git, ping)..."
 apt-get update -qq
 apt-get install -y --no-install-recommends \
     python3 python3-venv python3-dev build-essential git ca-certificates \
+    iputils-ping \
     >/dev/null
 
 # ---------------------------------------------------------------------------
