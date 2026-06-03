@@ -7,7 +7,7 @@
 #   2. NSSM-Dienst ENTFERNEN (sonst bleibt nssm.exe als Service-Host
 #      gelockt und das ganze bundle\-Verzeichnis kann nicht weg)
 #   3. Hardes Killen aller Prozesse die noch unter {app}\ laufen
-#   4. taskkill-Fallback per Image-Name (opn-cockpit.exe, nssm.exe)
+#   4. taskkill-Fallback per Image-Name (opn-cockpit.exe, opn-cockpitw.exe, nssm.exe)
 #   5. Wartezeit damit Windows die File-Handles wirklich freigibt
 #
 # Wird vom Inno-Setup-Uninstall UNCONDITIONAL aufgerufen - kein
@@ -130,7 +130,7 @@ if ($procs.Count -gt 0) {
 # ---- Schritt 4: taskkill-Fallback per Image-Name ----
 # Get-Process.Path kann fuer manche System/Service-Prozesse null sein
 # (Zugriff verweigert). taskkill /F /IM faengt das ab.
-foreach ($imgName in @("opn-cockpit.exe", "nssm.exe")) {
+foreach ($imgName in @("opn-cockpit.exe", "opn-cockpitw.exe", "nssm.exe")) {
     # 2>$null + Out-Null: taskkill schreibt "kein Prozess gefunden" als
     # Error-Output, das ist hier ok und nicht der Rede wert.
     & taskkill.exe /F /IM $imgName 2>$null | Out-Null

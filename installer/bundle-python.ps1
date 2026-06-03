@@ -202,6 +202,24 @@ $LauncherCheck = & $BrandedLauncher -c "import opn_cockpit; print('launcher ok:'
 if ($LASTEXITCODE -ne 0) { throw "Branded Launcher startet kein Python (Bundle kaputt)." }
 Write-Host "==> $LauncherCheck" -ForegroundColor Green
 
+# Windowless-Variante: pythonw.exe (= Windows-Subsystem statt Console)
+# Wird vom Desktop-Shortcut im Single-User-Mode genutzt, damit beim
+# Doppelklick KEIN schwarzes Konsolen-Fenster aufgeht das die ganze
+# Session offen bleibt. Service-Mode nutzt weiterhin opn-cockpit.exe
+# damit NSSM die stdout-/stderr-Streams capturen kann.
+$BundlePyW = Join-Path $BundleDir "pythonw.exe"
+if (Test-Path $BundlePyW) {
+    $BrandedWindowless = Join-Path $BundleDir "opn-cockpitw.exe"
+    Copy-Item -Force $BundlePyW $BrandedWindowless
+    Write-Host "==> Windowless Launcher: $BrandedWindowless" -ForegroundColor Cyan
+    # Smoke-Test: pythonw kann kein print zu stdout, aber Exit-Code muss 0 sein.
+    & $BrandedWindowless -c "import opn_cockpit; raise SystemExit(0)"
+    if ($LASTEXITCODE -ne 0) { throw "Windowless Launcher startet nicht sauber." }
+    Write-Host "==> Windowless Launcher OK" -ForegroundColor Green
+} else {
+    Write-Host "==> pythonw.exe nicht im Bundle - Windowless-Modus nicht verfuegbar." -ForegroundColor Yellow
+}
+
 # Pip's Scripts/opn-cockpit.exe und opn-cockpit-cli.exe haben den kaputten
 # Absoluten-Pfad-Shebang -- die wollen wir definitiv NICHT mit ausliefern,
 # damit niemand sie versehentlich startet. Entfernen.

@@ -41,6 +41,11 @@
 ; opn-cockpit.exe, kein pip-Launcher mit Build-Zeit-Pfad-Shebang noetig.
 #define MyAppExeName    "python\opn-cockpit.exe"
 #define MyAppExeArgs    "-m opn_cockpit"
+; Windowless-Variante (= Kopie von pythonw.exe). Wird vom Desktop-Shortcut
+; im Single-User-Mode genutzt damit der Doppelklick kein dauerhaft offenes
+; Konsolen-Fenster aufmacht. Runner erkennt sys.stdout==None und leitet
+; alle Logs in <app_data>/logs/opn-cockpit.log um.
+#define MyAppExeNameW   "python\opn-cockpitw.exe"
 
 [Setup]
 AppId={{B8F1A7C2-9D6E-4F3B-A1C0-OPNCOCKPITV20}}
@@ -110,12 +115,16 @@ Source: "vendor\nssm.exe";           DestDir: "{app}\bundle"; \
   Flags: ignoreversion; Components: service
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
+; Single-User-Shortcuts zeigen auf die WINDOWLESS-Variante
+; (opn-cockpitw.exe = Kopie von pythonw.exe). Damit oeffnet ein
+; Doppelklick KEIN dauerhaftes Konsolen-Fenster - Logs landen in
+; <app_data>/logs/opn-cockpit.log (Runner erkennt sys.stdout==None).
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeNameW}"; \
   Parameters: "{#MyAppExeArgs}"; WorkingDir: "{app}\python"; \
-  Comment: "OPN-Cockpit starten"; Components: single
+  Comment: "OPN-Cockpit starten (Hintergrund, kein Konsolen-Fenster)"; Components: single
 Name: "{group}\Online-Hilfe"; Filename: "{#MyAppURL}"
 Name: "{group}\{#MyAppName} deinstallieren"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeNameW}"; \
   Parameters: "{#MyAppExeArgs}"; WorkingDir: "{app}\python"; \
   Tasks: desktopicon; Components: single
 ; Service-Mode: kein Desktop-Shortcut, dafuer Browser-Verknuepfung zum lokalen Port.
@@ -134,8 +143,8 @@ Filename: "powershell.exe"; \
   StatusMsg: "Windows-Dienst wird registriert..."; \
   Flags: waituntilterminated; Components: service
 
-; Single-Mode: optional jetzt starten.
-Filename: "{app}\{#MyAppExeName}"; \
+; Single-Mode: optional jetzt starten (auch hier windowless).
+Filename: "{app}\{#MyAppExeNameW}"; \
   Parameters: "{#MyAppExeArgs}"; \
   WorkingDir: "{app}\python"; \
   Description: "OPN-Cockpit jetzt starten"; \
