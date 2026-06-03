@@ -3072,6 +3072,8 @@
     $('#vs-autobackup').checked = true;
     $('#vs-retention-pre-apply').value = '30';
     $('#vs-retention-scheduled').value = '90';
+    $('#vs-sched-enabled').checked = false;
+    $('#vs-sched-interval').value = '24';
     $('#vs-pw-current').value = '';
     $('#vs-pw-new1').value = '';
     $('#vs-pw-new2').value = '';
@@ -3097,6 +3099,10 @@
         if (typeof data.backup_retention_scheduled === 'number') {
           $('#vs-retention-scheduled').value = data.backup_retention_scheduled;
         }
+        $('#vs-sched-enabled').checked = data.scheduled_backup_enabled === true;
+        if (typeof data.scheduled_backup_interval_hours === 'number') {
+          $('#vs-sched-interval').value = data.scheduled_backup_interval_hours;
+        }
       }
     } catch (_e) { /* Modal kann auch mit leerem Feld bedient werden */ }
   }
@@ -3109,6 +3115,8 @@
     const autobackup = $('#vs-autobackup').checked;
     const preApply = parseInt($('#vs-retention-pre-apply').value, 10);
     const scheduled = parseInt($('#vs-retention-scheduled').value, 10);
+    const schedEnabled = $('#vs-sched-enabled').checked;
+    const schedInterval = parseInt($('#vs-sched-interval').value, 10);
     if (!Number.isFinite(preApply) || preApply < 1 || preApply > 500) {
       errBox.textContent = 'Apply-Retention muss zwischen 1 und 500 liegen.';
       errBox.hidden = false;
@@ -3116,6 +3124,11 @@
     }
     if (!Number.isFinite(scheduled) || scheduled < 1 || scheduled > 500) {
       errBox.textContent = 'Scheduled-Retention muss zwischen 1 und 500 liegen.';
+      errBox.hidden = false;
+      return;
+    }
+    if (!Number.isFinite(schedInterval) || schedInterval < 1 || schedInterval > 168) {
+      errBox.textContent = 'Backup-Intervall muss zwischen 1 und 168 Stunden liegen.';
       errBox.hidden = false;
       return;
     }
@@ -3132,6 +3145,8 @@
         auto_backup_before_apply: autobackup,
         backup_retention_pre_apply: preApply,
         backup_retention_scheduled: scheduled,
+        scheduled_backup_enabled: schedEnabled,
+        scheduled_backup_interval_hours: schedInterval,
       });
       if (response.status === 401) { handleSessionLost(); return; }
       if (!response.ok) {

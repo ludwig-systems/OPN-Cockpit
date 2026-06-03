@@ -122,6 +122,26 @@ class SessionManager:
         with self._lock:
             return len(self._sessions)
 
+    def snapshot_active(self) -> list[tuple[str, Session, Path]]:
+        """Liefert (token, session, vault_path)-Tupel aller aktiven Sessions.
+
+        Wird vom BackupScheduler genutzt um saemtliche entsperrten Tresore
+        in einer Iteration zu finden. Sessions die inzwischen abgelaufen
+        sind (Inaktivitaet) werden hier herausgefiltert UND aus der
+        Registry entfernt - genau wie ``get`` das pro Token macht.
+        """
+        with self._lock:
+            result: list[tuple[str, Session, Path]] = []
+            stale: list[str] = []
+            for token, entry in self._sessions.items():
+                if entry.session.check_inactivity():
+                    stale.append(token)
+                    continue
+                result.append((token, entry.session, entry.vault_path))
+            for token in stale:
+                self._sessions.pop(token, None)
+            return result
+
     def revoke_all_except(self, keep_token: str) -> int:
         """Sperrt alle Sessions ausser ``keep_token``. Liefert die Anzahl der
         gesperrten.

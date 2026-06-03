@@ -19,6 +19,7 @@ from starlette.types import Message, Receive, Scope, Send
 from opn_cockpit import __version__
 from opn_cockpit.web.api import register_api_routes
 from opn_cockpit.web.auth.manager import SessionManager
+from opn_cockpit.web.backup_scheduler import BackupScheduler
 from opn_cockpit.web.rate_limit import RateLimiter
 from opn_cockpit.web.retry_watcher import RetryWatcher
 from opn_cockpit.web.server_state import ServerState
@@ -70,6 +71,11 @@ def create_app() -> FastAPI:
     session_manager = SessionManager()
     app.state.session_manager = session_manager
     app.state.retry_watcher = RetryWatcher(session_manager)
+    app.state.backup_scheduler = BackupScheduler(session_manager)
+    # Scheduler-Thread direkt starten - er wartet sowieso ~30s vor dem
+    # ersten Tick und ist No-Op solange keine Session mit
+    # scheduled_backup_enabled offen ist.
+    app.state.backup_scheduler.start()
     app.state.server_state = ServerState.from_settings()
     app.state.login_rate_limiter = RateLimiter()
     app.state.bootstrap_rate_limiter = RateLimiter(

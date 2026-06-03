@@ -74,6 +74,12 @@ class VaultSettings:
     auto_backup_before_apply: bool = True
     backup_retention_pre_apply: int = 30
     backup_retention_scheduled: int = 90
+    # v0.7 #4 Scheduled Auto-Backup. Default AUS - manche Setups wollen
+    # keine automatische Verbindung zur OPNsense ohne explizite Freigabe
+    # (Audit-Eintraege auf der Box). Wer aktiviert, kriegt pro Geraet
+    # alle ``scheduled_backup_interval_hours`` Stunden ein Snapshot.
+    scheduled_backup_enabled: bool = False
+    scheduled_backup_interval_hours: int = 24
 
 
 @dataclass(slots=True)
@@ -154,5 +160,11 @@ def _settings_from_dict(raw: dict[str, Any]) -> VaultSettings:
         ),
         backup_retention_scheduled=int(
             raw.get("backup_retention_scheduled", defaults.backup_retention_scheduled),
+        ),
+        scheduled_backup_enabled=bool(
+            raw.get("scheduled_backup_enabled", defaults.scheduled_backup_enabled),
+        ),
+        scheduled_backup_interval_hours=int(
+            raw.get("scheduled_backup_interval_hours", defaults.scheduled_backup_interval_hours),
         ),
     )

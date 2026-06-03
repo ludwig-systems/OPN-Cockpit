@@ -405,6 +405,8 @@ def get_vault_settings(
         auto_backup_before_apply=bool(s.auto_backup_before_apply),
         backup_retention_pre_apply=int(s.backup_retention_pre_apply),
         backup_retention_scheduled=int(s.backup_retention_scheduled),
+        scheduled_backup_enabled=bool(s.scheduled_backup_enabled),
+        scheduled_backup_interval_hours=int(s.scheduled_backup_interval_hours),
     )
 
 
@@ -449,6 +451,16 @@ def update_vault_settings(
             if payload.backup_retention_scheduled is not None
             else old_settings.backup_retention_scheduled
         ),
+        scheduled_backup_enabled=(
+            payload.scheduled_backup_enabled
+            if payload.scheduled_backup_enabled is not None
+            else old_settings.scheduled_backup_enabled
+        ),
+        scheduled_backup_interval_hours=(
+            payload.scheduled_backup_interval_hours
+            if payload.scheduled_backup_interval_hours is not None
+            else old_settings.scheduled_backup_interval_hours
+        ),
     )
     session.opened.data.settings = new_settings
 
@@ -473,6 +485,8 @@ def update_vault_settings(
         auto_backup_before_apply=bool(new_settings.auto_backup_before_apply),
         backup_retention_pre_apply=int(new_settings.backup_retention_pre_apply),
         backup_retention_scheduled=int(new_settings.backup_retention_scheduled),
+        scheduled_backup_enabled=bool(new_settings.scheduled_backup_enabled),
+        scheduled_backup_interval_hours=int(new_settings.scheduled_backup_interval_hours),
     )
 
 

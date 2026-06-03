@@ -171,6 +171,9 @@ class VaultSettingsResponse(BaseModel):
 
     backup_retention_pre_apply: int = 30
     backup_retention_scheduled: int = 90
+    # v0.7 #4: Scheduled Auto-Backup
+    scheduled_backup_enabled: bool = False
+    scheduled_backup_interval_hours: int = 24
 
 
 class VaultSettingsUpdateRequest(BaseModel):
@@ -180,6 +183,10 @@ class VaultSettingsUpdateRequest(BaseModel):
 
     backup_retention_pre_apply: int | None = Field(None, ge=1, le=500)
     backup_retention_scheduled: int | None = Field(None, ge=1, le=500)
+    # v0.7 #4
+    scheduled_backup_enabled: bool | None = None
+    scheduled_backup_interval_hours: int | None = Field(None, ge=1, le=168)
+    """1h..7d Intervall. Werte < 1h verbietet auch der Scheduler intern."""
 
 
 # F5a: Master-Passwort des aktiven Tresors aendern

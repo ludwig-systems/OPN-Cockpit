@@ -910,8 +910,34 @@
           <input id="vs-retention-scheduled" class="form-input" type="number"
                  min="1" max="500" step="1" />
           <div class="form-hint">
-            Eigener Pool fuer die kommenden Hintergrund-Snapshots (taegliche
-            Sicherung). Heute ohne Effekt, ab v0.7-#4 aktiv.
+            Eigener Pool fuer die geplanten Hintergrund-Snapshots.
+          </div>
+
+          <div class="form-divider"></div>
+
+          <!-- Sektion: Scheduled Auto-Backup (v0.7 #4) -->
+          <h3 class="modal-section-title">Geplante Auto-Backups</h3>
+          <label class="form-checkbox">
+            <input id="vs-sched-enabled" type="checkbox" />
+            <span>Hintergrund-Backups aktivieren</span>
+          </label>
+          <div class="form-hint">
+            Der Server zieht im konfigurierten Intervall pro Geraet ein
+            verschluesseltes Konfig-Backup. Erscheint auf der OPNsense-Seite
+            als API-Zugriff (eigene Audit-Eintraege dort) — vor Aktivierung
+            mit deinen Compliance-Vorgaben abgleichen. Default AUS.
+          </div>
+
+          <label class="form-label" for="vs-sched-interval" style="margin-top:14px;">
+            Intervall in Stunden
+          </label>
+          <input id="vs-sched-interval" class="form-input" type="number"
+                 min="1" max="168" step="1" />
+          <div class="form-hint">
+            1 Stunde bis 7 Tage (168h). Default 24h. Pro Tresor; greift
+            sobald gespeichert (kein Restart noetig). Backups landen im
+            selben gzip-Index wie Pre-Apply-Backups mit
+            <code>trigger="scheduled"</code>.
           </div>
 
           <div class="form-row" style="margin-top:12px;">
