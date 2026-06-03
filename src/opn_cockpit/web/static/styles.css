@@ -362,6 +362,44 @@ body {
   line-height: 1.5;
 }
 
+/* Bekannte-Tresore-Chips unter dem Pfad-Input im Single-Switch-Modal.
+   Klick fuellt den Pfad - Komfort gegenueber dem Tippen langer Pfade. */
+.ssw-known-vaults {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.ssw-known-vaults-label {
+  width: 100%;
+  font-size: 11px;
+  color: var(--text-subtle);
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+}
+
+.ssw-vault-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+
+.ssw-vault-chip:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+}
+
 /* Input mit angedocktem Button (z. B. Pfad + "Durchsuchen…") */
 .form-input-with-button {
   display: flex;

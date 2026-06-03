@@ -103,10 +103,38 @@ def resolve_safe_vault_path(raw: str) -> Path:
     )
 
 
+def resolve_freeform_vault_path(raw: str) -> Path:
+    """Akzeptiert beliebige Tresor-Pfade ohne Basis-Check.
+
+    Nur fuer den Single-User-Local-Mode gedacht: dort ist der Browser-
+    User identisch mit dem Maschinen-Admin, und USB-Sticks /
+    Backup-Laufwerke / beliebige Ordner sollen ohne Konfiguration
+    funktionieren.
+
+    Wirft ``VaultPathError`` wenn der Pfad leer ist, falsche Endung
+    hat oder nicht aufloesbar ist. Es findet KEINE Basis-Pruefung
+    statt — der Aufrufer muss vorher sichergestellt haben, dass das
+    sicher ist (Single-User-Mode).
+    """
+    s = (raw or "").strip()
+    if not s:
+        raise VaultPathError("Tresor-Pfad fehlt.")
+    candidate = Path(s)
+    if candidate.suffix.lower() != VAULT_SUFFIX:
+        raise VaultPathError(
+            f"Tresor-Datei muss auf '{VAULT_SUFFIX}' enden.",
+        )
+    try:
+        return candidate.resolve()
+    except OSError as exc:
+        raise VaultPathError(f"Tresor-Pfad nicht aufloesbar: {exc}") from exc
+
+
 __all__ = [
     "VAULT_DIR_ENV",
     "VAULT_SUFFIX",
     "VaultPathError",
     "allowed_vault_bases",
+    "resolve_freeform_vault_path",
     "resolve_safe_vault_path",
 ]

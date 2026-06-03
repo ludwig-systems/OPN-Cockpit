@@ -1035,11 +1035,15 @@
         <div class="modal-body">
           <p class="form-hint">
             Sperrt deine aktuelle Session und oeffnet stattdessen einen
-            anderen oder neu angelegten Tresor.
+            anderen oder neu angelegten Tresor. Der Pfad darf auf jedem
+            lokalen Laufwerk liegen (z. B. USB-Stick).
           </p>
 
-          <label class="form-label" for="ssw-vault-select">Bekannter Tresor</label>
-          <select id="ssw-vault-select" class="form-select"></select>
+          <label class="form-label" for="ssw-vault-path">Pfad zum Tresor</label>
+          <input id="ssw-vault-path" class="form-input" type="text"
+                 placeholder="z. B. E:\Backups\team.opnvault"
+                 autocomplete="off" spellcheck="false" data-lpignore="true" />
+          <div id="ssw-known-vaults" class="ssw-known-vaults" hidden></div>
 
           <label class="form-label" for="ssw-pw">Master-Passwort</label>
           <input id="ssw-pw" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />

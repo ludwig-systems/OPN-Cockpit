@@ -32,7 +32,11 @@ from opn_cockpit.web.auth.dependencies import (
 from opn_cockpit.web.auth.manager import SessionManager
 from opn_cockpit.web.rate_limit import RateLimiter
 from opn_cockpit.web.server_state import ServerState, ServerStateError
-from opn_cockpit.web.vault_path import VaultPathError, resolve_safe_vault_path
+from opn_cockpit.web.vault_path import (
+    VaultPathError,
+    resolve_freeform_vault_path,
+    resolve_safe_vault_path,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -86,13 +90,28 @@ def unlock(
     payload: UnlockRequest,
     request: Request,
     manager: SessionManager = Depends(get_session_manager),
+    server: ServerState = Depends(get_server_state),
 ) -> UnlockResponse:
-    """Entsperrt einen Tresor und liefert ein Bearer-Token zurueck."""
+    """Entsperrt einen Tresor und liefert ein Bearer-Token zurueck.
+
+    Single-User-Mode: Pfade duerfen beliebig auf der lokalen Maschine
+    liegen (USB-Sticks, externe Laufwerke, beliebige Ordner). Der
+    Browser-User ist hier identisch mit dem Maschinen-Admin, eine
+    Pfad-Restriktion brachte nur Reibung.
+
+    Multi-User-Server-Mode: Pfade muessen unter einer der erlaubten
+    Basen liegen (APPDATA / Home / OPNCOCKPIT_VAULT_DIR), sonst koennte
+    ein authentifizierter User den Server zwingen, beliebige Dateien
+    zu lesen.
+    """
     limiter = _login_limiter(request)
     _check_rate_limit(request, limiter)
     client_key = _client_key(request)
     try:
-        path = resolve_safe_vault_path(payload.vault_path)
+        if server.is_multi_user_mode:
+            path = resolve_safe_vault_path(payload.vault_path)
+        else:
+            path = resolve_freeform_vault_path(payload.vault_path)
     except VaultPathError as exc:
         limiter.register_failure(client_key)
         raise HTTPException(

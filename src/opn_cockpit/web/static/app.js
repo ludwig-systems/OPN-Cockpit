@@ -3584,6 +3584,7 @@
   // -------------------- Single-Mode Vault wechseln --------------------
 
   async function openSingleSwitchModal() {
+    $('#ssw-vault-path').value = '';
     $('#ssw-pw').value = '';
     $('#ssw-new-path').value = '';
     $('#ssw-new-pw1').value = '';
@@ -3592,37 +3593,43 @@
     $('#ssw-error').hidden = true;
     $('#ssw-toggle-create').textContent = 'Stattdessen neuen Tresor anlegen…';
     $('#single-switch-modal').hidden = false;
-    // Bekannte Tresore laden
+    // Bekannte Tresore als Klick-Chips unter dem Pfad-Eingabefeld.
+    // Der User kann aber auch jeden beliebigen Pfad eintippen (USB-Stick,
+    // externes Laufwerk, eigene Ordner) - die Auswahl ist nur Komfort.
     try {
       const response = await apiGet('/api/vaults');
       if (!response.ok) throw new Error('Vault-Liste nicht erreichbar.');
       const data = await response.json();
-      const select = $('#ssw-vault-select');
-      select.innerHTML = '';
+      const box = $('#ssw-known-vaults');
+      box.innerHTML = '';
       const currentName = state.sessionInfo?.vault_filename;
-      let hasOther = false;
-      for (const v of data.vaults || []) {
-        if (v.filename === currentName) continue;
-        const opt = document.createElement('option');
-        opt.value = v.path;
-        opt.textContent = `${v.filename} — ${v.path}`;
-        select.appendChild(opt);
-        hasOther = true;
-      }
-      if (!hasOther) {
-        const opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = '(keine weiteren Tresore gefunden)';
-        select.appendChild(opt);
-        select.disabled = true;
+      const known = (data.vaults || []).filter((v) => v.filename !== currentName);
+      if (known.length > 0) {
+        const label = document.createElement('div');
+        label.className = 'ssw-known-vaults-label';
+        label.textContent = 'Bekannte Tresore (Klick fuellt den Pfad):';
+        box.appendChild(label);
+        for (const v of known) {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'ssw-vault-chip';
+          chip.textContent = v.filename;
+          chip.title = v.path;
+          chip.addEventListener('click', () => {
+            $('#ssw-vault-path').value = v.path;
+            $('#ssw-pw').focus();
+          });
+          box.appendChild(chip);
+        }
+        box.hidden = false;
       } else {
-        select.disabled = false;
+        box.hidden = true;
       }
       $('#ssw-new-path').value = data.suggested_new_path || '';
     } catch (err) {
       showSswError(err.message);
     }
-    setTimeout(() => $('#ssw-pw').focus(), 0);
+    setTimeout(() => $('#ssw-vault-path').focus(), 0);
   }
 
   function closeSingleSwitchModal() {
@@ -3650,9 +3657,9 @@
       if (pw1 !== pw2) return showSswError('Die beiden Passwoerter stimmen nicht ueberein.');
       await doSingleSwitchCreate(newPath, pw1);
     } else {
-      const path = $('#ssw-vault-select').value;
+      const path = $('#ssw-vault-path').value.trim();
       const pw = $('#ssw-pw').value;
-      if (!path) return showSswError('Bitte einen Tresor auswaehlen oder einen neuen anlegen.');
+      if (!path) return showSswError('Bitte Pfad zum Tresor eintragen oder einen neuen anlegen.');
       if (!pw) return showSswError('Master-Passwort fehlt.');
       await doSingleSwitchUnlock(path, pw);
     }
