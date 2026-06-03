@@ -512,6 +512,58 @@ OPNCOCKPIT_REPO_URL='${REPO_URL}' OPNCOCKPIT_REPO_BRANCH='${REPO_BRANCH}' /tmp/i
 "
 
 # ---------------------------------------------------------------------------
+# Proxmox-Container-Beschreibung (Notes-Feld)
+# ---------------------------------------------------------------------------
+# Erst NACH dem Setup setzen, damit wir die echte CT_IP im Web-UI-Link
+# stehen haben. Erscheint in der Proxmox-Web-UI unter dem Container ->
+# "Notes" und gibt dem Admin auf einen Blick: Login, Update-One-Liner,
+# Repo-Link. Markdown wird vom Proxmox-GUI gerendert.
+#
+# Update-One-Liner ist derselbe URL den der User zur Installation nutzt -
+# das Skript erkennt den Update-Modus automatisch (Helper-Mode-Detection
+# am Anfang via Existenz von /opt/opn-cockpit + dem systemd-Service).
+RAW_HELPER_URL=$(echo "$REPO_URL" |
+    sed -E 's|^(https?://)github\.com/([^/]+)/([^/.]+)(\.git)?/?$|\1raw.githubusercontent.com/\2/\3|')
+RAW_HELPER_URL="${RAW_HELPER_URL}/${REPO_BRANCH}/installer/linux/proxmox-helper.sh"
+
+CT_DESCRIPTION=$(cat <<EOF
+<div align='center'>
+  <h2 style='margin: 12px 0 4px 0;'>OPN-Cockpit</h2>
+  <p style='margin: 0 0 16px 0; color: #888;'>Multi-Site OPNsense Management</p>
+</div>
+
+### Zugang
+- **Web-UI:** [http://${CT_IP}:9876](http://${CT_IP}:9876)
+- **Default-Login:** \`admin\` / \`OPN-Cockpit!\`
+  (Pflicht-PW-Wechsel beim ersten Login)
+
+### Update / Reinstall
+Im Container einloggen (\`pct enter ${CT_ID}\` vom Proxmox-Host),
+dann das Helper-Skript erneut starten:
+
+    bash -c "\$(wget -qLO - ${RAW_HELPER_URL})"
+
+Das Skript erkennt automatisch dass es im bereits installierten
+Container laeuft und macht ein Update statt Neuinstallation.
+User-Daten in \`/var/lib/opn-cockpit\` bleiben unberuehrt.
+
+### Daten + Logs
+- Tresor + Audit: \`/var/lib/opn-cockpit/\`
+- Service-Logs: \`journalctl -u opn-cockpit\`
+- Branch / Version: \`${REPO_BRANCH}\`
+
+### Links
+- [GitHub Repository](https://github.com/ludwig-systems/opn-cockpit)
+- [Issues / Feedback](https://github.com/ludwig-systems/opn-cockpit/issues)
+EOF
+)
+
+# pct set akzeptiert --description als String, Proxmox kuemmert sich
+# intern um Encoding von Newlines im Container-Config.
+pct set "$CT_ID" --description "$CT_DESCRIPTION" 2>/dev/null \
+    || warn "Container-Beschreibung konnte nicht gesetzt werden (nicht kritisch)."
+
+# ---------------------------------------------------------------------------
 # Fertig — sowohl Whiptail-Msgbox als auch Konsolen-Ausgabe
 # ---------------------------------------------------------------------------
 if [[ -n "$CT_PASSWORD" ]]; then
