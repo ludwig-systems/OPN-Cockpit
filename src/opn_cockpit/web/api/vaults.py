@@ -408,6 +408,9 @@ def get_vault_settings(
         scheduled_backup_enabled=bool(s.scheduled_backup_enabled),
         scheduled_backup_interval_hours=int(s.scheduled_backup_interval_hours),
         drift_detection_enabled=bool(s.drift_detection_enabled),
+        auto_retry_enabled=bool(s.auto_retry_enabled),
+        auto_retry_max_hours=int(s.auto_retry_max_hours),
+        auto_retry_interval_minutes=int(s.auto_retry_interval_minutes),
     )
 
 
@@ -467,6 +470,21 @@ def update_vault_settings(
             if payload.drift_detection_enabled is not None
             else old_settings.drift_detection_enabled
         ),
+        auto_retry_enabled=(
+            payload.auto_retry_enabled
+            if payload.auto_retry_enabled is not None
+            else old_settings.auto_retry_enabled
+        ),
+        auto_retry_max_hours=(
+            payload.auto_retry_max_hours
+            if payload.auto_retry_max_hours is not None
+            else old_settings.auto_retry_max_hours
+        ),
+        auto_retry_interval_minutes=(
+            payload.auto_retry_interval_minutes
+            if payload.auto_retry_interval_minutes is not None
+            else old_settings.auto_retry_interval_minutes
+        ),
     )
     session.opened.data.settings = new_settings
 
@@ -494,6 +512,9 @@ def update_vault_settings(
         scheduled_backup_enabled=bool(new_settings.scheduled_backup_enabled),
         scheduled_backup_interval_hours=int(new_settings.scheduled_backup_interval_hours),
         drift_detection_enabled=bool(new_settings.drift_detection_enabled),
+        auto_retry_enabled=bool(new_settings.auto_retry_enabled),
+        auto_retry_max_hours=int(new_settings.auto_retry_max_hours),
+        auto_retry_interval_minutes=int(new_settings.auto_retry_interval_minutes),
     )
 
 

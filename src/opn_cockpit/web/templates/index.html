@@ -1013,6 +1013,42 @@
 
           <div class="form-divider"></div>
 
+          <!-- Sektion: Auto-Retry-Queue (v0.7 #6, Mobile-Racks) -->
+          <h3 class="modal-section-title">Auto-Retry fuer offline-Geraete</h3>
+          <label class="form-checkbox">
+            <input id="vs-retry-enabled" type="checkbox" />
+            <span>Failed-Geraete automatisch retryen wenn wieder erreichbar</span>
+          </label>
+          <div class="form-hint">
+            Wenn ein Apply auf Geraeten fehlschlaegt (typisch: Mobile-Rack
+            ist offline / Timeout), reiht Cockpit sie in eine Retry-Queue.
+            Solange deine Session offen ist, probiert der Hintergrund-Thread
+            es alle paar Minuten wieder - sobald das Geraet zurueck ist,
+            wird der Plan automatisch nachgezogen. Default AN.
+          </div>
+
+          <label class="form-label" for="vs-retry-max-hours" style="margin-top:14px;">
+            Max. Wartezeit (Stunden)
+          </label>
+          <input id="vs-retry-max-hours" class="form-input" type="number"
+                 min="1" max="720" step="1" />
+          <div class="form-hint">
+            1 bis 720 Stunden (30 Tage). Default 168h (7 Tage) - genug fuer
+            ein Wochenende ohne Connection.
+          </div>
+
+          <label class="form-label" for="vs-retry-interval-min" style="margin-top:14px;">
+            Retry-Intervall (Minuten)
+          </label>
+          <input id="vs-retry-interval-min" class="form-input" type="number"
+                 min="1" max="120" step="1" />
+          <div class="form-hint">
+            Wie oft der Watcher das Geraet anpingt. Default 5 Min - sparsam
+            damit OPNsense-Audit nicht ueberflutet wird.
+          </div>
+
+          <div class="form-divider"></div>
+
           <!-- Sektion: Config-Drift-Erkennung (v0.7 #5) -->
           <h3 class="modal-section-title">Config-Drift erkennen</h3>
           <label class="form-checkbox">

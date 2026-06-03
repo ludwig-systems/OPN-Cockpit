@@ -176,6 +176,10 @@ class VaultSettingsResponse(BaseModel):
     scheduled_backup_interval_hours: int = 24
     # v0.7 #5: Config-Drift-Erkennung
     drift_detection_enabled: bool = False
+    # v0.7 #6: Auto-Retry-Queue fuer Mobile-Racks
+    auto_retry_enabled: bool = True
+    auto_retry_max_hours: int = 168
+    auto_retry_interval_minutes: int = 5
 
 
 class VaultSettingsUpdateRequest(BaseModel):
@@ -191,6 +195,11 @@ class VaultSettingsUpdateRequest(BaseModel):
     """1h..7d Intervall. Werte < 1h verbietet auch der Scheduler intern."""
     # v0.7 #5
     drift_detection_enabled: bool | None = None
+    # v0.7 #6
+    auto_retry_enabled: bool | None = None
+    auto_retry_max_hours: int | None = Field(None, ge=1, le=720)
+    """1h..30d. Defaults 168h (7 Tage)."""
+    auto_retry_interval_minutes: int | None = Field(None, ge=1, le=120)
 
 
 # F5a: Master-Passwort des aktiven Tresors aendern

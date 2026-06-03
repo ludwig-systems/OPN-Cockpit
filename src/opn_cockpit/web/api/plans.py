@@ -7,7 +7,7 @@ Der Plan-Store ist derselbe wie bei der CLI (``%APPDATA%/OPN-Cockpit/plans/``)
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from opn_cockpit.audit.backend import get_audit_backend
 from opn_cockpit.core.errors import ValidationError
@@ -47,7 +47,11 @@ from opn_cockpit.web.api.schemas import (
     RolloutReportResponse,
     RoutePlanRequest,
 )
-from opn_cockpit.web.auth.dependencies import require_session
+from opn_cockpit.web.auth.dependencies import (
+    require_session,
+    require_session_with_token,
+)
+from opn_cockpit.web.retry_watcher import RetryWatcher
 
 router = APIRouter(prefix="/api/plans", tags=["plans"])
 
@@ -307,8 +311,9 @@ def delete_plan(
 @router.post("/{plan_id}/apply", response_model=RolloutReportResponse)
 def apply_plan(
     plan_id: str,
+    request: Request,
     payload: ApplyRequest | None = None,
-    session: Session = Depends(require_session),
+    pair: tuple[Session, str] = Depends(require_session_with_token),
 ) -> RolloutReportResponse:
     """Rollt einen Plan aus. Optional nur fuer eine Untermenge der Geraete.
 
@@ -316,11 +321,17 @@ def apply_plan(
     schon einmal angewandt, einige Geraete sind fehlgeschlagen, und er
     will nur die fehlgeschlagenen nachziehen. Wenn ``device_ids`` leer
     oder ``None`` ist, wird der Plan auf allen seinen Geraeten ausgerollt.
+
+    Mobile-Rack-Workflow: wenn ``auto_retry_enabled`` im Tresor an ist und
+    Geraete nach dem Apply als FAILED zurueckkommen (typisch: offline,
+    Timeout), werden sie automatisch in den RetryWatcher eingequeued.
+    Sobald sie wieder erreichbar sind, zieht der Watcher den Apply nach -
+    ohne dass der User nochmal klicken muss. Der Job laeuft bis zur
+    konfigurierten Max-Dauer (default 7 Tage) oder bis er Erfolg hat.
     """
+    session, token = pair
     require_plan_role(session)
     device_ids = payload.device_ids if payload is not None else None
-    # ACL-Pruefung: alle Plan-Geraete (oder gefilterte device_ids) muessen im
-    # User-Scope liegen. Sonst 404 (Existenz nicht verraten).
     plan = _load_plan_or_404(plan_id)
     target_ids = device_ids if device_ids else [a.device.id for a in plan.actions]
     require_device_ids_accessible(
@@ -338,7 +349,53 @@ def apply_plan(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+    # Auto-Retry-Queue fuer Failed-Devices (v0.7 Mobile-Rack-Feature).
+    _auto_arm_retry_for_failures(
+        request=request, session=session, token=token,
+        plan_id=plan_id, report=full_report,
+    )
+
     return _report_to_response(plan, full_report)
+
+
+def _auto_arm_retry_for_failures(
+    *,
+    request: Request,
+    session: Session,
+    token: str,
+    plan_id: str,
+    report: RolloutReport,
+) -> None:
+    """Schedules RetryWatcher-Job fuer alle FAILED-Geraete des Reports.
+
+    Best-Effort: wenn der Watcher nicht initialisiert ist oder Settings
+    auto_retry_enabled=False sagen, bleibt der Apply unveraendert. Greift
+    auch nicht wenn der User aktuell schon einen Retry-Filter angewandt
+    hat - dann ist das ein expliziter Retry-Klick und kein Bedarf fuer
+    Auto-Watcher.
+    """
+    settings = session.opened.data.settings
+    if not settings.auto_retry_enabled:
+        return
+    watcher = getattr(request.app.state, "retry_watcher", None)
+    if not isinstance(watcher, RetryWatcher):
+        return
+    failed_ids = [
+        r.device_id for r in report.results
+        if r.status == Status.FAILED
+    ]
+    if not failed_ids:
+        return
+    interval_s = max(60, settings.auto_retry_interval_minutes * 60)
+    max_duration_s = max(3600, settings.auto_retry_max_hours * 3600)
+    watcher.schedule(
+        plan_id=plan_id,
+        session_token=token,
+        device_ids=failed_ids,
+        interval_s=interval_s,
+        max_duration_s=max_duration_s,
+    )
 
 
 # ---------------------------------------------------------------------------

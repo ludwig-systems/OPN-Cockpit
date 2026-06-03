@@ -85,6 +85,13 @@ class VaultSettings:
     # Drift-Anzeige auf der Karte wenn der Live-Config-Hash vom letzten
     # Backup-Hash abweicht (Indikator fuer ungesicherte Aenderungen).
     drift_detection_enabled: bool = False
+    # v0.7 #6 Auto-Retry fuer Mobile-Racks. Default an - der Watcher gibt
+    # einem offline-Geraet bis zu auto_retry_max_hours Stunden Zeit
+    # wieder erreichbar zu werden und wendet den Plan dann ohne weiteres
+    # Zutun an. Solange die Session lebt, laeuft der Watcher weiter.
+    auto_retry_enabled: bool = True
+    auto_retry_max_hours: int = 168     # 7 Tage - mobile Racks koennen lang offline sein
+    auto_retry_interval_minutes: int = 5
 
 
 @dataclass(slots=True)
@@ -174,5 +181,14 @@ def _settings_from_dict(raw: dict[str, Any]) -> VaultSettings:
         ),
         drift_detection_enabled=bool(
             raw.get("drift_detection_enabled", defaults.drift_detection_enabled),
+        ),
+        auto_retry_enabled=bool(
+            raw.get("auto_retry_enabled", defaults.auto_retry_enabled),
+        ),
+        auto_retry_max_hours=int(
+            raw.get("auto_retry_max_hours", defaults.auto_retry_max_hours),
+        ),
+        auto_retry_interval_minutes=int(
+            raw.get("auto_retry_interval_minutes", defaults.auto_retry_interval_minutes),
         ),
     )

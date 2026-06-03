@@ -3449,6 +3449,9 @@
     $('#vs-sched-enabled').checked = false;
     $('#vs-sched-interval').value = '24';
     $('#vs-drift-enabled').checked = false;
+    $('#vs-retry-enabled').checked = true;
+    $('#vs-retry-max-hours').value = '168';
+    $('#vs-retry-interval-min').value = '5';
     $('#vs-pw-current').value = '';
     $('#vs-pw-new1').value = '';
     $('#vs-pw-new2').value = '';
@@ -3479,6 +3482,13 @@
           $('#vs-sched-interval').value = data.scheduled_backup_interval_hours;
         }
         $('#vs-drift-enabled').checked = data.drift_detection_enabled === true;
+        $('#vs-retry-enabled').checked = data.auto_retry_enabled !== false;
+        if (typeof data.auto_retry_max_hours === 'number') {
+          $('#vs-retry-max-hours').value = data.auto_retry_max_hours;
+        }
+        if (typeof data.auto_retry_interval_minutes === 'number') {
+          $('#vs-retry-interval-min').value = data.auto_retry_interval_minutes;
+        }
       }
     } catch (_e) { /* Modal kann auch mit leerem Feld bedient werden */ }
   }
@@ -3494,6 +3504,19 @@
     const schedEnabled = $('#vs-sched-enabled').checked;
     const schedInterval = parseInt($('#vs-sched-interval').value, 10);
     const driftEnabled = $('#vs-drift-enabled').checked;
+    const retryEnabled = $('#vs-retry-enabled').checked;
+    const retryMaxH = parseInt($('#vs-retry-max-hours').value, 10);
+    const retryIntervalMin = parseInt($('#vs-retry-interval-min').value, 10);
+    if (!Number.isFinite(retryMaxH) || retryMaxH < 1 || retryMaxH > 720) {
+      errBox.textContent = 'Retry-Wartezeit muss zwischen 1 und 720 Stunden liegen.';
+      errBox.hidden = false;
+      return;
+    }
+    if (!Number.isFinite(retryIntervalMin) || retryIntervalMin < 1 || retryIntervalMin > 120) {
+      errBox.textContent = 'Retry-Intervall muss zwischen 1 und 120 Minuten liegen.';
+      errBox.hidden = false;
+      return;
+    }
     if (!Number.isFinite(preApply) || preApply < 1 || preApply > 500) {
       errBox.textContent = 'Apply-Retention muss zwischen 1 und 500 liegen.';
       errBox.hidden = false;
@@ -3525,6 +3548,9 @@
         scheduled_backup_enabled: schedEnabled,
         scheduled_backup_interval_hours: schedInterval,
         drift_detection_enabled: driftEnabled,
+        auto_retry_enabled: retryEnabled,
+        auto_retry_max_hours: retryMaxH,
+        auto_retry_interval_minutes: retryIntervalMin,
       });
       if (response.status === 401) { handleSessionLost(); return; }
       if (!response.ok) {
