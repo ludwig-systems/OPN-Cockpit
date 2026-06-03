@@ -1753,7 +1753,115 @@ body {
 }
 
 .modal-card-narrow { max-width: 460px; }
-.modal-card-wide { max-width: 720px; }
+.modal-card-wide { max-width: 1100px; }
+
+/* Konfig-Compare-Modal: Tabellen-Matrix Geraet x Alias */
+.compare-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.compare-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.compare-tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-subtle);
+  cursor: pointer;
+}
+
+.compare-tab.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+}
+
+.compare-status {
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
+.compare-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-bottom: 12px;
+  font-size: 11.5px;
+  color: var(--text-subtle);
+}
+
+.cmp-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.cmp-dot-present     { background: var(--online, #5a8a5e); }
+.cmp-dot-drift       { background: var(--checking, #c89a1a); }
+.cmp-dot-absent      { background: var(--offline, #b85050); opacity: 0.55; }
+.cmp-dot-unreachable { background: var(--text-subtle); opacity: 0.4; }
+
+.compare-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.compare-table th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.compare-table tr.cmp-row-drift {
+  background: rgba(204, 158, 0, 0.06);
+}
+
+.compare-table tr:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.compare-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.compare-cell-fp {
+  color: var(--text-subtle);
+  font-size: 10px;
+}
 
 .modal-header {
   display: flex;

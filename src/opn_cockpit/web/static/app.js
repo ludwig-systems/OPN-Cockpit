@@ -1335,6 +1335,121 @@
     const el = $('#selection-count');
     el.textContent = label;
     el.classList.toggle('has-selection', n > 0);
+    // Vergleichs-Button nur ab 2 ausgewaehlten Geraeten sichtbar
+    const cmpBtn = $('#sel-compare');
+    if (cmpBtn) cmpBtn.hidden = n < 2;
+  }
+
+  // -------------------- Config-Compare-Modal --------------------
+
+  async function openCompareModal(subsystem = 'aliases') {
+    const ids = Array.from(state.selectedDeviceIds);
+    if (ids.length < 2) {
+      showToast('Mindestens 2 Geräte für den Vergleich auswählen.');
+      return;
+    }
+    $('#compare-modal').hidden = false;
+    $('#cmp-status').textContent = 'Lade Vergleich…';
+    $('#cmp-head').innerHTML = '';
+    $('#cmp-body').innerHTML = '';
+    try {
+      const r = await apiPost('/api/inventory/compare', {
+        device_ids: ids, subsystem,
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        $('#cmp-status').textContent = body.detail || `Fehler ${r.status}`;
+        return;
+      }
+      const data = await r.json();
+      renderCompareTable(data);
+    } catch (err) {
+      $('#cmp-status').textContent = err.message;
+    }
+  }
+
+  function closeCompareModal() {
+    $('#compare-modal').hidden = true;
+  }
+
+  function renderCompareTable(data) {
+    $('#cmp-status').textContent = data.summary;
+    const head = $('#cmp-head');
+    const body = $('#cmp-body');
+    head.innerHTML = '';
+    body.innerHTML = '';
+    // Kopf: 1. Spalte = Alias-Name, dann pro Geraet eine Spalte
+    const th0 = document.createElement('th');
+    th0.textContent = 'Alias';
+    head.appendChild(th0);
+    for (const col of data.columns) {
+      const th = document.createElement('th');
+      th.textContent = col.device_name;
+      th.title = col.reachable ? 'erreichbar' : `nicht erreichbar: ${col.summary}`;
+      if (!col.reachable) th.style.color = 'var(--text-subtle)';
+      head.appendChild(th);
+    }
+    if (data.rows.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = data.columns.length + 1;
+      td.style.textAlign = 'center';
+      td.style.color = 'var(--text-subtle)';
+      td.style.padding = '20px';
+      td.textContent = 'Nichts zu vergleichen.';
+      tr.appendChild(td);
+      body.appendChild(tr);
+      return;
+    }
+    for (const row of data.rows) {
+      const tr = document.createElement('tr');
+      if (!row.uniform) tr.classList.add('cmp-row-drift');
+      const nameTd = document.createElement('td');
+      nameTd.textContent = row.name;
+      nameTd.style.fontWeight = '600';
+      tr.appendChild(nameTd);
+      // Fingerprint-Map: gleicher fp -> gleicher Inhalt; unterschiedlich -> drift
+      const fps = new Set(row.cells
+        .filter((c) => c.status === 'present')
+        .map((c) => c.content_fingerprint));
+      const hasDrift = fps.size > 1;
+      for (const cell of row.cells) {
+        const td = document.createElement('td');
+        const wrap = document.createElement('span');
+        wrap.className = 'compare-cell';
+        const dot = document.createElement('span');
+        dot.className = 'cmp-dot';
+        let label = '';
+        let title = '';
+        if (cell.status === 'present') {
+          dot.classList.add(hasDrift ? 'cmp-dot-drift' : 'cmp-dot-present');
+          label = `${cell.content_count} ${cell.type}`;
+          title = (
+            `Typ: ${cell.type}\n` +
+            `Eintraege: ${cell.content_count}\n` +
+            `Fingerprint: ${cell.content_fingerprint}\n` +
+            (cell.description ? `Beschreibung: ${cell.description}` : '')
+          );
+        } else if (cell.status === 'absent') {
+          dot.classList.add('cmp-dot-absent');
+          label = '—';
+          title = 'Nicht vorhanden';
+        } else {
+          dot.classList.add('cmp-dot-unreachable');
+          label = '?';
+          title = 'Gerät nicht erreichbar';
+        }
+        const text = document.createElement('span');
+        text.textContent = label;
+        text.title = title;
+        wrap.appendChild(dot);
+        wrap.appendChild(text);
+        td.appendChild(wrap);
+        tr.appendChild(td);
+      }
+      body.appendChild(tr);
+    }
   }
 
   function pruneSelectionToExistingDevices() {
@@ -4539,6 +4654,16 @@
     $('#sel-all').addEventListener('click', selectAllDevices);
     $('#sel-none').addEventListener('click', selectNoDevices);
     $('#sel-reachable').addEventListener('click', selectReachableDevices);
+    const selCmp = $('#sel-compare');
+    if (selCmp) selCmp.addEventListener('click', () => openCompareModal('aliases'));
+    const cmpClose = $('#cmp-close');
+    if (cmpClose) cmpClose.addEventListener('click', closeCompareModal);
+    const cmpCancel = $('#cmp-cancel');
+    if (cmpCancel) cmpCancel.addEventListener('click', closeCompareModal);
+    const cmpModal = $('#compare-modal');
+    if (cmpModal) cmpModal.addEventListener('click', (e) => {
+      if (e.target.id === 'compare-modal') closeCompareModal();
+    });
 
     // Sidebar actions
     $('#add-device-btn').addEventListener('click', openAddModal);

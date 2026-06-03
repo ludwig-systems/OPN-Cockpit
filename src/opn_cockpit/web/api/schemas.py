@@ -462,6 +462,49 @@ class DriftStatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Config-Compare (v0.7+ Multi-Site-Sync)
+# ---------------------------------------------------------------------------
+
+
+class CompareRequest(BaseModel):
+    """N Geraete + Subsystem zum Vergleichen."""
+
+    device_ids: list[str] = Field(..., min_length=2)
+    subsystem: str = Field(..., pattern=r"^(aliases)$")
+    """Aktuell nur 'aliases'. Routes / Firewall-Rules folgen spaeter."""
+
+
+class CompareCellResponse(BaseModel):
+    device_id: str
+    status: str  # "present" | "absent" | "unreachable"
+    type: str = ""
+    content_fingerprint: str = ""
+    content_count: int = 0
+    description: str = ""
+
+
+class CompareRowResponse(BaseModel):
+    name: str
+    uniform: bool
+    cells: list[CompareCellResponse]
+
+
+class CompareColumnInfo(BaseModel):
+    device_id: str
+    device_name: str
+    reachable: bool
+    summary: str
+
+
+class CompareResponse(BaseModel):
+    subsystem: str
+    columns: list[CompareColumnInfo]
+    rows: list[CompareRowResponse]
+    summary: str
+    checked_at_iso: str
+
+
+# ---------------------------------------------------------------------------
 # Backups (v0.7 Safety-Nets)
 # ---------------------------------------------------------------------------
 

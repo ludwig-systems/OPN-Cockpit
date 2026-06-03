@@ -31,6 +31,11 @@ from opn_cockpit.backups.storage import (
     BACKUP_FILE_SUFFIX,
     _default_storage_root,
 )
+from opn_cockpit.core.config_compare import (
+    AliasItem,
+    compare_aliases,
+    extract_aliases,
+)
 from opn_cockpit.core.config_drift import compute_drift_hash
 from opn_cockpit.core.device_info import (
     CertificateStatus,
@@ -67,6 +72,11 @@ from opn_cockpit.web.api.schemas import (
     CertStatusEntry,
     CertStatusRequest,
     CertStatusResponse,
+    CompareCellResponse,
+    CompareColumnInfo,
+    CompareRequest,
+    CompareResponse,
+    CompareRowResponse,
     ConnectionTestResponse,
     DeviceApiKeyResponse,
     DeviceCreateRequest,
@@ -650,6 +660,110 @@ def drift_status(
         results = list(pool.map(probe, targets))
     session.touch()
     return DriftStatusResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/inventory/compare  - Konfig-Vergleich zwischen N Geraeten
+# ---------------------------------------------------------------------------
+
+
+@router.post("/compare", response_model=CompareResponse)
+def compare_configs(
+    payload: CompareRequest,
+    session: Session = Depends(require_session),
+) -> CompareResponse:
+    """Vergleicht ein Subsystem (heute: aliases) ueber N Geraete hinweg.
+
+    Pro Geraet wird das Live-Konfig-XML geholt, das Subsystem strukturiert
+    extrahiert und in eine Matrix verglichen. Nicht erreichbare Geraete
+    erscheinen als eigene Spalte mit Status "unreachable".
+    """
+    min_devices_for_compare = 2
+    visible_devices = filter_devices_for(session.opened.data.devices, session)
+    wanted = set(payload.device_ids)
+    targets_by_id = {d.id: d for d in visible_devices if d.id in wanted}
+    if len(targets_by_id) < min_devices_for_compare:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mindestens 2 sichtbare Geraete fuer einen Vergleich noetig.",
+        )
+    # Reihenfolge entsprechend der vom Caller geschickten Liste — Sortierung
+    # ist Aufgabe des Aufrufers, wir bewahren sie.
+    targets = [targets_by_id[did] for did in payload.device_ids if did in targets_by_id]
+
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+
+    def probe(vd: VaultDevice) -> tuple[VaultDevice, bytes | None, str]:
+        tgt = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
+        try:
+            with HttpClient(targets=[tgt], tuning=tuning) as client:
+                content = download_backup(client, tgt, vd.api_key, vd.api_secret)
+            return vd, content, "OK"
+        except OpnCockpitError as exc:
+            reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+            return vd, None, reason
+
+    workers = min(HEARTBEAT_MAX_WORKERS, len(targets))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        probe_results = list(pool.map(probe, targets))
+
+    columns_info: list[CompareColumnInfo] = []
+    per_device_aliases: dict[str, list[AliasItem] | None] = {}
+    column_order: list[str] = []
+    for vd, xml_bytes, summary in probe_results:
+        column_order.append(vd.id)
+        columns_info.append(CompareColumnInfo(
+            device_id=vd.id,
+            device_name=vd.name,
+            reachable=xml_bytes is not None,
+            summary=summary,
+        ))
+        per_device_aliases[vd.id] = (
+            extract_aliases(xml_bytes) if xml_bytes is not None else None
+        )
+
+    if payload.subsystem == "aliases":
+        comparison = compare_aliases(per_device_aliases, column_order)
+        rows = [
+            CompareRowResponse(
+                name=row.name,
+                uniform=row.uniform,
+                cells=[
+                    CompareCellResponse(
+                        device_id=did,
+                        status=cell.status,
+                        type=cell.type,
+                        content_fingerprint=cell.content_fingerprint,
+                        content_count=cell.content_count,
+                        description=cell.description,
+                    )
+                    for did, cell in row.cells
+                ],
+            )
+            for row in comparison.rows
+        ]
+        summary = comparison.summary
+    else:
+        # Schema-Validator stellt das eigentlich sicher, defensiver Fallback
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Subsystem '{payload.subsystem}' nicht unterstuetzt.",
+        )
+
+    session.touch()
+    return CompareResponse(
+        subsystem=payload.subsystem,
+        columns=columns_info,
+        rows=rows,
+        summary=summary,
+        checked_at_iso=_iso_now(),
+    )
 
 
 # ---------------------------------------------------------------------------

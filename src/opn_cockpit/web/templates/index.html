@@ -451,9 +451,48 @@
               <span class="selection-count" id="selection-count">0 ausgewählt</span>
             </div>
             <div class="selection-bar-actions">
+              <button class="btn-link" id="sel-compare" hidden>Vergleichen</button>
               <button class="btn-link" id="sel-all">Alle</button>
               <button class="btn-link" id="sel-reachable">Nur erreichbare</button>
               <button class="btn-link" id="sel-none">Keine</button>
+            </div>
+          </div>
+
+          <!-- ============ MODAL: Konfig-Vergleich (Aliases) ============ -->
+          <div class="modal-backdrop" id="compare-modal" hidden>
+            <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="cmp-title">
+              <div class="modal-header">
+                <h2 id="cmp-title">Konfiguration vergleichen</h2>
+                <button class="icon-btn modal-close" id="cmp-close" aria-label="Schliessen">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                    <line x1="3" y1="3" x2="11" y2="11"/>
+                    <line x1="11" y1="3" x2="3" y2="11"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="modal-body">
+                <div class="compare-toolbar">
+                  <div class="compare-tabs">
+                    <button class="compare-tab is-active" data-subsystem="aliases">Aliase</button>
+                  </div>
+                  <div class="compare-status" id="cmp-status">Lade Vergleich…</div>
+                </div>
+                <div class="compare-legend">
+                  <span><span class="cmp-dot cmp-dot-present"></span> Vorhanden + identisch</span>
+                  <span><span class="cmp-dot cmp-dot-drift"></span> Vorhanden, anderer Inhalt</span>
+                  <span><span class="cmp-dot cmp-dot-absent"></span> Fehlt</span>
+                  <span><span class="cmp-dot cmp-dot-unreachable"></span> Nicht erreichbar</span>
+                </div>
+                <div class="compare-table-wrap">
+                  <table class="compare-table" id="cmp-table">
+                    <thead><tr id="cmp-head"></tr></thead>
+                    <tbody id="cmp-body"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn-link" id="cmp-cancel">Schliessen</button>
+              </div>
             </div>
           </div>
 
