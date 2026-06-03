@@ -279,4 +279,131 @@ def pick_folder_native(request: Request) -> PickFolderResponse:
     return PickFolderResponse(path=picked, cancelled=False)
 
 
+class PickFileResponse(BaseModel):
+    path: str | None
+    cancelled: bool
+
+
+def _pick_file_native_windows(
+    title: str = "OPN-Cockpit — Tresor-Datei waehlen",
+    filter_label: str = "OPN-Cockpit Tresor",
+    filter_pattern: str = "*.opnvault",
+) -> str | None:
+    """Oeffnet den Windows-Datei-Open-Dialog (GetOpenFileNameW).
+
+    Liefert den absoluten Pfad oder ``None`` bei Abbruch. Nur unter
+    Windows. Filter ist auf ``.opnvault`` voreingestellt; der User kann
+    im Dialog auf "Alle Dateien" umschalten.
+    """
+    if sys.platform != "win32":
+        raise OSError("Native file picker only on Windows")
+
+    import ctypes  # noqa: PLC0415 — Windows-only
+    from ctypes import wintypes  # noqa: PLC0415
+
+    ofn_explorer = 0x00080000
+    ofn_filemustexist = 0x00001000
+    ofn_pathmustexist = 0x00000800
+    ofn_hidereadonly = 0x00000004
+    ofn_nochangedir = 0x00000008
+
+    class OPENFILENAMEW(ctypes.Structure):
+        _fields_ = (
+            ("lStructSize", wintypes.DWORD),
+            ("hwndOwner", wintypes.HWND),
+            ("hInstance", wintypes.HINSTANCE),
+            ("lpstrFilter", wintypes.LPCWSTR),
+            ("lpstrCustomFilter", wintypes.LPWSTR),
+            ("nMaxCustFilter", wintypes.DWORD),
+            ("nFilterIndex", wintypes.DWORD),
+            ("lpstrFile", wintypes.LPWSTR),
+            ("nMaxFile", wintypes.DWORD),
+            ("lpstrFileTitle", wintypes.LPWSTR),
+            ("nMaxFileTitle", wintypes.DWORD),
+            ("lpstrInitialDir", wintypes.LPCWSTR),
+            ("lpstrTitle", wintypes.LPCWSTR),
+            ("Flags", wintypes.DWORD),
+            ("nFileOffset", wintypes.WORD),
+            ("nFileExtension", wintypes.WORD),
+            ("lpstrDefExt", wintypes.LPCWSTR),
+            ("lCustData", wintypes.LPARAM),
+            ("lpfnHook", ctypes.c_void_p),
+            ("lpTemplateName", wintypes.LPCWSTR),
+            ("pvReserved", ctypes.c_void_p),
+            ("dwReserved", wintypes.DWORD),
+            ("FlagsEx", wintypes.DWORD),
+        )
+
+    comdlg32 = ctypes.windll.comdlg32
+    user32 = ctypes.windll.user32
+
+    get_open_file_name = comdlg32.GetOpenFileNameW
+    get_open_file_name.argtypes = (ctypes.POINTER(OPENFILENAMEW),)
+    get_open_file_name.restype = wintypes.BOOL
+
+    # Filter-String: paerchenweise label\0pattern\0, terminiert mit \0\0
+    filter_str = f"{filter_label} ({filter_pattern})\0{filter_pattern}\0Alle Dateien (*.*)\0*.*\0\0"
+
+    path_buf = ctypes.create_unicode_buffer(1024)
+    ofn = OPENFILENAMEW()
+    ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
+    ofn.hwndOwner = user32.GetForegroundWindow()
+    ofn.lpstrFilter = filter_str
+    ofn.nFilterIndex = 1
+    ofn.lpstrFile = ctypes.cast(path_buf, wintypes.LPWSTR)
+    ofn.nMaxFile = len(path_buf)
+    ofn.lpstrTitle = title
+    ofn.Flags = (
+        ofn_explorer | ofn_filemustexist | ofn_pathmustexist
+        | ofn_hidereadonly | ofn_nochangedir
+    )
+    ofn.lpstrDefExt = "opnvault"
+
+    if not get_open_file_name(ctypes.byref(ofn)):
+        return None
+    return path_buf.value
+
+
+@router.get("/pick-file", response_model=PickFileResponse)
+def pick_file_native(
+    request: Request,
+    title: str = Query(
+        "OPN-Cockpit — Tresor-Datei waehlen",
+        description="Fenstertitel des Datei-Dialogs.",
+    ),
+) -> PickFileResponse:
+    """Oeffnet den nativen OS-Datei-Picker auf dem Server.
+
+    Filter ist fix auf ``.opnvault`` (kann im Dialog auf "Alle Dateien"
+    geschaltet werden). Nur sinnvoll wenn Server und Browser auf
+    derselben Maschine laufen - Single-User-Local-Setup.
+
+    Nicht-Windows: 501. Frontend macht Fallback auf Pfad-Eingabe.
+    """
+    server_state = request.app.state.server_state
+    if not server_state.is_single_user_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Native Picker ist nur im Single-User-Mode verfuegbar.",
+        )
+    if sys.platform != "win32":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Native Picker derzeit nur unter Windows verfuegbar.",
+        )
+
+    with _dialog_lock:
+        try:
+            picked = _pick_file_native_windows(title=title)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"File-Picker fehlgeschlagen: {exc}",
+            ) from exc
+
+    if picked is None:
+        return PickFileResponse(path=None, cancelled=True)
+    return PickFileResponse(path=picked, cancelled=False)
+
+
 __all__ = ["router"]

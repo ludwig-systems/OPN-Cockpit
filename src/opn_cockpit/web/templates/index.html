@@ -1040,9 +1040,14 @@
           </p>
 
           <label class="form-label" for="ssw-vault-path">Pfad zum Tresor</label>
-          <input id="ssw-vault-path" class="form-input" type="text"
-                 placeholder="z. B. E:\Backups\team.opnvault"
-                 autocomplete="off" spellcheck="false" data-lpignore="true" />
+          <div class="form-input-with-button">
+            <input id="ssw-vault-path" class="form-input" type="text"
+                   placeholder="z. B. E:\Backups\team.opnvault"
+                   autocomplete="off" spellcheck="false" data-lpignore="true" />
+            <button type="button" class="btn-input-adornment" id="ssw-browse-btn" hidden>
+              Datei suchen…
+            </button>
+          </div>
           <div id="ssw-known-vaults" class="ssw-known-vaults" hidden></div>
 
           <label class="form-label" for="ssw-pw">Master-Passwort</label>

@@ -3593,6 +3593,11 @@
     $('#ssw-error').hidden = true;
     $('#ssw-toggle-create').textContent = 'Stattdessen neuen Tresor anlegen…';
     $('#single-switch-modal').hidden = false;
+    // "Datei suchen..."-Button nur im Single-User-Mode anzeigen (im Multi-
+    // User-Mode laeuft der Server eh remote, der native Picker waere dort
+    // nicht sichtbar).
+    const browseBtn = $('#ssw-browse-btn');
+    if (browseBtn) browseBtn.hidden = state.serverMode === 'user-db';
     // Bekannte Tresore als Klick-Chips unter dem Pfad-Eingabefeld.
     // Der User kann aber auch jeden beliebigen Pfad eintippen (USB-Stick,
     // externes Laufwerk, eigene Ordner) - die Auswahl ist nur Komfort.
@@ -3634,6 +3639,37 @@
 
   function closeSingleSwitchModal() {
     $('#single-switch-modal').hidden = true;
+  }
+
+  async function pickVaultFileNative() {
+    // Triggert serverseitig den nativen Windows-File-Dialog. Funktioniert
+    // nur im Single-User-Local-Setup (Server und Browser auf gleicher
+    // Maschine). Server liefert 403/501 zurueck wenn nicht moeglich -
+    // dann zeigen wir einen Hinweis statt zu raten.
+    const btn = $('#ssw-browse-btn');
+    if (btn) btn.disabled = true;
+    try {
+      const response = await apiGet('/api/files/pick-file');
+      if (response.status === 403) {
+        showSswError('Datei-Picker steht nur im Single-User-Mode zur Verfuegung.');
+        return;
+      }
+      if (response.status === 501) {
+        showSswError('Datei-Picker steht derzeit nur unter Windows zur Verfuegung. Bitte Pfad eintragen.');
+        return;
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        showSswError(data.detail || 'Datei-Picker fehlgeschlagen.');
+        return;
+      }
+      const data = await response.json();
+      if (data.cancelled || !data.path) return;
+      $('#ssw-vault-path').value = data.path;
+      $('#ssw-pw').focus();
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   function toggleSswCreate() {
@@ -4280,6 +4316,8 @@
     // Single-Mode Vault-Switch
     const sswBtn = $('#single-switch-btn');
     if (sswBtn) sswBtn.addEventListener('click', openSingleSwitchModal);
+    const sswBrowse = $('#ssw-browse-btn');
+    if (sswBrowse) sswBrowse.addEventListener('click', pickVaultFileNative);
     const sswClose = $('#ssw-close');
     if (sswClose) {
       sswClose.addEventListener('click', closeSingleSwitchModal);
