@@ -291,14 +291,38 @@ class HttpClient:
                 if attempt < attempts - 1:
                     self._sleep(self._tuning.backoff_delay_s(attempt))
                     continue
+                # ConnectTimeout = TCP-Handshake nicht zustande gekommen
+                # (Firewall/Routing/Down). ReadTimeout = Handshake klappt,
+                # aber keine Antwort innerhalb von read_timeout_s (MTU,
+                # langsamer Backend, Cipher-Negotiation haengt). Diese
+                # Unterscheidung hilft dem Admin den Layer einzukreisen.
+                if isinstance(exc, httpx.ConnectTimeout):
+                    kind = "connect_timeout"
+                    summary = (
+                        f"TCP-Connect-Timeout nach {self._tuning.connect_timeout_s:.0f}s "
+                        f"gegen {target.host}:{target.port} (kein SYN-ACK)."
+                    )
+                elif isinstance(exc, httpx.ReadTimeout):
+                    kind = "read_timeout"
+                    summary = (
+                        f"Read-Timeout nach {self._tuning.read_timeout_s:.0f}s "
+                        f"gegen {target.host}:{target.port} (TCP offen, "
+                        "aber keine HTTP-Antwort)."
+                    )
+                else:
+                    kind = "timeout"
+                    summary = (
+                        f"Timeout gegen {target.host}:{target.port} ({method} {url})."
+                    )
                 raise UnreachableError(
-                    f"Timeout gegen {target.host}:{target.port} ({method} {url}).",
+                    summary,
                     context=make_context(
                         host=target.host,
                         port=target.port,
                         method=method,
                         path=url,
-                        error_kind="timeout",
+                        error_kind=kind,
+                        summary=summary,
                     ),
                 ) from exc
             except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as exc:
