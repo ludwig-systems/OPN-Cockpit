@@ -18,9 +18,16 @@ Aufrufer entscheidet ueber Speichern/Streamen.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.x509.oid import NameOID
 
 from opn_cockpit.core.errors import (
     ApiError,
@@ -35,6 +42,9 @@ FIRMWARE_STATUS_ENDPOINT = "/api/core/firmware/status"
 FIRMWARE_CHECK_ENDPOINT = "/api/core/firmware/check"
 BACKUP_DOWNLOAD_ENDPOINT = "/api/core/backup/download/this"
 CERT_SEARCH_ENDPOINT = "/api/trust/cert/search"
+CERT_GET_ENDPOINT_FMT = "/api/trust/cert/get/{uuid}"
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,39 +328,6 @@ class CertificateStatus:
         return min(candidates) if candidates else None
 
 
-def _parse_opnsense_datetime(value: Any) -> tuple[str, int | None]:
-    """Parst OPNsense's ``not_after``-Feld in (ISO-Stamm, Tage-bis-Ablauf).
-
-    Format ist typischerweise ``"YYYY-MM-DD HH:MM:SS"`` ohne Zeitzone -
-    wir interpretieren das als UTC (OPNsense generiert mit `date -u`
-    bei Cert-Erzeugung). Bei nicht parsbarer Eingabe ``("", None)``.
-    """
-    if not isinstance(value, str) or not value.strip():
-        return "", None
-    raw = value.strip()
-    formats = (
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%b %d %H:%M:%S %Y %Z",   # OpenSSL classic
-        "%Y-%m-%d",
-    )
-    parsed: datetime | None = None
-    for fmt in formats:
-        try:
-            parsed = datetime.strptime(raw, fmt)
-            break
-        except ValueError:
-            continue
-    if parsed is None:
-        return raw, None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    iso = parsed.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    now = datetime.now(UTC)
-    delta_days = (parsed - now).days
-    return iso, delta_days
-
-
 def _extract_in_use(raw: Any) -> bool:
     """OPNsense liefert 'in_use' als '0'/'1'/0/1/bool. Akzeptiert alles."""
     if isinstance(raw, bool):
@@ -360,6 +337,82 @@ def _extract_in_use(raw: Any) -> bool:
     if isinstance(raw, str):
         return raw.strip() in {"1", "true", "yes"}
     return False
+
+
+def _first_str(row: dict[str, Any], *keys: str) -> str:
+    """Liefert den ersten nicht-leeren String-Wert aus row[keys[i]].
+
+    OPNsense's ``/cert/search`` listet nur ``uuid``/``descr``/``in_use`` direkt.
+    Das ``/cert/get/<uuid>``-Schema schachtelt Felder unter ``cert``. Wir
+    bleiben tolerant ueber mehrere Key-Varianten.
+    """
+    for k in keys:
+        val = row.get(k)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+        if isinstance(val, dict):
+            # OPNsense schachtelt z. B. issuer als {"CN": "..."} oder caref als
+            # {"<uuid>": {"value": "...", "selected": 1}} - wir picken den ersten
+            # erkannten Sub-Key heraus.
+            for sub in ("CN", "commonName", "common_name", "cn", "value"):
+                inner = val.get(sub)
+                if isinstance(inner, str) and inner.strip():
+                    return inner.strip()
+    return ""
+
+
+def _decode_pem_blob(raw: Any) -> bytes | None:
+    """OPNsense liefert das Cert im ``crt``-Feld als base64-PEM-Blob.
+
+    Manche Releases liefern bereits den PEM-String roh ("-----BEGIN..."),
+    andere wickeln den ganzen PEM-Text in base64. Beide Wege akzeptieren.
+    Bei Decode-Fehler ``None``.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = raw.strip()
+    if "-----BEGIN" in text:
+        return text.encode("ascii", errors="ignore")
+    try:
+        return base64.b64decode(text, validate=False)
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _parse_cert_blob(pem_or_der: bytes) -> tuple[datetime | None, str, str]:
+    """Liefert (not_after_utc, common_name, issuer_cn) aus PEM/DER-Bytes.
+
+    Defensiv: Bei Parse-Fehlern ``(None, "", "")`` damit Cert-Inventur nie
+    crasht. Issuer wird auf den Issuer-CN reduziert (kompaktere UI-Anzeige).
+    """
+    try:
+        if b"-----BEGIN" in pem_or_der:
+            cert = x509.load_pem_x509_certificate(pem_or_der, default_backend())
+        else:
+            cert = x509.load_der_x509_certificate(pem_or_der, default_backend())
+    except (ValueError, TypeError) as exc:
+        _LOG.debug("cert blob parse failed: %s", exc)
+        return None, "", ""
+    # cryptography>=42 hat not_valid_after_utc; aeltere Versionen nur das naive not_valid_after.
+    not_after = (
+        cert.not_valid_after_utc
+        if hasattr(cert, "not_valid_after_utc")
+        else cert.not_valid_after
+    )
+    if not_after.tzinfo is None:
+        not_after = not_after.replace(tzinfo=UTC)
+
+    def _name_cn(name: x509.Name) -> str:
+        try:
+            attrs = name.get_attributes_for_oid(NameOID.COMMON_NAME)
+            if attrs:
+                value = attrs[0].value
+                return value if isinstance(value, str) else value.decode("utf-8", errors="ignore")
+        except (ValueError, IndexError):
+            pass
+        return name.rfc4514_string()
+
+    return not_after, _name_cn(cert.subject), _name_cn(cert.issuer)
 
 
 def fetch_certificates(
@@ -374,8 +427,13 @@ def fetch_certificates(
     ``summary``, damit Batch-Aufrufer ohne Try-Block weiterarbeiten koennen.
     """
     try:
+        # ``current=1`` + grosser ``rowCount`` umgeht OPNsense's Default-
+        # Pagination (haeufig 10 Eintraege), sonst wuerde ein frisch
+        # erstelltes Cert auf einer Seite weiter hinten landen und der
+        # Kachel-Badge nichts anzeigen.
         response = client.call(
-            target, key, secret, "POST", CERT_SEARCH_ENDPOINT, json={},
+            target, key, secret, "POST", CERT_SEARCH_ENDPOINT,
+            json={"current": 1, "rowCount": 1000, "searchPhrase": ""},
         )
     except AuthError as exc:
         return CertificateStatus(
@@ -409,21 +467,67 @@ def fetch_certificates(
             rows = raw_rows
     elif isinstance(body, list):
         rows = body
-    entries: list[CertificateEntry] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        iso, days = _parse_opnsense_datetime(row.get("not_after"))
-        entries.append(CertificateEntry(
-            uuid=str(row.get("uuid", "")),
-            descr=str(row.get("descr", "")),
-            common_name=str(row.get("common_name", "")),
-            issuer=str(row.get("issuer", "")),
-            not_after_iso=iso,
-            days_until_expiry=days,
-            in_use=_extract_in_use(row.get("in_use")),
-        ))
+    # OPNsense's /cert/search liefert nur uuid/descr/in_use - die Validity- und
+    # Subject-Felder stehen im /cert/get/<uuid>-Endpoint, und dort steckt der
+    # PEM-Blob im Feld ``crt`` (base64-kodiert oder roh-PEM, je nach Release).
+    # Wir parsen das Blob client-seitig mit `cryptography.x509`, damit wir
+    # unabhaengig von API-Schema-Aenderungen sind.
+    now = datetime.now(UTC)
+    entries = [
+        _fetch_cert_detail(client, target, key, secret, row, now)
+        for row in rows
+        if isinstance(row, dict)
+    ]
     return CertificateStatus(
         reachable=True, authenticated=True, certs=tuple(entries),
         summary=f"{len(entries)} Zertifikat(e) gefunden.",
+    )
+
+
+def _fetch_cert_detail(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+    row: dict[str, Any],
+    now: datetime,
+) -> CertificateEntry:
+    """Holt den Detail-Eintrag eines einzelnen Certs und parst dessen PEM."""
+    uuid = _first_str(row, "uuid")
+    descr = _first_str(row, "descr", "description")
+    in_use = _extract_in_use(row.get("in_use"))
+    not_after_dt: datetime | None = None
+    common_name = ""
+    issuer = ""
+    if uuid:
+        try:
+            detail_resp = client.call(
+                target, key, secret, "GET",
+                CERT_GET_ENDPOINT_FMT.format(uuid=uuid),
+            )
+            detail_body = detail_resp.json()
+        except (OpnCockpitError, ValueError):
+            detail_body = None
+        cert_node: Any = None
+        if isinstance(detail_body, dict):
+            cert_node = detail_body.get("cert")
+            if not isinstance(cert_node, dict):
+                cert_node = detail_body
+        if isinstance(cert_node, dict):
+            blob = _decode_pem_blob(cert_node.get("crt"))
+            if blob is not None:
+                not_after_dt, common_name, issuer = _parse_cert_blob(blob)
+    not_after_iso = ""
+    days: int | None = None
+    if not_after_dt is not None:
+        not_after_iso = not_after_dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        days = (not_after_dt - now).days
+    return CertificateEntry(
+        uuid=uuid,
+        descr=descr,
+        common_name=common_name,
+        issuer=issuer,
+        not_after_iso=not_after_iso,
+        days_until_expiry=days,
+        in_use=in_use,
     )
