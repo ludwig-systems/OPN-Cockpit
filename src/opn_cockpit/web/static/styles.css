@@ -1342,6 +1342,29 @@ body {
 /* Cert-Ablauf-Badge auf der Kachel: gelb 7-30d, rot <7d/abgelaufen.
    Nutzt --checking (gelb-Olive) und --offline (rot) als bekannte
    Status-Token, damit die Bedeutung konsistent zu Heartbeat-Dots bleibt. */
+/* Drift-Badge (v0.7 #5): gelb, neben Backup-/Cert-Badges. */
+.card-drift-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 9px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  background: rgba(204, 158, 0, 0.13);
+  color: var(--checking, #b58a00);
+  border: 1px solid rgba(204, 158, 0, 0.35);
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+  margin-top: 6px;
+}
+
+.card-drift-badge:hover {
+  background: rgba(204, 158, 0, 0.22);
+  border-color: rgba(204, 158, 0, 0.55);
+}
+
 .card-cert-badge {
   display: inline-flex;
   align-items: center;

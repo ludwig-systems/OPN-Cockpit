@@ -940,6 +940,23 @@
             <code>trigger="scheduled"</code>.
           </div>
 
+          <div class="form-divider"></div>
+
+          <!-- Sektion: Config-Drift-Erkennung (v0.7 #5) -->
+          <h3 class="modal-section-title">Config-Drift erkennen</h3>
+          <label class="form-checkbox">
+            <input id="vs-drift-enabled" type="checkbox" />
+            <span>Beim Inventar-Refresh aktiv vergleichen</span>
+          </label>
+          <div class="form-hint">
+            Cockpit holt die Live-Config jeder Box und vergleicht ihren
+            normalisierten Hash mit dem juengsten lokalen Backup
+            (volatile <code>&lt;revision&gt;</code>-Bloecke werden gestrippt).
+            Wenn ungleich: gelber Drift-Indikator auf der Kachel. Erzeugt pro
+            Refresh einen API-Call pro Geraet, also vergleichbar zur
+            Cert-Pruefung. Default AUS.
+          </div>
+
           <div class="form-row" style="margin-top:12px;">
             <button class="btn-secondary" id="vs-backup-save" type="button">Backup-Einstellungen speichern</button>
           </div>

@@ -31,6 +31,7 @@ from opn_cockpit.backups.storage import (
     BACKUP_FILE_SUFFIX,
     _default_storage_root,
 )
+from opn_cockpit.core.config_drift import compute_drift_hash
 from opn_cockpit.core.device_info import (
     CertificateStatus,
     FirmwareStatus,
@@ -71,6 +72,9 @@ from opn_cockpit.web.api.schemas import (
     DeviceCreateRequest,
     DeviceResponse,
     DeviceUpdateRequest,
+    DriftStatusEntry,
+    DriftStatusRequest,
+    DriftStatusResponse,
     FirmwareStatusEntry,
     FirmwareStatusRequest,
     FirmwareStatusResponse,
@@ -537,6 +541,115 @@ def cert_status(
         results = list(pool.map(probe, targets))
     session.touch()
     return CertStatusResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/inventory/drift-status  - Config-Drift gegen letztes Backup
+# ---------------------------------------------------------------------------
+
+
+@router.post("/drift-status", response_model=DriftStatusResponse)
+def drift_status(
+    payload: DriftStatusRequest,
+    session: Session = Depends(require_session),
+) -> DriftStatusResponse:
+    """Vergleicht Live-Config-Hash mit dem letzten lokalen Backup.
+
+    Pro Geraet: holt aktuelle Konfig via OPNsense-Backup-Endpoint, rechnet
+    den normalisierten SHA256 (volatile <revision>/<lastchange>-Bloecke
+    gestrippt). Vergleicht mit dem Hash des juengsten lokalen Backups.
+    Wenn ungleich: Drift erkannt.
+
+    Geraete ohne lokales Backup koennen nicht verglichen werden -
+    ``has_baseline=False``, ``drift_detected=None``. UI zeigt das als
+    neutrale Info (kein Drift-Badge).
+    """
+    visible_devices = filter_devices_for(session.opened.data.devices, session)
+    if payload.device_ids:
+        wanted = set(payload.device_ids)
+        targets = [d for d in visible_devices if d.id in wanted]
+    else:
+        targets = list(visible_devices)
+    if not targets:
+        return DriftStatusResponse(results=[])
+
+    timestamp = _iso_now()
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+
+    def probe(vd: VaultDevice) -> DriftStatusEntry:
+        baseline_records = list_backups(vd.id)
+        if not baseline_records:
+            return DriftStatusEntry(
+                device_id=vd.id,
+                reachable=False, authenticated=False,
+                summary="Kein lokales Backup als Baseline vorhanden.",
+                checked_at_iso=timestamp,
+                has_baseline=False, drift_detected=None,
+            )
+        baseline = baseline_records[0]  # Neueste zuerst
+        try:
+            baseline_bytes = read_backup_content(vd.id, baseline.id)
+        except (BackupNotFoundError, BackupStoreError) as exc:
+            return DriftStatusEntry(
+                device_id=vd.id,
+                reachable=False, authenticated=False,
+                summary=f"Baseline-Backup nicht lesbar: {exc}",
+                checked_at_iso=timestamp,
+                has_baseline=False, drift_detected=None,
+            )
+        baseline_hash = compute_drift_hash(baseline_bytes)
+
+        tgt = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
+        try:
+            with HttpClient(targets=[tgt], tuning=tuning) as client:
+                live_bytes = download_backup(client, tgt, vd.api_key, vd.api_secret)
+        except OpnCockpitError as exc:
+            reason = exc.context.summary or exc.context.error_kind
+            return DriftStatusEntry(
+                device_id=vd.id,
+                reachable=exc.context.error_kind != "connect_timeout",
+                authenticated=False,
+                summary=f"Drift-Check fehlgeschlagen: {reason}",
+                checked_at_iso=timestamp,
+                has_baseline=True, drift_detected=None,
+                baseline_backup_id=baseline.id,
+                baseline_backup_iso=baseline.timestamp_utc,
+                baseline_trigger=baseline.trigger,
+            )
+        live_hash = compute_drift_hash(live_bytes)
+        drift = live_hash != baseline_hash
+        if drift:
+            summary = (
+                f"Drift erkannt gegen Backup vom {baseline.timestamp_utc[:19]} "
+                f"({baseline.trigger})."
+            )
+        else:
+            summary = (
+                f"Keine Drift gegen Backup vom {baseline.timestamp_utc[:19]} "
+                f"({baseline.trigger})."
+            )
+        return DriftStatusEntry(
+            device_id=vd.id,
+            reachable=True, authenticated=True,
+            summary=summary,
+            checked_at_iso=timestamp,
+            has_baseline=True, drift_detected=drift,
+            baseline_backup_id=baseline.id,
+            baseline_backup_iso=baseline.timestamp_utc,
+            baseline_trigger=baseline.trigger,
+        )
+
+    workers = min(HEARTBEAT_MAX_WORKERS, len(targets))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(probe, targets))
+    session.touch()
+    return DriftStatusResponse(results=results)
 
 
 # ---------------------------------------------------------------------------

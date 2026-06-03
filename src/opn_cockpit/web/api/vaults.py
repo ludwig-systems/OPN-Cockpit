@@ -407,6 +407,7 @@ def get_vault_settings(
         backup_retention_scheduled=int(s.backup_retention_scheduled),
         scheduled_backup_enabled=bool(s.scheduled_backup_enabled),
         scheduled_backup_interval_hours=int(s.scheduled_backup_interval_hours),
+        drift_detection_enabled=bool(s.drift_detection_enabled),
     )
 
 
@@ -461,6 +462,11 @@ def update_vault_settings(
             if payload.scheduled_backup_interval_hours is not None
             else old_settings.scheduled_backup_interval_hours
         ),
+        drift_detection_enabled=(
+            payload.drift_detection_enabled
+            if payload.drift_detection_enabled is not None
+            else old_settings.drift_detection_enabled
+        ),
     )
     session.opened.data.settings = new_settings
 
@@ -487,6 +493,7 @@ def update_vault_settings(
         backup_retention_scheduled=int(new_settings.backup_retention_scheduled),
         scheduled_backup_enabled=bool(new_settings.scheduled_backup_enabled),
         scheduled_backup_interval_hours=int(new_settings.scheduled_backup_interval_hours),
+        drift_detection_enabled=bool(new_settings.drift_detection_enabled),
     )
 
 

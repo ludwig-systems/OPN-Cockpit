@@ -80,6 +80,11 @@ class VaultSettings:
     # alle ``scheduled_backup_interval_hours`` Stunden ein Snapshot.
     scheduled_backup_enabled: bool = False
     scheduled_backup_interval_hours: int = 24
+    # v0.7 #5 Config-Drift-Erkennung. Default AUS - braucht einen API-
+    # Call pro Geraet pro Inventar-Refresh. Wenn an: Cockpit faerbt eine
+    # Drift-Anzeige auf der Karte wenn der Live-Config-Hash vom letzten
+    # Backup-Hash abweicht (Indikator fuer ungesicherte Aenderungen).
+    drift_detection_enabled: bool = False
 
 
 @dataclass(slots=True)
@@ -166,5 +171,8 @@ def _settings_from_dict(raw: dict[str, Any]) -> VaultSettings:
         ),
         scheduled_backup_interval_hours=int(
             raw.get("scheduled_backup_interval_hours", defaults.scheduled_backup_interval_hours),
+        ),
+        drift_detection_enabled=bool(
+            raw.get("drift_detection_enabled", defaults.drift_detection_enabled),
         ),
     )

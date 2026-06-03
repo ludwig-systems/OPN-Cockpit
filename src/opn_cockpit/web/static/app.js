@@ -113,6 +113,8 @@
     outstandingByDevice: {},       // device_id -> { count, plans[] }
     backupsByDevice: {},           // device_id -> { count, latestTs }
     certsByDevice: {},             // device_id -> { count, soonestDays, certs[], summary }
+    driftByDevice: {},             // device_id -> { drift, hasBaseline, summary, baselineIso }
+    vaultSettings: null,           // gecachte /api/vaults/settings - fuer Opt-In-Features wie Drift
     firmware: {},                  // device_id -> { version, status, update_available, summary, checked_at_iso }
     firmwareLoading: false,
     serverMode: 'vault',           // 'vault' (single) | 'user-db' (multi)
@@ -774,6 +776,43 @@
     loadFirmwareStatus().catch(() => {});
     loadBackupCounts().catch(() => {});
     loadCertStatus().catch(() => {});
+    refreshVaultSettingsCache().then(() => {
+      if (state.vaultSettings?.drift_detection_enabled) {
+        loadDriftStatus().catch(() => {});
+      }
+    });
+  }
+
+  async function refreshVaultSettingsCache() {
+    try {
+      const r = await apiGet('/api/vaults/settings');
+      if (r.ok) {
+        state.vaultSettings = await r.json();
+      }
+    } catch (_e) { /* nicht kritisch */ }
+  }
+
+  async function loadDriftStatus(deviceIds = null) {
+    // Drift-Check ist Opt-In (settings.drift_detection_enabled). Wer das
+    // anschaltet weiss dass pro Refresh ein API-Call pro Geraet entsteht
+    // (entsprechend ein OPNsense-Audit-Eintrag) - analog zum Cert-Probe.
+    try {
+      const body = deviceIds ? { device_ids: deviceIds } : { device_ids: [] };
+      const r = await apiPost('/api/inventory/drift-status', body);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) return;
+      const data = await r.json();
+      for (const entry of data.results || []) {
+        state.driftByDevice[entry.device_id] = {
+          drift: entry.drift_detected,
+          hasBaseline: entry.has_baseline,
+          summary: entry.summary,
+          baselineIso: entry.baseline_backup_iso,
+          baselineTrigger: entry.baseline_trigger,
+        };
+      }
+      renderGrid();
+    } catch (_e) { /* still */ }
   }
 
   async function loadCertStatus(deviceIds = null) {
@@ -1210,6 +1249,28 @@
         openBackupHistoryModal(device.id);
       });
       article.appendChild(backupBadge);
+    }
+
+    // Drift-Indikator - nur wenn drift_detection_enabled UND tatsaechlich
+    // Drift erkannt wurde. has_baseline=false / drift=null gibt KEIN
+    // Badge (Zero-State ist still, sonst wirkt jede frisch hinzugefuegte
+    // Box rot bevor sie ein Backup hat).
+    const driftInfo = state.driftByDevice[device.id];
+    if (driftInfo && driftInfo.drift === true) {
+      const driftBadge = document.createElement('button');
+      driftBadge.type = 'button';
+      driftBadge.className = 'card-drift-badge';
+      driftBadge.title = driftInfo.summary
+        || 'Live-Config weicht vom letzten Backup ab.';
+      driftBadge.innerHTML = `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 2v4"/>
+        <circle cx="6" cy="9" r="0.4" fill="currentColor"/>
+      </svg><span>Drift</span>`;
+      driftBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showToast(driftInfo.summary || 'Drift erkannt.');
+      });
+      article.appendChild(driftBadge);
     }
 
     article.addEventListener('click', () => openDeviceModal(device.id));
@@ -3074,6 +3135,7 @@
     $('#vs-retention-scheduled').value = '90';
     $('#vs-sched-enabled').checked = false;
     $('#vs-sched-interval').value = '24';
+    $('#vs-drift-enabled').checked = false;
     $('#vs-pw-current').value = '';
     $('#vs-pw-new1').value = '';
     $('#vs-pw-new2').value = '';
@@ -3103,6 +3165,7 @@
         if (typeof data.scheduled_backup_interval_hours === 'number') {
           $('#vs-sched-interval').value = data.scheduled_backup_interval_hours;
         }
+        $('#vs-drift-enabled').checked = data.drift_detection_enabled === true;
       }
     } catch (_e) { /* Modal kann auch mit leerem Feld bedient werden */ }
   }
@@ -3117,6 +3180,7 @@
     const scheduled = parseInt($('#vs-retention-scheduled').value, 10);
     const schedEnabled = $('#vs-sched-enabled').checked;
     const schedInterval = parseInt($('#vs-sched-interval').value, 10);
+    const driftEnabled = $('#vs-drift-enabled').checked;
     if (!Number.isFinite(preApply) || preApply < 1 || preApply > 500) {
       errBox.textContent = 'Apply-Retention muss zwischen 1 und 500 liegen.';
       errBox.hidden = false;
@@ -3147,6 +3211,7 @@
         backup_retention_scheduled: scheduled,
         scheduled_backup_enabled: schedEnabled,
         scheduled_backup_interval_hours: schedInterval,
+        drift_detection_enabled: driftEnabled,
       });
       if (response.status === 401) { handleSessionLost(); return; }
       if (!response.ok) {

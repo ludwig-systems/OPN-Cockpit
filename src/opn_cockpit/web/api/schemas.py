@@ -174,6 +174,8 @@ class VaultSettingsResponse(BaseModel):
     # v0.7 #4: Scheduled Auto-Backup
     scheduled_backup_enabled: bool = False
     scheduled_backup_interval_hours: int = 24
+    # v0.7 #5: Config-Drift-Erkennung
+    drift_detection_enabled: bool = False
 
 
 class VaultSettingsUpdateRequest(BaseModel):
@@ -187,6 +189,8 @@ class VaultSettingsUpdateRequest(BaseModel):
     scheduled_backup_enabled: bool | None = None
     scheduled_backup_interval_hours: int | None = Field(None, ge=1, le=168)
     """1h..7d Intervall. Werte < 1h verbietet auch der Scheduler intern."""
+    # v0.7 #5
+    drift_detection_enabled: bool | None = None
 
 
 # F5a: Master-Passwort des aktiven Tresors aendern
@@ -420,6 +424,41 @@ class CertStatusEntry(BaseModel):
 
 class CertStatusResponse(BaseModel):
     results: list[CertStatusEntry]
+
+
+# ---------------------------------------------------------------------------
+# Config-Drift (v0.7 Safety-Net #5)
+# ---------------------------------------------------------------------------
+
+
+class DriftStatusRequest(BaseModel):
+    """Optional Subset von Device-IDs. Leer = alle sichtbaren."""
+
+    device_ids: list[str] = Field(default_factory=list)
+
+
+class DriftStatusEntry(BaseModel):
+    """Drift-Status eines Geraets fuer die Batch-Antwort."""
+
+    device_id: str
+    reachable: bool
+    authenticated: bool
+    summary: str
+    checked_at_iso: str
+    has_baseline: bool
+    """True wenn lokal mindestens ein Backup existiert das wir als Baseline
+    vergleichen koennten. False -> Drift nicht ermittelbar."""
+
+    drift_detected: bool | None
+    """True/False wenn baseline existiert; None wenn ``has_baseline`` False."""
+
+    baseline_backup_id: str = ""
+    baseline_backup_iso: str = ""
+    baseline_trigger: str = ""
+
+
+class DriftStatusResponse(BaseModel):
+    results: list[DriftStatusEntry]
 
 
 # ---------------------------------------------------------------------------
