@@ -147,21 +147,20 @@ Filename: "http://localhost:9876"; \
   Flags: postinstall skipifsilent shellexec; Components: service
 
 [UninstallRun]
-; Schritt 1 (IMMER): Service-Mode-Dienst stoppen UND laufende Single-User-
-; Prozesse killen. Sonst koennen DLLs/PYDs/SQLite-DBs nicht geloescht werden
-; und die Files bleiben nach Uninstall liegen. waituntilterminated blockiert
-; bis tatsaechlich alle Prozesse weg sind.
+; EIN Skript fuer ALLES: Dienst stoppen + entfernen + Prozesse killen +
+; Lock-Release-Wartezeit. Bewusst UNCONDITIONAL (kein Components-Filter):
+; das Skript erkennt selbst ob ein Dienst da ist, und Inno's Component-
+; Tracking ist bei In-Place-Upgrades unzuverlaessig. waituntilterminated
+; blockiert bis das Skript wirklich durch ist (~5s typisch, max ~20s).
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\stop-processes.ps1"""; \
   RunOnceId: "StopProcesses"; Flags: runhidden waituntilterminated
 
-; Schritt 2 (nur Service-Mode): NSSM-Service entfernen.
-Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall-service.ps1"""; \
-  RunOnceId: "UninstallService"; Flags: runhidden waituntilterminated; Components: service
-
 [UninstallDelete]
-; Embedded-Python-Bundle wird mit deinstalliert.
+; Embedded-Python-Bundle + NSSM-Bundle werden mit deinstalliert.
+; Beide explizit listen, damit Inno bei gelockten Files (haetten wir
+; nicht, weil stop-processes.ps1 vorher aufraeumt) wenigstens retries
+; macht und keine halben Reste stehen bleiben.
 ;
 ; %ProgramData%\OPN-Cockpit bleibt bewusst stehen (Tresor + Audit + Plans
 ; = User-Daten), AUSSER:
@@ -175,6 +174,8 @@ Filename: "powershell.exe"; \
 ;   - logs/: Diagnose-Reste vergangener Installation, fuer einen Re-Install
 ;     irrelevant. Wer Logs braucht backupt vorher selbst.
 Type: filesandordirs; Name: "{app}\python"
+Type: filesandordirs; Name: "{app}\bundle"
+Type: filesandordirs; Name: "{app}\scripts"
 Type: files; Name: "{commonappdata}\OPN-Cockpit\users.db"
 Type: files; Name: "{commonappdata}\OPN-Cockpit\BOOTSTRAP-TOKEN.txt"
 Type: filesandordirs; Name: "{commonappdata}\OPN-Cockpit\logs"
