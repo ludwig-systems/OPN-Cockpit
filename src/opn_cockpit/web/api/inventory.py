@@ -92,6 +92,8 @@ from opn_cockpit.web.api.schemas import (
     HeartbeatRequest,
     HeartbeatResponse,
     InventoryResponse,
+    SyncAliasRequest,
+    SyncAliasResponse,
     TagSummary,
 )
 from opn_cockpit.web.auth.dependencies import require_session
@@ -763,6 +765,107 @@ def compare_configs(
         rows=rows,
         summary=summary,
         checked_at_iso=_iso_now(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/inventory/compare/sync-aliases  - Master -> Targets uebernehmen
+# ---------------------------------------------------------------------------
+
+
+@router.post("/compare/sync-aliases", response_model=SyncAliasResponse)
+def sync_alias_from_master(
+    payload: SyncAliasRequest,
+    session: Session = Depends(require_session),
+) -> SyncAliasResponse:
+    """Holt einen Alias vom Master-Geraet und erzeugt einen Plan fuer die Targets.
+
+    Workflow von der Compare-Matrix aus:
+    1. User klickt auf "Sync" einer Drift-/Absent-Zeile
+    2. Picked das Geraet das er als Master will (per Klick auf eine
+       'present'-Cell)
+    3. Backend zieht den live config des Masters, extrahiert den Alias,
+       erzeugt ueber das existierende Plan-Pattern (firewall_alias-Subsystem)
+       einen Plan mit den Target-Geraeten
+    4. Frontend springt direkt in den Plan-View
+
+    Die Sync-Action ist 'add_alias' (= create on target). Wenn das Target
+    den Alias bereits in identischer Form hat, markiert der Planner ihn als
+    SKIP - keine Doppel-Anwendung.
+    """
+    # Spaete Imports: vermeidet Zirkular-Imports zur plans.py.
+    from opn_cockpit.core.objects.aliases import AliasSpec  # noqa: PLC0415
+    from opn_cockpit.web.api.plans import (  # noqa: PLC0415
+        _devices_or_404,
+        _generate_and_save_plan,
+    )
+
+    require_write_role(session)
+
+    visible = filter_devices_for(session.opened.data.devices, session)
+    visible_by_id = {d.id: d for d in visible}
+    master = visible_by_id.get(payload.master_device_id)
+    if master is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Master-Geraet '{payload.master_device_id}' nicht sichtbar.",
+        )
+
+    # Master-Config holen + Alias extrahieren
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+    tgt = HttpTarget(host=master.host, port=master.port, verify=master.tls_verify)
+    try:
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            master_xml = download_backup(client, tgt, master.api_key, master.api_secret)
+    except OpnCockpitError as exc:
+        reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Master-Geraet '{master.name}' nicht erreichbar: {reason}",
+        ) from exc
+
+    master_aliases = {a.name: a for a in extract_aliases(master_xml)}
+    source = master_aliases.get(payload.alias_name)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Alias '{payload.alias_name}' existiert auf Master-Geraet "
+                f"'{master.name}' nicht."
+            ),
+        )
+
+    # Targets aufloesen + Plan erzeugen via existing pipeline
+    target_devices = _devices_or_404(session, payload.target_device_ids)
+    spec = AliasSpec(
+        name=source.name,
+        type=source.type,
+        content=tuple(source.content),
+        descr=source.description,
+        merge_mode="create",
+    )
+    plan = _generate_and_save_plan(
+        session=session,
+        action="add_alias",
+        subsystem="firewall_alias",
+        spec=spec,
+        devices=target_devices,
+    )
+
+    return SyncAliasResponse(
+        plan_id=plan.plan_id,
+        alias_name=source.name,
+        target_count=len(target_devices),
+        source_summary=(
+            f"{source.name} ({source.type}, "
+            f"{len(source.content)} Eintraege) von {master.name}"
+        ),
     )
 
 

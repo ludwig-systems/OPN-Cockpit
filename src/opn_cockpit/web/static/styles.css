@@ -1863,6 +1863,12 @@ body {
   font-size: 10px;
 }
 
+.compare-sync-btn {
+  margin-left: 10px;
+  font-size: 11px;
+  padding: 0 6px;
+}
+
 .modal-header {
   display: flex;
   align-items: center;

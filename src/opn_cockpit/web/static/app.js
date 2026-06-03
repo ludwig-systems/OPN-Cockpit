@@ -1373,6 +1373,82 @@
     $('#compare-modal').hidden = true;
   }
 
+  // -------------------- Sync-Master-Picker --------------------
+
+  function openSyncMasterPicker(row, columns) {
+    // Modal: zeigt fuer jede 'present'-Cell einen Knopf "von hier uebernehmen".
+    // Pick -> doSyncAlias mit master + targets (alle anderen Geraete der Row).
+    const colsById = Object.fromEntries(columns.map((c) => [c.device_id, c]));
+    const present = row.cells.filter((c) => c.status === 'present');
+    if (present.length === 0) {
+      showToast('Keine Variante zum Uebernehmen vorhanden.');
+      return;
+    }
+    // Wenn nur eine present-Variante: direkt Bestaetigungs-Dialog
+    if (present.length === 1) {
+      const masterCell = present[0];
+      const targets = row.cells
+        .filter((c) => c.device_id !== masterCell.device_id)
+        .map((c) => c.device_id);
+      const masterName = colsById[masterCell.device_id]?.device_name || masterCell.device_id;
+      const targetNames = targets
+        .map((tid) => colsById[tid]?.device_name || tid)
+        .join(', ');
+      if (!confirm(
+        `Alias '${row.name}' von '${masterName}' auf ${targets.length} Gerät(e) ` +
+        `uebertragen: ${targetNames}?\n\n` +
+        'Ein Plan wird erzeugt, du kannst ihn vor dem Apply pruefen.',
+      )) return;
+      doSyncAlias(row.name, masterCell.device_id, targets);
+      return;
+    }
+    // Mehrere present-Varianten: einfache Browser-Prompt-Auswahl via numeriert
+    const options = present.map((c, i) => {
+      const name = colsById[c.device_id]?.device_name || c.device_id;
+      return `${i + 1}. ${name} (${c.content_count} ${c.type}, fp=${c.content_fingerprint})`;
+    });
+    const ans = prompt(
+      `Mehrere Varianten von '${row.name}' vorhanden.\n` +
+      'Welche ist die richtige? Zahl eingeben:\n\n' + options.join('\n'),
+    );
+    if (!ans) return;
+    const idx = parseInt(ans, 10) - 1;
+    if (Number.isNaN(idx) || idx < 0 || idx >= present.length) {
+      showToast('Ungueltige Auswahl.');
+      return;
+    }
+    const masterCell = present[idx];
+    const targets = row.cells
+      .filter((c) => c.device_id !== masterCell.device_id)
+      .map((c) => c.device_id);
+    doSyncAlias(row.name, masterCell.device_id, targets);
+  }
+
+  async function doSyncAlias(aliasName, masterId, targetIds) {
+    try {
+      const r = await apiPost('/api/inventory/compare/sync-aliases', {
+        master_device_id: masterId,
+        target_device_ids: targetIds,
+        alias_name: aliasName,
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Sync fehlgeschlagen (${r.status}).`);
+        return;
+      }
+      const data = await r.json();
+      showToast(`Plan erzeugt: ${data.source_summary} → ${data.target_count} Gerät(e)`);
+      closeCompareModal();
+      // Springe in den Plan-View
+      if (typeof openPlanModal === 'function') {
+        openPlanModal(data.plan_id);
+      }
+    } catch (err) {
+      showToast(`Sync fehlgeschlagen: ${err.message}`);
+    }
+  }
+
   function renderCompareTable(data) {
     $('#cmp-status').textContent = data.summary;
     const head = $('#cmp-head');
@@ -1406,8 +1482,26 @@
       const tr = document.createElement('tr');
       if (!row.uniform) tr.classList.add('cmp-row-drift');
       const nameTd = document.createElement('td');
-      nameTd.textContent = row.name;
-      nameTd.style.fontWeight = '600';
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = row.name;
+      nameSpan.style.fontWeight = '600';
+      nameTd.appendChild(nameSpan);
+      // Sync-Button nur bei nicht-uniformen Reihen, nur bei Aliases
+      if (!row.uniform && data.subsystem === 'aliases') {
+        const presentCount = row.cells.filter((c) => c.status === 'present').length;
+        if (presentCount >= 1) {
+          const syncBtn = document.createElement('button');
+          syncBtn.type = 'button';
+          syncBtn.className = 'btn-link compare-sync-btn';
+          syncBtn.textContent = 'Sync…';
+          syncBtn.title = 'Diese Variante auf andere Geraete uebertragen';
+          syncBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openSyncMasterPicker(row, data.columns);
+          });
+          nameTd.appendChild(syncBtn);
+        }
+      }
       tr.appendChild(nameTd);
       // Fingerprint-Map: gleicher fp -> gleicher Inhalt; unterschiedlich -> drift
       const fps = new Set(row.cells

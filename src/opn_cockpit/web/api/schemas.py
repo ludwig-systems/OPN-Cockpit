@@ -504,6 +504,22 @@ class CompareResponse(BaseModel):
     checked_at_iso: str
 
 
+class SyncAliasRequest(BaseModel):
+    """Sync-Aktion: pull Alias vom Master, pushe Plan zu Targets."""
+
+    master_device_id: str = Field(..., min_length=1)
+    target_device_ids: list[str] = Field(..., min_length=1)
+    alias_name: str = Field(..., min_length=1)
+
+
+class SyncAliasResponse(BaseModel):
+    plan_id: str
+    alias_name: str
+    target_count: int
+    source_summary: str
+    """Kurzfassung was als Master uebernommen wurde."""
+
+
 # ---------------------------------------------------------------------------
 # Backups (v0.7 Safety-Nets)
 # ---------------------------------------------------------------------------
