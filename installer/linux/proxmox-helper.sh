@@ -233,7 +233,12 @@ ASK "Hostname" "Hostname / CT-Name" "$CT_HOSTNAME_DEFAULT"
 [[ -n "$REPLY" ]] || err "Hostname darf nicht leer sein."
 CT_HOSTNAME="$REPLY"
 
-# ----- Storage-Pool -----
+# ----- Container-Rootfs-Storage -----
+# WICHTIG: das ist der Storage auf dem die Container-Root-Disk dauerhaft
+# liegt. Hier laeuft der Container - bei jedem I/O. USB-Platten oder
+# langsame/wackelige Storages sind hier eine schlechte Idee. Wir machen
+# das im Prompt explizit deutlich, weil in der Praxis schon mehrfach
+# verwechselt wurde mit dem Template-Storage.
 # pvesm status-Spalten (stable seit Proxmox 6.x):
 #   $1=Name $2=Type $3=Status $4=Total(KiB) $5=Used(KiB) $6=Available(KiB) $7=%
 STORAGE_ITEMS=()
@@ -256,8 +261,8 @@ if [[ ${#STORAGE_ITEMS[@]} -eq 0 ]]; then
     err "Kein Storage mit Content 'Container' verfuegbar.\n\nIn Proxmox-UI: Datacenter -> Storage -> Pool auswaehlen -> Edit -> 'Content' -> 'Container' anhaken."
 fi
 
-ASK_MENU "Storage-Pool" \
-"Storage-Pool fuer den Container-Disk waehlen.\nNur Pools mit Content=Container werden gelistet." \
+ASK_MENU "Container-Rootfs-Storage" \
+"Wo soll die Root-Disk des Containers leben?\n\nHier laeuft der Container dauerhaft - waehle einen schnellen, fest eingebundenen Speicher.\nKEIN USB-Stick oder externes Backup-Laufwerk.\n\n(Nur Pools mit Content=Container sind gelistet.)" \
 "${STORAGE_ITEMS[@]}"
 CT_STORAGE="$REPLY"
 
@@ -349,6 +354,44 @@ while true; do
     break
 done
 
+# ----- Template-Storage (frueh, damit es in der Zusammenfassung auftaucht) -----
+# pveam-Katalog frisch ziehen — sonst zeigt 'pveam available' eine alte
+# Version, deren tar.zst-URL bei Proxmox laengst weg ist (404 beim Download).
+log "Template-Katalog aktualisieren..."
+pveam update >/dev/null 2>&1 || warn "pveam update fehlgeschlagen — alter Katalog wird verwendet."
+
+log "Aktuelles Debian-12-Template ermitteln..."
+TEMPLATE=$(pveam available --section system | awk '/debian-12-standard/{print $2}' | tail -1)
+[[ -n "$TEMPLATE" ]] || err "Kein Debian-12-Template im pveam-Katalog."
+
+TPL_ITEMS=()
+while IFS= read -r line; do
+    name=$(echo "$line" | awk '{print $1}')
+    type=$(echo "$line" | awk '{print $2}')
+    avail_kib=$(echo "$line" | awk '{print $6}')
+    if [[ "$avail_kib" =~ ^[0-9]+$ ]]; then
+        avail_gb=$((avail_kib / 1024 / 1024))
+        descr="$type | ${avail_gb} GB frei"
+    else
+        descr="$type"
+    fi
+    TPL_ITEMS+=("$name" "$descr")
+done < <(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1')
+
+if [[ ${#TPL_ITEMS[@]} -eq 0 ]]; then
+    err "Kein Storage mit Content 'CT Templates' verfuegbar."
+fi
+
+if [[ ${#TPL_ITEMS[@]} -eq 2 ]]; then
+    TPL_STORAGE="${TPL_ITEMS[0]}"
+    log "Template-Storage automatisch gewaehlt (nur einer verfuegbar): $TPL_STORAGE"
+else
+    ASK_MENU "Template-Storage" \
+"Wo soll das Debian-12-Template gespeichert werden?\n\nDas Template wird einmal heruntergeladen und kaum angefasst -\nUSB-Platten oder Backup-Storages sind hier ok.\n\n(Nur Pools mit Content=CT Templates sind gelistet.)" \
+"${TPL_ITEMS[@]}"
+    TPL_STORAGE="$REPLY"
+fi
+
 # ----- Net-String fuer pct zusammenbauen -----
 NET_STR="name=eth0,bridge=$CT_NETWORK"
 if [[ -n "$IPV4_CIDR" ]]; then
@@ -378,7 +421,8 @@ SUMMARY="Container
   ID:        $CT_ID
   Hostname:  $CT_HOSTNAME
   Root-PW:   $PW_SUMMARY
-  Storage:   $CT_STORAGE
+  Rootfs:    $CT_STORAGE  (Container laeuft dauerhaft hier)
+  Template:  $TPL_STORAGE  (einmaliger Template-Download)
   Disk:      ${CT_DISK} GB
   CPUs:      $CT_CPU
   RAM:       ${CT_RAM} MB
@@ -402,35 +446,8 @@ whiptail --backtitle "$BACKTITLE" --title "Zusammenfassung" \
     --yesno "$SUMMARY" 24 78 || err "Abgebrochen."
 
 # ---------------------------------------------------------------------------
-# Debian-12-Template sicherstellen
+# Debian-12-Template ggf. herunterladen
 # ---------------------------------------------------------------------------
-# pveam-Katalog frisch ziehen — sonst zeigt 'pveam available' eine alte
-# Version, deren tar.zst-URL bei Proxmox laengst weg ist (404 beim Download).
-log "Template-Katalog aktualisieren..."
-pveam update >/dev/null 2>&1 || warn "pveam update fehlgeschlagen — alter Katalog wird verwendet."
-
-log "Aktuelles Debian-12-Template ermitteln..."
-TEMPLATE=$(pveam available --section system | awk '/debian-12-standard/{print $2}' | tail -1)
-[[ -n "$TEMPLATE" ]] || err "Kein Debian-12-Template im pveam-Katalog."
-
-# Template-Storage waehlen: bevorzugt 'local' (Standard-Proxmox-Setup), sonst
-# der erste vztmpl-faehige Pool. Verhindert dass das Template auf einer
-# USB-Backup-Platte landet die der User nur fuer Backups eingebunden hat.
-log "Template-Storage auswaehlen..."
-mapfile -t TPL_STORAGES < <(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 {print $1}')
-if [[ ${#TPL_STORAGES[@]} -eq 0 ]]; then
-    err "Kein Storage mit Content 'CT Templates' verfuegbar."
-fi
-
-TPL_STORAGE=""
-for candidate in "${TPL_STORAGES[@]}"; do
-    [[ "$candidate" == "local" ]] && { TPL_STORAGE="local"; break; }
-done
-# Wenn 'local' nicht in der Liste war, nimm den ersten Eintrag.
-: "${TPL_STORAGE:=${TPL_STORAGES[0]}}"
-
-log "Template-Storage: $TPL_STORAGE"
-
 # Template prueft pveam list — pfad-basierter Check funktionierte nur fuer
 # 'local' (/var/lib/vz/template/cache). pveam list ist Storage-agnostisch.
 if ! pveam list "$TPL_STORAGE" 2>/dev/null | awk '{print $1}' | grep -qF "$TEMPLATE"; then
@@ -480,8 +497,13 @@ RAW_INSTALL_SH=$(echo "$REPO_URL" |
     sed -E 's|^(https?://)github\.com/([^/]+)/([^/.]+)(\.git)?/?$|\1raw.githubusercontent.com/\2/\3|')
 RAW_INSTALL_SH="${RAW_INSTALL_SH}/${REPO_BRANCH}/installer/linux/install.sh"
 
+# Locale-Trockenlegen: pristine Debian-LXC-Template hat LANG=en_US.UTF-8
+# gesetzt aber keine Locale-Daten installiert. Das gibt bei apt-listchanges
+# / perl haessliche Warnings. C.UTF-8 ist immer verfuegbar und unterdrueckt
+# die Meldungen ohne nachinstallieren zu muessen.
 pct exec "$CT_ID" -- bash -c "
 set -e
+export LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y --no-install-recommends curl ca-certificates >/dev/null
 curl -fsSL '${RAW_INSTALL_SH}' -o /tmp/install.sh

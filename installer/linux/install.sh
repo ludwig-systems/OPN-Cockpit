@@ -16,6 +16,11 @@
 
 set -euo pipefail
 
+# Pristine Debian-LXC-Templates haben LANG=en_US.UTF-8 gesetzt aber keine
+# Locale-Daten installiert -> apt-listchanges/perl warnen lautstark. C.UTF-8
+# ist immer verfuegbar und die saubere Default-Wahl fuer Scripts.
+export LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive
+
 REPO_URL="${OPNCOCKPIT_REPO_URL:-${OPNCOCKPIT_REPO:-https://github.com/ludwig-systems/opn-cockpit.git}}"
 REPO_BRANCH="${OPNCOCKPIT_REPO_BRANCH:-main}"
 INSTALL_DIR="${OPNCOCKPIT_INSTALL_DIR:-/opt/opn-cockpit}"
