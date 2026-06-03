@@ -180,10 +180,31 @@ Jetzt:     $NEW_TAG  (Commit $NEW_COMMIT)
 Service:   running
 URL:       http://${HOST_IP}:9876
 
-User-Daten und Login bleiben unveraendert. Du kannst dich direkt
-mit deinem bestehenden Admin-Konto wieder einloggen." 18 78 || true
+*** WICHTIG: Browser hart neu laden! ***
+
+Der Browser cacht das alte app.js / styles.css. Druecke im
+geoffneten Cockpit-Tab:
+
+   Strg + Umschalt + R       (alle Browser)
+       oder
+   Umschalt + F5             (Chrome / Edge / Firefox)
+       oder
+   Strg + F5                 (Internet Explorer / aeltere Setups)
+
+Ohne Hard-Reload siehst du die neuen Features nicht und denkst
+das Update sei nicht durchgekommen.
+
+User-Daten und Login bleiben unveraendert - dein bestehendes
+Admin-Konto funktioniert weiter." 28 78 || true
 
         log "Update fertig: $CURRENT_TAG ($CURRENT_COMMIT) -> $NEW_TAG ($NEW_COMMIT)"
+        echo
+        echo "================================================================"
+        echo "  WICHTIG: Browser HART neu laden bevor du auf Aenderungen"
+        echo "  suchst! Im Cockpit-Tab: Strg+Umschalt+R bzw. Umschalt+F5."
+        echo "  Ohne das siehst du den alten Cache und denkst das Update"
+        echo "  sei nicht durchgekommen."
+        echo "================================================================"
     else
         err "Service ist nach Update nicht aktiv.\n\njournalctl -u opn-cockpit -n 50"
     fi
