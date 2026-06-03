@@ -66,6 +66,7 @@ from opn_cockpit.web.acl import (
 )
 from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
+    AliasEntryResponse,
     BackupListResponse,
     BackupResponse,
     CertEntryResponse,
@@ -78,6 +79,7 @@ from opn_cockpit.web.api.schemas import (
     CompareResponse,
     CompareRowResponse,
     ConnectionTestResponse,
+    DeviceAliasesResponse,
     DeviceApiKeyResponse,
     DeviceCreateRequest,
     DeviceResponse,
@@ -866,6 +868,79 @@ def sync_alias_from_master(
             f"{source.name} ({source.type}, "
             f"{len(source.content)} Eintraege) von {master.name}"
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/aliases  - Live-Aliase pro Geraet
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/aliases",
+    response_model=DeviceAliasesResponse,
+)
+def get_device_aliases(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> DeviceAliasesResponse:
+    """Liefert die Live-Aliase eines Geraets (extrahiert aus dem aktuellen
+    Backup-XML). Read-only - Edit/Delete geht heute via OPNsense-UI.
+
+    Aufgerufen vom Alias-Manager-View im Device-Modal. Pro Eintrag:
+    Name, Typ, sortierter Content, Beschreibung, content_fingerprint
+    (kann fuer Drift-Vergleich mit Compare-Matrix abgeglichen werden).
+    """
+    devices_by_id = {d.id: d for d in session.opened.data.devices}
+    device = devices_by_id.get(device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(device, session)
+    timestamp = _iso_now()
+
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    try:
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            xml_bytes = download_backup(client, tgt, device.api_key, device.api_secret)
+    except OpnCockpitError as exc:
+        reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+        return DeviceAliasesResponse(
+            device_id=device.id,
+            device_name=device.name,
+            reachable=False,
+            summary=f"Konfig nicht ladbar: {reason}",
+            aliases=[],
+            checked_at_iso=timestamp,
+        )
+
+    extracted: list[AliasItem] = extract_aliases(xml_bytes)
+    session.touch()
+    return DeviceAliasesResponse(
+        device_id=device.id,
+        device_name=device.name,
+        reachable=True,
+        summary=f"{len(extracted)} Alias(e) live geladen.",
+        aliases=[
+            AliasEntryResponse(
+                name=a.name,
+                type=a.type,
+                content=list(a.content),
+                description=a.description,
+                content_fingerprint=a.content_fingerprint,
+            )
+            for a in extracted
+        ],
+        checked_at_iso=timestamp,
     )
 
 

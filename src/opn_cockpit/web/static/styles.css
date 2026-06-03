@@ -1869,6 +1869,84 @@ body {
   padding: 0 6px;
 }
 
+/* Alias-Manager (read-only) */
+.alm-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.alm-toolbar .form-input {
+  flex: 1;
+}
+
+.alm-status {
+  font-size: 11.5px;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+
+.alm-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.alm-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.alm-row:last-child {
+  border-bottom: none;
+}
+
+.alm-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.alm-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.alm-meta {
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+
+.alm-content {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  padding: 6px 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.alm-descr {
+  font-size: 11.5px;
+  color: var(--text-subtle);
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.alm-actions {
+  margin-top: 6px;
+}
+
 .modal-header {
   display: flex;
   align-items: center;

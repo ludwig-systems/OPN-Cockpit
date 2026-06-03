@@ -1966,6 +1966,110 @@
     deleteArmed = false;
   }
 
+  // -------------------- Alias-Manager (read-only Browse-View) --------------------
+
+  let almRawAliases = [];
+  let almCurrentDevice = null;
+
+  async function openAliasManager() {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    if (!device) return;
+    almCurrentDevice = device;
+    almRawAliases = [];
+    $('#alm-title').textContent = `Aliase: ${device.name}`;
+    $('#alm-status').textContent = 'Lade…';
+    $('#alm-filter').value = '';
+    $('#alm-list').innerHTML = '';
+    $('#aliases-modal').hidden = false;
+    try {
+      const r = await apiGet(`/api/inventory/devices/${currentDeviceId}/aliases`);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        $('#alm-status').textContent = body.detail || `Fehler ${r.status}`;
+        return;
+      }
+      const data = await r.json();
+      almRawAliases = data.aliases || [];
+      $('#alm-status').textContent = data.summary;
+      renderAliasManagerList();
+    } catch (err) {
+      $('#alm-status').textContent = err.message;
+    }
+  }
+
+  function closeAliasManager() {
+    $('#aliases-modal').hidden = true;
+    almRawAliases = [];
+    almCurrentDevice = null;
+  }
+
+  function renderAliasManagerList() {
+    const list = $('#alm-list');
+    list.innerHTML = '';
+    const filter = ($('#alm-filter').value || '').trim().toLowerCase();
+    const matching = filter
+      ? almRawAliases.filter((a) =>
+          a.name.toLowerCase().includes(filter)
+          || a.content.some((c) => c.toLowerCase().includes(filter))
+          || (a.description || '').toLowerCase().includes(filter))
+      : almRawAliases;
+    if (matching.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.padding = '24px';
+      empty.style.textAlign = 'center';
+      empty.style.color = 'var(--text-subtle)';
+      empty.textContent = filter
+        ? 'Kein Treffer fuer den Filter.'
+        : 'Keine Aliase auf diesem Geraet.';
+      list.appendChild(empty);
+      return;
+    }
+    for (const a of matching) {
+      const row = document.createElement('div');
+      row.className = 'alm-row';
+      const head = document.createElement('div');
+      head.className = 'alm-row-head';
+      const name = document.createElement('span');
+      name.className = 'alm-name';
+      name.textContent = a.name;
+      const meta = document.createElement('span');
+      meta.className = 'alm-meta';
+      meta.textContent = `${a.type} · ${a.content.length} Eintrag${a.content.length === 1 ? '' : 'e'}`;
+      head.appendChild(name);
+      head.appendChild(meta);
+      row.appendChild(head);
+      const content = document.createElement('div');
+      content.className = 'alm-content';
+      content.textContent = a.content.join('\n') || '(leer)';
+      row.appendChild(content);
+      if (a.description) {
+        const descr = document.createElement('div');
+        descr.className = 'alm-descr';
+        descr.textContent = a.description;
+        row.appendChild(descr);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'alm-actions';
+      // Deep-Link zur OPNsense-Alias-Seite. URL-Pfade fuer Alias-Edit
+      // sind /ui/firewall/alias bzw. /firewall_aliases.php je nach Release.
+      // Wir nehmen das aktuelle UI-Path; der Hash filtert per Name nicht
+      // direkt, der User sieht die Alias-Tabelle und klickt manuell rein.
+      if (almCurrentDevice) {
+        const editLink = document.createElement('a');
+        editLink.className = 'btn-link';
+        editLink.target = '_blank';
+        editLink.rel = 'noopener';
+        editLink.href = `https://${almCurrentDevice.host}:${almCurrentDevice.port}/ui/firewall/alias`;
+        editLink.textContent = 'In OPNsense bearbeiten →';
+        actions.appendChild(editLink);
+      }
+      row.appendChild(actions);
+      list.appendChild(row);
+    }
+  }
+
   async function doTestConnection() {
     if (!currentDeviceId) return;
     const btn = $('#device-test-btn');
@@ -4829,6 +4933,18 @@
     $('#device-duplicate-btn').addEventListener('click', doDuplicate);
     $('#device-backup-btn').addEventListener('click', doBackupDownload);
     $('#device-update-check-btn').addEventListener('click', doFirmwareCheck);
+    const aliasBtn = $('#device-aliases-btn');
+    if (aliasBtn) aliasBtn.addEventListener('click', openAliasManager);
+    const almClose = $('#alm-close');
+    if (almClose) almClose.addEventListener('click', closeAliasManager);
+    const almCancel = $('#alm-cancel');
+    if (almCancel) almCancel.addEventListener('click', closeAliasManager);
+    const almFilter = $('#alm-filter');
+    if (almFilter) almFilter.addEventListener('input', renderAliasManagerList);
+    const almModal = $('#aliases-modal');
+    if (almModal) almModal.addEventListener('click', (e) => {
+      if (e.target.id === 'aliases-modal') closeAliasManager();
+    });
     $('#device-url-copy').addEventListener('click', doCopyUrl);
     $('#device-modal').addEventListener('click', (e) => {
       if (e.target.id === 'device-modal') closeDeviceModal();

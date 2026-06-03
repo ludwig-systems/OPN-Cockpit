@@ -520,6 +520,23 @@ class SyncAliasResponse(BaseModel):
     """Kurzfassung was als Master uebernommen wurde."""
 
 
+class AliasEntryResponse(BaseModel):
+    name: str
+    type: str
+    content: list[str]
+    description: str
+    content_fingerprint: str
+
+
+class DeviceAliasesResponse(BaseModel):
+    device_id: str
+    device_name: str
+    reachable: bool
+    summary: str
+    aliases: list[AliasEntryResponse]
+    checked_at_iso: str
+
+
 # ---------------------------------------------------------------------------
 # Backups (v0.7 Safety-Nets)
 # ---------------------------------------------------------------------------

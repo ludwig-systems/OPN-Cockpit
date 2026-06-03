@@ -595,6 +595,32 @@
       </div>
     </div>
 
+    <!-- ================ MODAL: Alias-Manager (read-only) ================ -->
+    <div class="modal-backdrop" id="aliases-modal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="alm-title">
+        <div class="modal-header">
+          <h2 id="alm-title">Aliase</h2>
+          <button class="icon-btn modal-close" id="alm-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="alm-toolbar">
+            <input id="alm-filter" class="form-input" type="search"
+                   placeholder="Filter (Name oder Inhalt)..." autocomplete="off" />
+            <div class="alm-status" id="alm-status">—</div>
+          </div>
+          <div class="alm-list" id="alm-list"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="alm-cancel">Schliessen</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ================ MODAL: Geräte-Detail ================ -->
     <div class="modal-backdrop" id="device-modal" hidden>
       <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="device-modal-title">
@@ -656,6 +682,12 @@
                 <polyline points="10.5 2 10.5 4 8.5 4"/>
               </svg>
               <span>Updates suchen</span>
+            </button>
+            <button class="btn-secondary action-row-btn" id="device-aliases-btn">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 3h9M2 6.5h9M2 10h6"/>
+              </svg>
+              <span>Aliase anzeigen</span>
             </button>
           </div>
 
