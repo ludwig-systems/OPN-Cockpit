@@ -490,6 +490,9 @@ class CompareCellResponse(BaseModel):
     content_fingerprint: str = ""
     content_count: int = 0
     description: str = ""
+    content: list[str] = Field(default_factory=list)
+    """Sortierte Liste der Alias-Eintraege. Wird im Detail-Aufklapp im UI
+    angezeigt damit der Admin pruefen kann was synct wird, bevor er klickt."""
 
 
 class CompareRowResponse(BaseModel):

@@ -746,6 +746,7 @@ def compare_configs(
                         content_fingerprint=cell.content_fingerprint,
                         content_count=cell.content_count,
                         description=cell.description,
+                        content=list(cell.content),
                     )
                     for did, cell in row.cells
                 ],

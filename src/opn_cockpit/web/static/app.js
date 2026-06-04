@@ -1437,56 +1437,10 @@
     $('#compare-modal').hidden = true;
   }
 
-  // -------------------- Sync-Master-Picker --------------------
-
-  function openSyncMasterPicker(row, columns) {
-    // Modal: zeigt fuer jede 'present'-Cell einen Knopf "von hier uebernehmen".
-    // Pick -> doSyncAlias mit master + targets (alle anderen Geraete der Row).
-    const colsById = Object.fromEntries(columns.map((c) => [c.device_id, c]));
-    const present = row.cells.filter((c) => c.status === 'present');
-    if (present.length === 0) {
-      showToast('Keine Variante zum Uebernehmen vorhanden.');
-      return;
-    }
-    // Wenn nur eine present-Variante: direkt Bestaetigungs-Dialog
-    if (present.length === 1) {
-      const masterCell = present[0];
-      const targets = row.cells
-        .filter((c) => c.device_id !== masterCell.device_id)
-        .map((c) => c.device_id);
-      const masterName = colsById[masterCell.device_id]?.device_name || masterCell.device_id;
-      const targetNames = targets
-        .map((tid) => colsById[tid]?.device_name || tid)
-        .join(', ');
-      if (!confirm(
-        `Alias '${row.name}' von '${masterName}' auf ${targets.length} Gerät(e) ` +
-        `uebertragen: ${targetNames}?\n\n` +
-        'Ein Plan wird erzeugt, du kannst ihn vor dem Apply pruefen.',
-      )) return;
-      doSyncAlias(row.name, masterCell.device_id, targets);
-      return;
-    }
-    // Mehrere present-Varianten: einfache Browser-Prompt-Auswahl via numeriert
-    const options = present.map((c, i) => {
-      const name = colsById[c.device_id]?.device_name || c.device_id;
-      return `${i + 1}. ${name} (${c.content_count} ${c.type}, fp=${c.content_fingerprint})`;
-    });
-    const ans = prompt(
-      `Mehrere Varianten von '${row.name}' vorhanden.\n` +
-      'Welche ist die richtige? Zahl eingeben:\n\n' + options.join('\n'),
-    );
-    if (!ans) return;
-    const idx = parseInt(ans, 10) - 1;
-    if (Number.isNaN(idx) || idx < 0 || idx >= present.length) {
-      showToast('Ungueltige Auswahl.');
-      return;
-    }
-    const masterCell = present[idx];
-    const targets = row.cells
-      .filter((c) => c.device_id !== masterCell.device_id)
-      .map((c) => c.device_id);
-    doSyncAlias(row.name, masterCell.device_id, targets);
-  }
+  // Master-Auswahl erfolgt jetzt via ◀▶★-Buttons in den Spalten-Headern
+  // der Compare-Matrix (siehe renderCompareTableInner). Master = linkeste
+  // Spalte, optisch hervorgehoben. doSyncAlias ist der Endpoint, das
+  // Picker-Modal davor entfaellt.
 
   async function doSyncAlias(aliasName, masterId, targetIds) {
     try {
@@ -1538,27 +1492,97 @@
     }
   }
 
+  // Compare-State: aktuelle Spalten-Reihenfolge + Detail-Auftaster pro Row
+  let currentCompareData = null;
+  let compareColumnOrder = [];  // device_ids in displayed order, [0] = Master
+  const compareExpandedRows = new Set(); // row.name -> expanded
+
   function renderCompareTable(data) {
-    $('#cmp-status').textContent = data.summary;
+    currentCompareData = data;
+    if (!compareColumnOrder.length
+        || compareColumnOrder.length !== data.columns.length
+        || !compareColumnOrder.every((id) => data.columns.some((c) => c.device_id === id))) {
+      // Erste Anzeige oder Geraete-Set hat sich geaendert -> Default-Order
+      compareColumnOrder = data.columns.map((c) => c.device_id);
+    }
+    compareExpandedRows.clear();
+    renderCompareTableInner();
+  }
+
+  function renderCompareTableInner() {
+    const data = currentCompareData;
+    if (!data) return;
+    const colsById = Object.fromEntries(data.columns.map((c) => [c.device_id, c]));
+    const orderedCols = compareColumnOrder.map((id) => colsById[id]).filter(Boolean);
+    const masterId = orderedCols[0]?.device_id || null;
+
+    $('#cmp-status').textContent = `${data.summary} (Master: ${colsById[masterId]?.device_name || '—'})`;
     const head = $('#cmp-head');
     const body = $('#cmp-body');
     head.innerHTML = '';
     body.innerHTML = '';
-    // Kopf: 1. Spalte = Alias-Name, dann pro Geraet eine Spalte
+
+    // Kopf: 1. Spalte = Alias-Name + Detail-Spalte, dann pro Geraet eine Spalte
     const th0 = document.createElement('th');
     th0.textContent = 'Alias';
+    th0.style.width = '180px';
     head.appendChild(th0);
-    for (const col of data.columns) {
+    orderedCols.forEach((col, idx) => {
       const th = document.createElement('th');
-      th.textContent = col.device_name;
-      th.title = col.reachable ? 'erreichbar' : `nicht erreichbar: ${col.summary}`;
-      if (!col.reachable) th.style.color = 'var(--text-subtle)';
+      if (idx === 0) th.classList.add('cmp-col-master');
+      const wrap = document.createElement('div');
+      wrap.className = 'cmp-col-head';
+      const name = document.createElement('span');
+      name.className = 'cmp-col-name';
+      name.textContent = col.device_name;
+      name.title = col.reachable ? 'erreichbar' : `nicht erreichbar: ${col.summary}`;
+      if (!col.reachable) name.style.color = 'var(--text-subtle)';
+      wrap.appendChild(name);
+      if (idx === 0) {
+        const masterTag = document.createElement('span');
+        masterTag.className = 'cmp-master-tag';
+        masterTag.textContent = '★ Master';
+        wrap.appendChild(masterTag);
+      }
+      // Steuerung: nach links / als Master
+      const ctrls = document.createElement('div');
+      ctrls.className = 'cmp-col-ctrls';
+      if (idx > 0) {
+        const leftBtn = document.createElement('button');
+        leftBtn.type = 'button';
+        leftBtn.className = 'cmp-arrow-btn';
+        leftBtn.textContent = '◀';
+        leftBtn.title = 'Diese Spalte nach links verschieben';
+        leftBtn.addEventListener('click', () => moveCompareColumn(idx, idx - 1));
+        ctrls.appendChild(leftBtn);
+      }
+      if (idx > 0) {
+        const masterBtn = document.createElement('button');
+        masterBtn.type = 'button';
+        masterBtn.className = 'cmp-arrow-btn cmp-master-btn';
+        masterBtn.textContent = '★';
+        masterBtn.title = 'Diese Spalte zum Master machen (an Position 1)';
+        masterBtn.addEventListener('click', () => moveCompareColumn(idx, 0));
+        ctrls.appendChild(masterBtn);
+      }
+      if (idx < orderedCols.length - 1) {
+        const rightBtn = document.createElement('button');
+        rightBtn.type = 'button';
+        rightBtn.className = 'cmp-arrow-btn';
+        rightBtn.textContent = '▶';
+        rightBtn.title = 'Diese Spalte nach rechts verschieben';
+        rightBtn.addEventListener('click', () => moveCompareColumn(idx, idx + 1));
+        ctrls.appendChild(rightBtn);
+      }
+      wrap.appendChild(ctrls);
+      th.appendChild(wrap);
       head.appendChild(th);
-    }
+    });
+
     if (data.rows.length === 0) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = data.columns.length + 1;
+      td.colSpan = orderedCols.length + 1;
       td.style.textAlign = 'center';
       td.style.color = 'var(--text-subtle)';
       td.style.padding = '20px';
@@ -1567,38 +1591,69 @@
       body.appendChild(tr);
       return;
     }
+
     for (const row of data.rows) {
       const tr = document.createElement('tr');
       if (!row.uniform) tr.classList.add('cmp-row-drift');
+      const cellsByDevice = Object.fromEntries(row.cells.map((c) => [c.device_id, c]));
+
+      // Name-Spalte: Aufklapp-Icon + Name + Sync-Button
       const nameTd = document.createElement('td');
+      const expandBtn = document.createElement('button');
+      expandBtn.type = 'button';
+      expandBtn.className = 'cmp-expand-btn';
+      const isExpanded = compareExpandedRows.has(row.name);
+      expandBtn.textContent = isExpanded ? '▼' : '▶';
+      expandBtn.title = isExpanded ? 'Details ausblenden' : 'Inhalte anzeigen';
+      expandBtn.addEventListener('click', () => {
+        if (compareExpandedRows.has(row.name)) compareExpandedRows.delete(row.name);
+        else compareExpandedRows.add(row.name);
+        renderCompareTableInner();
+      });
+      nameTd.appendChild(expandBtn);
       const nameSpan = document.createElement('span');
       nameSpan.textContent = row.name;
       nameSpan.style.fontWeight = '600';
+      nameSpan.style.marginLeft = '6px';
       nameTd.appendChild(nameSpan);
-      // Sync-Button nur bei nicht-uniformen Reihen, nur bei Aliases
+      // Sync-Button (Master = Spalte 0). Nur sichtbar wenn Master einen
+      // Wert hat UND es Drift / Absent-Cells gibt.
       if (!row.uniform && data.subsystem === 'aliases') {
-        const presentCount = row.cells.filter((c) => c.status === 'present').length;
-        if (presentCount >= 1) {
+        const masterCell = cellsByDevice[masterId];
+        if (masterCell && masterCell.status === 'present') {
           const syncBtn = document.createElement('button');
           syncBtn.type = 'button';
           syncBtn.className = 'btn-link compare-sync-btn';
-          syncBtn.textContent = 'Sync…';
-          syncBtn.title = 'Diese Variante auf andere Geraete uebertragen';
+          syncBtn.textContent = 'Sync ←';
+          syncBtn.title = `'${colsById[masterId].device_name}' als Master uebernehmen`;
           syncBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            openSyncMasterPicker(row, data.columns);
+            const targets = orderedCols.slice(1).map((c) => c.device_id);
+            const ok = confirm(
+              `Alias '${row.name}' von '${colsById[masterId].device_name}' auf ` +
+              `${targets.length} Gerät(e) uebertragen?\n\n` +
+              targets.map((tid) => `· ${colsById[tid]?.device_name || tid}`).join('\n')
+              + '\n\nEin Plan wird erzeugt, du kannst ihn vor dem Apply pruefen.',
+            );
+            if (!ok) return;
+            doSyncAlias(row.name, masterId, targets);
           });
           nameTd.appendChild(syncBtn);
         }
       }
       tr.appendChild(nameTd);
+
       // Fingerprint-Map: gleicher fp -> gleicher Inhalt; unterschiedlich -> drift
       const fps = new Set(row.cells
         .filter((c) => c.status === 'present')
         .map((c) => c.content_fingerprint));
       const hasDrift = fps.size > 1;
-      for (const cell of row.cells) {
+      const masterFp = cellsByDevice[masterId]?.content_fingerprint || null;
+
+      for (const col of orderedCols) {
+        const cell = cellsByDevice[col.device_id];
         const td = document.createElement('td');
+        if (col.device_id === masterId) td.classList.add('cmp-col-master');
         const wrap = document.createElement('span');
         wrap.className = 'compare-cell';
         const dot = document.createElement('span');
@@ -1606,7 +1661,12 @@
         let label = '';
         let title = '';
         if (cell.status === 'present') {
-          dot.classList.add(hasDrift ? 'cmp-dot-drift' : 'cmp-dot-present');
+          // Master-relativer Drift: gleich wie Master = gruen, ungleich = gelb
+          const matchesMaster = masterFp !== null && cell.content_fingerprint === masterFp;
+          dot.classList.add(matchesMaster ? 'cmp-dot-present' : 'cmp-dot-drift');
+          if (!matchesMaster && hasDrift) {
+            // markiere als drift
+          }
           label = `${cell.content_count} ${cell.type}`;
           title = (
             `Typ: ${cell.type}\n` +
@@ -1632,7 +1692,45 @@
         tr.appendChild(td);
       }
       body.appendChild(tr);
+
+      // Detail-Aufklapp-Zeile
+      if (compareExpandedRows.has(row.name)) {
+        const detail = document.createElement('tr');
+        detail.className = 'cmp-detail-row';
+        // Erste Spalte (leer + Stil) damit Layout passt
+        const lead = document.createElement('td');
+        detail.appendChild(lead);
+        for (const col of orderedCols) {
+          const cell = cellsByDevice[col.device_id];
+          const td = document.createElement('td');
+          if (col.device_id === masterId) td.classList.add('cmp-col-master');
+          const box = document.createElement('div');
+          box.className = 'cmp-detail-content';
+          if (cell.status !== 'present') {
+            box.textContent = cell.status === 'absent' ? '(nicht vorhanden)' : '(unerreichbar)';
+            box.style.color = 'var(--text-subtle)';
+            box.style.fontStyle = 'italic';
+          } else if (!cell.content || cell.content.length === 0) {
+            box.textContent = '(leer)';
+            box.style.color = 'var(--text-subtle)';
+            box.style.fontStyle = 'italic';
+          } else {
+            box.textContent = cell.content.join('\n');
+          }
+          td.appendChild(box);
+          detail.appendChild(td);
+        }
+        body.appendChild(detail);
+      }
     }
+  }
+
+  function moveCompareColumn(fromIdx, toIdx) {
+    if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
+    if (fromIdx >= compareColumnOrder.length || toIdx >= compareColumnOrder.length) return;
+    const [item] = compareColumnOrder.splice(fromIdx, 1);
+    compareColumnOrder.splice(toIdx, 0, item);
+    renderCompareTableInner();
   }
 
   function pruneSelectionToExistingDevices() {

@@ -110,6 +110,8 @@ class AliasCell:
     content_fingerprint: str = ""
     content_count: int = 0
     description: str = ""
+    content: tuple[str, ...] = ()
+    """Vollstaendiger sortierter Inhalt - fuer den UI-Detail-Aufklapp."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +178,7 @@ def compare_aliases(
                 content_fingerprint=entry.content_fingerprint,
                 content_count=len(entry.content),
                 description=entry.description,
+                content=entry.content,
             )
             fingerprints_seen.add((entry.type, entry.content_fingerprint))
             cells.append((device_id, cell))
