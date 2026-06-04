@@ -107,6 +107,66 @@ nicht mit Konsolen-Fenster nerven" (Windowless-Install).
   Backwards-Compat mit alten Tresoren).
 - `iputils-ping` im Linux-Installer (für ICMP-Probe).
 
+### Phase 2 (nach erstem v0.7-Test)
+
+User-Test deckte mehrere Punkte auf, die wir im selben Release noch
+mitgenommen haben:
+
+**Bugs:**
+- Login-Maske + alle anderen Versions-Anzeigen zeigten statisch
+  `v0.6.3.dev0` statt der echten Release-Version → `get_runtime_version()`
+  überall durchgereicht (statt nur in About). Git-Tag-Praefix `v` wird
+  jetzt vor dem Template-Render gestrippt, sonst rendert das Brand-
+  Label `vv0.7.0`.
+- `BackupScheduler` lief nur solange eine Browser-Session offen war.
+  Im Multi-User-Server-Mode (LXC) wird der zentrale Vault aber durchgehend
+  entsperrt gehalten — Scheduler nutzt jetzt `server_state.opened_vault`
+  als Quelle, deduppt gegen Sessions. 24/7-Operation jetzt garantiert.
+- `__version__` von `0.6.3.dev0` auf `0.7.0.dev0` gebumpt damit der
+  Fallback-Wert ehrlich ist (Windows-Installer ohne Git-Repo).
+- Login-Maske hatte das Dropdown noch — File-Picker-Refactor jetzt
+  auch dort (gleiche Pattern wie Vault-Switch-Modal nach Login).
+- Alias-Sync → "Vorschau anzeigen" gab Fehler "Pflichtfelder" weil
+  ich `openPlanModal(plan_id)` rief statt einer Funktion die einen
+  bestehenden Plan in die Vorschau lädt. Neue `openExistingPlanInPreview`
+  springt direkt zur Preview-Phase.
+
+**Compare-Matrix UX:**
+- Master-Wahl per ◀ / ▶ / ★ direkt im Spalten-Header (statt
+  Prompt-Picker). Spalte ganz links = Master, optisch hervorgehoben
+  mit Olive-Border + ★-Pill.
+- Cells werden relativ zum Master gefärbt: identischer Fingerprint =
+  grün, abweichend = gelb. Schneller erkennbar wo Drift sitzt.
+- Detail-Aufklapp pro Alias-Row (▶ / ▼ Icon vor dem Namen): zeigt den
+  vollständigen Inhalt pro Gerät vor dem Sync-Klick. Backend gibt
+  jetzt `content: list[str]` pro Cell mit.
+
+**Device-Modal Restrukturierung:**
+- Modal-Card-Wide statt -Narrow.
+- Browser-Tab-Style Tab-Strip: **Info | Updates | Backups | Aliase**.
+- Info-Tab: 4 Haupt-Buttons im 2×2-Grid (Test, OPNsense, Duplizieren,
+  Update-Check), Detail-Liste, URL, Sekundär-Buttons (Bearbeiten,
+  Backup herunterladen) im Footer-Bereich.
+- Updates-Tab: installierte + verfügbare Version, "Aktuell"-/"Update
+  verfügbar"-Badge, OPNsense-Status-Message, "Erneut prüfen".
+- Backups-Tab: integrierte History (Pre-Apply / Manuell / Geplant),
+  "Backup jetzt ziehen"-Button.
+- Aliase-Tab: integrierter Browse-View. Beide vorher separaten Modale
+  (Aliases + Backup-History) komplett entfernt.
+- Karten-Badge-Klicks (Backups, Aliase) öffnen das Device-Modal mit
+  dem passenden Tab aktiv — kein zweites Modal hinter der Karte mehr.
+
+**Karten-Polish:**
+- "Port / TLS / Heartbeat-Alter"-Stats-Zeile entfernt (Info im Modal).
+- Hover-Quick-Actions in der Status-Row: OPNsense öffnen, Updates
+  suchen, Duplizieren — fade-in beim Card-Hover (opacity-Transition).
+  Default-State der Karte deutlich ruhiger.
+
+**Sonstiges:**
+- User-Anlage: Tag-ACL-Hint von "Heute kosmetisch" auf "User sieht
+  nur Geräte mit mindestens einem der Tags" aktualisiert — die ACL
+  ist seit v3.0 Iter 4 (Mai 2026) live, der Hint war veraltet.
+
 ---
 
 ## v0.6.0 — 2026-06-01 — Multi-User-Server + Linux-Deployment
