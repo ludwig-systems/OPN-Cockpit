@@ -180,6 +180,16 @@ class ServerState:
         return self._opened_vault is not None
 
     @property
+    def opened_vault(self) -> OpenedVault | None:
+        """Liefert den zentralen entsperrten Vault (Multi-User-Server-Mode).
+
+        None wenn nicht entsperrt oder im Single-User-Modus laeuft (dort
+        ist der Vault session-gebunden, nicht zentral). Wird vom Backup-
+        Scheduler genutzt um auch ohne aktive User-Session weiterzulaufen.
+        """
+        return self._opened_vault
+
+    @property
     def bootstrap_token(self) -> str | None:
         """Aktueller Bootstrap-Token (None wenn nicht im Bootstrap-Status)."""
         return self._bootstrap_token

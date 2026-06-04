@@ -46,10 +46,11 @@ from opn_cockpit.backups.errors import BackupStoreError
 from opn_cockpit.core.device_info import download_backup
 from opn_cockpit.core.errors import OpnCockpitError
 from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
-from opn_cockpit.vault.model import VaultDevice
+from opn_cockpit.vault.model import VaultData, VaultDevice
 
 if TYPE_CHECKING:
     from opn_cockpit.web.auth.manager import SessionManager
+    from opn_cockpit.web.server_state import ServerState
 
 LOOP_TICK_S = 300            # 5 Min: pruefe Faelligkeit
 MIN_INTERVAL_HOURS = 1       # User-Settings darf nicht unter 1h fallen
@@ -77,11 +78,18 @@ class BackupScheduler:
         self,
         manager: SessionManager,
         *,
+        server_state: ServerState | None = None,
         backup_storage_root: Path | None = None,
         audit_backend: AuditBackend | None = None,
         tick_interval_s: int = LOOP_TICK_S,
     ) -> None:
         self._manager = manager
+        # Optional ServerState-Referenz: im Multi-User-Server-Mode bleibt
+        # der zentrale Vault auch ohne aktive User-Session entsperrt.
+        # Ohne diese Referenz wuerde der Scheduler nach jedem Browser-
+        # Logout in den Leerlauf gehen - genau der Bug den User in der
+        # 20h-Pause beobachtet hat.
+        self._server_state = server_state
         self._backup_storage_root = backup_storage_root
         self._audit = audit_backend  # lazy via get_audit_backend wenn None
         self._tick_interval_s = tick_interval_s
@@ -131,27 +139,48 @@ class BackupScheduler:
             return self._audit
         return get_audit_backend()
 
+    def _collect_vault_sources(self) -> list[tuple[str, VaultData]]:
+        """Sammelt (vault_key, VaultData)-Paare aus zentralem Vault + Sessions.
+
+        Reihenfolge:
+        1. ServerState's zentraler Vault (Multi-User-Server-Mode) - bleibt
+           auch ohne aktive Browser-Session entsperrt, ist also die Haupt-
+           Quelle fuer 24/7-Operation
+        2. Sessions des SessionManagers (Single-User-Mode oder zusaetzliche
+           Sessions auf separaten Vaults)
+
+        Dedupiert per resolved vault_path string.
+        """
+        sources: list[tuple[str, VaultData]] = []
+        seen: set[str] = set()
+        if self._server_state is not None:
+            opened = self._server_state.opened_vault
+            vault_path = self._server_state.vault_path
+            if opened is not None and vault_path is not None:
+                key = str(vault_path.resolve())
+                seen.add(key)
+                sources.append((key, opened.data))
+        for _token, session, vault_path in self._manager.snapshot_active():
+            key = str(vault_path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append((key, session.opened.data))
+        return sources
+
     def _tick_once(self) -> _Tick:
-        snapshots = self._manager.snapshot_active()
-        sessions_seen = len(snapshots)
+        vault_sources = self._collect_vault_sources()
+        sessions_seen = len(vault_sources)
         devices_checked = 0
         backups_taken = 0
         failures = 0
 
-        seen_vaults: set[str] = set()
-        for _token, session, vault_path in snapshots:
-            # Pro Tresor nur einmal arbeiten - mehrere Sessions auf
-            # demselben Vault wuerden sonst doppelt sichern.
-            vault_key = str(vault_path.resolve())
-            if vault_key in seen_vaults:
-                continue
-            seen_vaults.add(vault_key)
-
-            settings = session.opened.data.settings
+        for _vault_key, vault_data in vault_sources:
+            settings = vault_data.settings
             if not settings.scheduled_backup_enabled:
                 continue
             interval_h = max(MIN_INTERVAL_HOURS, settings.scheduled_backup_interval_hours)
-            devices = list(session.opened.data.devices)
+            devices = list(vault_data.devices)
             devices_checked += len(devices)
 
             due_devices = [d for d in devices if self._is_due(d, interval_h)]

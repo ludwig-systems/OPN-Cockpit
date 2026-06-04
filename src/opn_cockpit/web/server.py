@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.types import Message, Receive, Scope, Send
 
 from opn_cockpit import __version__
+from opn_cockpit.runtime_version import get_runtime_version
 from opn_cockpit.web.api import register_api_routes
 from opn_cockpit.web.auth.manager import SessionManager
 from opn_cockpit.web.backup_scheduler import BackupScheduler
@@ -58,9 +59,14 @@ def create_app() -> FastAPI:
     auffindbar. Bei spaeterer Multi-User-Variante kann ``docs_url`` per
     Setting wieder aktiviert werden.
     """
+    # Effective Version: bevorzugt das Git-Tag wenn das Repo eines hat,
+    # sonst Fallback auf das hardcoded __version__ aus __init__.py.
+    # Damit zeigen Login-Maske/Topbar/About im Linux-Container die echte
+    # Release-Version statt der dev-Bezeichnung aus main.
+    effective_version = get_runtime_version()
     app = FastAPI(
         title="OPN-Cockpit",
-        version=__version__,
+        version=effective_version,
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -71,12 +77,16 @@ def create_app() -> FastAPI:
     session_manager = SessionManager()
     app.state.session_manager = session_manager
     app.state.retry_watcher = RetryWatcher(session_manager)
-    app.state.backup_scheduler = BackupScheduler(session_manager)
-    # Scheduler-Thread direkt starten - er wartet sowieso ~30s vor dem
-    # ersten Tick und ist No-Op solange keine Session mit
-    # scheduled_backup_enabled offen ist.
-    app.state.backup_scheduler.start()
     app.state.server_state = ServerState.from_settings()
+    # Scheduler kennt jetzt sowohl SessionManager (Single-User) als auch
+    # ServerState (Multi-User-Server-Mode mit zentralem Vault). Bug aus
+    # User-Test 2026-06-04: Tresor war 20h nach Browser-Logout still,
+    # weil nur Sessions iteriert wurden. Mit server_state laeuft der
+    # Scheduler durchgehend solange der Container an ist.
+    app.state.backup_scheduler = BackupScheduler(
+        session_manager, server_state=app.state.server_state,
+    )
+    app.state.backup_scheduler.start()
     app.state.login_rate_limiter = RateLimiter()
     app.state.bootstrap_rate_limiter = RateLimiter(
         # Bootstrap ist seltener als Login — strenger limitieren.
@@ -109,7 +119,7 @@ def create_app() -> FastAPI:
             request,
             "index.html",
             {
-                "version": __version__,
+                "version": effective_version,
                 "asset_version": _asset_version(),
             },
         )
