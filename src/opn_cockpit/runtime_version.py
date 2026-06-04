@@ -22,6 +22,9 @@ from pathlib import Path
 from opn_cockpit import __version__
 
 _TIMEOUT_S = 2.0
+# parents[0]=opn_cockpit/, parents[1]=src/, parents[2]=Repo-Root.
+# Wenn weniger Ebenen existieren, ist das kein normales Source-Layout.
+_REPO_ROOT_DEPTH = 3
 
 
 def _package_repo_dir() -> Path | None:
@@ -33,7 +36,7 @@ def _package_repo_dir() -> Path | None:
     ``None`` zurueck und der Caller faellt auf ``__version__`` zurueck.
     """
     here = Path(__file__).resolve()
-    candidate = here.parents[2] if len(here.parents) >= 3 else None
+    candidate = here.parents[2] if len(here.parents) >= _REPO_ROOT_DEPTH else None
     if candidate is None:
         return None
     if (candidate / ".git").exists():
@@ -82,6 +85,18 @@ def _git_describe_tag(repo: Path) -> str | None:
     return None
 
 
+def _strip_v_prefix(value: str) -> str:
+    """Entfernt fuehrendes 'v' / 'V'.
+
+    Git-Tags sind konventionell ``vX.Y.Z``, ``__version__``-Konstanten
+    ohne Praefix (``X.Y.Z``). Templates rendern ``v{{ version }}`` und
+    erwarten daher die nackte Zahl - sonst kommt ``vv0.7.0`` raus.
+    """
+    if value and value[0] in ("v", "V"):
+        return value[1:]
+    return value
+
+
 @lru_cache(maxsize=1)
 def get_runtime_version() -> str:
     """Liefert die "tatsaechliche" Version dieses Builds.
@@ -92,13 +107,17 @@ def get_runtime_version() -> str:
     * Installation ist kein Git-Checkout (Windows-Installer)
     * Git nicht installiert / nicht im PATH
     * Repo hat noch keine Tags (Fresh-Install vor erstem Release)
+
+    Rueckgabe-Format: **ohne** ``v``-Praefix. Wer das Praefix will,
+    haengt es vorne selbst dran (so machen es die Templates mit
+    ``v{{ version }}``).
     """
     repo = _package_repo_dir()
     if repo is not None:
         tag = _git_describe_tag(repo)
         if tag:
-            return tag
-    return __version__
+            return _strip_v_prefix(tag)
+    return _strip_v_prefix(__version__)
 
 
 def get_runtime_version_detail() -> dict[str, str]:
