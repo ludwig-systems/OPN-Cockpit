@@ -1524,6 +1524,49 @@ body {
   border-color: var(--accent-line);
 }
 
+/* Quick-Actions: Set von Icon-Buttons in der Status-Row.
+   Standardmaessig unsichtbar/diskret, erscheinen beim Hover ueber die Karte. */
+.card-quick-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 4px;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: none;
+}
+
+.card:hover .card-quick-actions,
+.card:focus-within .card-quick-actions {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.card-quick-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s, background-color 0.12s, border-color 0.12s;
+  text-decoration: none;
+  padding: 0;
+}
+
+.card-quick-btn:hover {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+a.card-quick-btn { text-decoration: none; }
+
 .card-name {
   font-size: 18px;
   font-weight: 500;
@@ -1754,6 +1797,96 @@ body {
 
 .modal-card-narrow { max-width: 460px; }
 .modal-card-wide { max-width: 1100px; }
+
+/* Tab-Strip im Modal (Device-Detail-Modal nutzt das, spaeter
+   evtl. weitere Modale). Optik wie Browser-Tabs: Buttons in Reihe,
+   aktiver Tab durch Border-Bottom akzentuiert. */
+.modal-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  background: var(--bg-elevated);
+}
+
+.modal-tab {
+  background: transparent;
+  border: none;
+  padding: 10px 18px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--text-subtle);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+
+.modal-tab:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+.modal-tab.is-active {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent-strong);
+  background: var(--bg);
+}
+
+.modal-tab-pane {
+  display: block;
+}
+
+.modal-tab-pane[hidden] {
+  display: none;
+}
+
+/* Action-Row im Grid statt Flex damit 4 Buttons sauber arrangiert sind. */
+.action-row-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* Updates-Tab Status-Block */
+.device-updates-summary {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.device-updates-summary-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.device-updates-summary-meta {
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.device-updates-summary-badge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.device-updates-summary-badge.has-update {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border: 1px solid var(--accent-line);
+}
+
+.device-updates-summary-badge.up-to-date {
+  background: rgba(90, 138, 94, 0.12);
+  color: var(--online);
+  border: 1px solid rgba(90, 138, 94, 0.3);
+}
 
 /* Konfig-Compare-Modal: Tabellen-Matrix Geraet x Alias */
 .compare-toolbar {

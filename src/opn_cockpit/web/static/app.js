@@ -1157,22 +1157,59 @@
       </svg>`;
       row.appendChild(warn);
     }
+    // Quick-Action-Icons: erscheinen auf Hover. Container damit wir das
+    // ganze Set ueber CSS einblenden koennen.
+    const quickActions = document.createElement('div');
+    quickActions.className = 'card-quick-actions';
+
     const openLink = document.createElement('a');
-    openLink.className = 'card-open-link';
+    openLink.className = 'card-quick-btn';
     openLink.href = `https://${device.host}:${device.port}/`;
     openLink.target = '_blank';
     openLink.title = 'OPNsense-Weboberfläche öffnen';
-    openLink.innerHTML = `<svg width="17" height="17" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    openLink.innerHTML = `<svg width="15" height="15" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
       <path d="M6.5 2H3a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V6.5"/>
       <path d="M8 1.5h3.5V5"/>
       <line x1="6" y1="7" x2="11.5" y2="1.5"/>
     </svg>`;
     openLink.addEventListener('click', (e) => {
-      e.stopPropagation();  // Karte soll nicht das Detail-Modal oeffnen
-      e.preventDefault();   // native Anchor-Navigation abloesen
+      e.stopPropagation();
+      e.preventDefault();
       openWebUrl(`https://${device.host}:${device.port}/`);
     });
-    row.appendChild(openLink);
+    quickActions.appendChild(openLink);
+
+    const fwQuickBtn = document.createElement('button');
+    fwQuickBtn.type = 'button';
+    fwQuickBtn.className = 'card-quick-btn';
+    fwQuickBtn.title = 'Updates suchen';
+    fwQuickBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 6.5A4.5 4.5 0 0 1 2.7 9"/>
+      <polyline points="2.5 11 2.5 9 4.5 9"/>
+      <path d="M2 6.5A4.5 4.5 0 0 1 10.3 4"/>
+      <polyline points="10.5 2 10.5 4 8.5 4"/>
+    </svg>`;
+    fwQuickBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      doFirmwareCheckForDevice(device.id);
+    });
+    quickActions.appendChild(fwQuickBtn);
+
+    const dupQuickBtn = document.createElement('button');
+    dupQuickBtn.type = 'button';
+    dupQuickBtn.className = 'card-quick-btn';
+    dupQuickBtn.title = 'Geraet duplizieren';
+    dupQuickBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1"/>
+      <path d="M2 8.5V2.5a1 1 0 011-1H9"/>
+    </svg>`;
+    dupQuickBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      duplicateDeviceById(device.id);
+    });
+    quickActions.appendChild(dupQuickBtn);
+
+    row.appendChild(quickActions);
     article.appendChild(row);
 
     // Name
@@ -1213,15 +1250,9 @@
       article.appendChild(tagsRow);
     }
 
-    // Stats
-    const stats = document.createElement('div');
-    stats.className = 'card-stats';
-    stats.innerHTML = `
-      <span class="stat"><span class="stat-label">Port</span><span class="stat-value">${device.port}</span></span>
-      <span class="stat"><span class="stat-value ${device.tls_verify ? 'tls-on' : 'tls-off'}">${device.tls_verify ? 'TLS ✓' : 'TLS AUS'}</span></span>
-      <span class="stat"><span class="stat-value">${formatHeartbeatLabel(hb, reachability)}</span></span>
-    `;
-    article.appendChild(stats);
+    // (Stats-Zeile "Port/TLS/Heartbeat-Alter" bewusst entfernt - die Info
+    // ist im Detail-Modal sichtbar, auf der Kachel war sie nur Rauschen.
+    // TLS-Risiko wird weiterhin oben durch das card-warning-badge angezeigt.)
 
     // Firmware-Zeile (nur wenn Daten da sind — sonst leiser Platzhalter
     // damit das Karten-Layout nicht springt wenn die Daten nachgeladen
@@ -2134,7 +2165,48 @@
     $('#device-url-text').textContent = url;
 
     resetDeleteButton();
+    // Default: Info-Tab aktiv beim Oeffnen.
+    switchDeviceTab('info');
     $('#device-modal').hidden = false;
+  }
+
+  function switchDeviceTab(tabName) {
+    document.querySelectorAll('#device-modal-tabs .modal-tab').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.tab === tabName);
+    });
+    document.querySelectorAll('#device-modal [data-tab-pane]').forEach((pane) => {
+      pane.hidden = pane.dataset.tabPane !== tabName;
+    });
+    // Lazy-Load der Tab-Inhalte
+    if (tabName === 'aliases') {
+      loadAliasesTab().catch(() => {});
+    } else if (tabName === 'updates') {
+      renderUpdatesTab();
+    }
+  }
+
+  function renderUpdatesTab() {
+    if (!currentDeviceId) return;
+    const fw = state.firmware[currentDeviceId];
+    const box = $('#device-updates-summary');
+    if (!fw || !fw.version || fw.version === 'unknown') {
+      box.innerHTML = '<div class="form-hint">Noch keine Firmware-Info geladen. Klicke "Erneut pruefen".</div>';
+      return;
+    }
+    const lines = [];
+    lines.push(`<div class="device-updates-summary-title">Installiert: v${fw.version}</div>`);
+    if (fw.update_available) {
+      const target = fw.new_version ? `v${fw.new_version}` : '(neuere Version verfuegbar)';
+      lines.push(`<div class="device-updates-summary-meta">Verfuegbar: ${target}</div>`);
+      lines.push(`<span class="device-updates-summary-badge has-update">Update verfuegbar</span>`);
+    } else {
+      lines.push(`<span class="device-updates-summary-badge up-to-date">Aktuell</span>`);
+    }
+    if (fw.status_msg) {
+      const safe = fw.status_msg.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      lines.push(`<div class="device-updates-summary-meta" style="margin-top:8px;">${safe}</div>`);
+    }
+    box.innerHTML = lines.join('');
   }
 
   function appendDetail(dl, label, value, html) {
@@ -2151,24 +2223,34 @@
     $('#device-modal').hidden = true;
     currentDeviceId = null;
     deleteArmed = false;
+    // Tab-spezifischer State zuruecksetzen damit beim naechsten Open
+    // der frische Stand geladen wird.
+    almLoadedForDeviceId = null;
+    almRawAliases = [];
+    almCurrentDevice = null;
   }
 
-  // -------------------- Alias-Manager (read-only Browse-View) --------------------
+  // -------------------- Aliase als Tab im Device-Modal --------------------
 
   let almRawAliases = [];
   let almCurrentDevice = null;
+  let almLoadedForDeviceId = null;
 
-  async function openAliasManager() {
+  async function loadAliasesTab(force = false) {
     if (!currentDeviceId) return;
     const device = state.devices.find((d) => d.id === currentDeviceId);
     if (!device) return;
+    // Cachen pro Geraet damit Tab-Wechsel nicht jedesmal nachlaedt
+    if (!force && almLoadedForDeviceId === currentDeviceId && almRawAliases.length) {
+      renderAliasManagerList();
+      return;
+    }
     almCurrentDevice = device;
     almRawAliases = [];
-    $('#alm-title').textContent = `Aliase: ${device.name}`;
+    almLoadedForDeviceId = currentDeviceId;
     $('#alm-status').textContent = 'Lade…';
     $('#alm-filter').value = '';
     $('#alm-list').innerHTML = '';
-    $('#aliases-modal').hidden = false;
     try {
       const r = await apiGet(`/api/inventory/devices/${currentDeviceId}/aliases`);
       if (r.status === 401) { handleSessionLost(); return; }
@@ -2184,12 +2266,6 @@
     } catch (err) {
       $('#alm-status').textContent = err.message;
     }
-  }
-
-  function closeAliasManager() {
-    $('#aliases-modal').hidden = true;
-    almRawAliases = [];
-    almCurrentDevice = null;
   }
 
   function renderAliasManagerList() {
@@ -2281,6 +2357,59 @@
     } finally {
       btn.disabled = false;
       if (labelSpan) labelSpan.textContent = originalLabel;
+    }
+  }
+
+  function duplicateDeviceById(deviceId) {
+    // Quick-Action-Variante von doDuplicate: oeffnet direkt das Add-Modal
+    // mit den Werten des Quell-Geraets, ohne den Umweg ueber Device-Modal.
+    const device = state.devices.find((d) => d.id === deviceId);
+    if (!device) return;
+    openAddModal({
+      name: `${device.name} (Kopie)`,
+      host: device.host,
+      port: device.port,
+      tls_verify: device.tls_verify,
+      tags: device.tags,
+      descr: device.descr,
+      duplicateOf: device.name,
+    });
+  }
+
+  async function doFirmwareCheckForDevice(deviceId) {
+    // Quick-Action-Variante von doFirmwareCheck: triggert den OPNsense-
+    // Check ohne Modal-spezifische UI-Updates. Toast zeigt Status.
+    showToast('OPNsense pruefend (bis ~15s)…');
+    try {
+      const response = await apiPost(
+        `/api/inventory/devices/${encodeURIComponent(deviceId)}/firmware-check`,
+      );
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Update-Check fehlgeschlagen (${response.status})`, true);
+        return;
+      }
+      const data = await response.json();
+      state.firmware[data.device_id] = {
+        version: data.version,
+        status: data.status,
+        update_available: data.update_available,
+        new_version: data.new_version || '',
+        status_msg: data.status_msg || '',
+      };
+      renderGrid();
+      if (data.update_available) {
+        showToast(
+          data.new_version
+            ? `Update verfuegbar: v${data.new_version}`
+            : 'Update verfuegbar',
+        );
+      } else {
+        showToast('Aktuell — kein Update verfuegbar.');
+      }
+    } catch (err) {
+      showToast(`Update-Check fehlgeschlagen: ${err.message}`, true);
     }
   }
 
@@ -5152,17 +5281,19 @@
     $('#device-duplicate-btn').addEventListener('click', doDuplicate);
     $('#device-backup-btn').addEventListener('click', doBackupDownload);
     $('#device-update-check-btn').addEventListener('click', doFirmwareCheck);
-    const aliasBtn = $('#device-aliases-btn');
-    if (aliasBtn) aliasBtn.addEventListener('click', openAliasManager);
-    const almClose = $('#alm-close');
-    if (almClose) almClose.addEventListener('click', closeAliasManager);
-    const almCancel = $('#alm-cancel');
-    if (almCancel) almCancel.addEventListener('click', closeAliasManager);
+    // Aliase-Tab im Device-Modal: Filter-Input
     const almFilter = $('#alm-filter');
     if (almFilter) almFilter.addEventListener('input', renderAliasManagerList);
-    const almModal = $('#aliases-modal');
-    if (almModal) almModal.addEventListener('click', (e) => {
-      if (e.target.id === 'aliases-modal') closeAliasManager();
+    // Device-Modal Tab-Switching
+    document.querySelectorAll('#device-modal-tabs .modal-tab').forEach((btn) => {
+      btn.addEventListener('click', () => switchDeviceTab(btn.dataset.tab));
+    });
+    // Updates-Tab: "Erneut pruefen"-Button triggert vorhandenen Check
+    const updRecheck = $('#device-updates-recheck-btn');
+    if (updRecheck) updRecheck.addEventListener('click', async () => {
+      if (!currentDeviceId) return;
+      await doFirmwareCheckForDevice(currentDeviceId);
+      renderUpdatesTab();
     });
     $('#device-url-copy').addEventListener('click', doCopyUrl);
     $('#device-modal').addEventListener('click', (e) => {
