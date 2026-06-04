@@ -1,6 +1,6 @@
 [project]
 name = "opn-cockpit"
-version = "0.6.3.dev0"
+version = "0.7.0.dev0"
 description = "Multi-Site OPNsense-Management — Windows-Single-User, Windows-Multi-User-Server, Linux/Proxmox-Server. REST-API-basiert."
 readme = "README.md"
 requires-python = ">=3.11"
