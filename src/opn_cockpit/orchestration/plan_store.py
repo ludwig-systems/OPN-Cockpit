@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from opn_cockpit.core.objects.base import Diff, DiffKind
+from opn_cockpit.core.objects.base import ActionKind, Diff, DiffKind
 from opn_cockpit.core.result import (
     Phase,
     Result,
@@ -157,6 +157,7 @@ def _plan_to_dict(plan: Plan) -> dict[str, Any]:
     return {
         "plan_id": plan.plan_id,
         "action": plan.action,
+        "action_kind": str(plan.action_kind),
         "subsystem": plan.subsystem,
         "created_at_utc": plan.created_at_utc,
         "actions": [_action_to_dict(a, binding.adapter) for a in plan.actions],
@@ -208,12 +209,18 @@ def _plan_from_dict(raw: dict[str, Any]) -> Plan:
             continue
         actions.append(_action_from_dict(a, binding.adapter))
 
+    # action_kind default ADD haelt Pre-0.8-Plaene lesbar.
+    try:
+        action_kind = ActionKind(str(raw.get("action_kind", "add")))
+    except ValueError:
+        action_kind = ActionKind.ADD
     return Plan(
         plan_id=str(raw.get("plan_id", "")),
         action=str(raw.get("action", "")),
         subsystem=subsystem,
         created_at_utc=str(raw.get("created_at_utc", "")),
         actions=tuple(actions),
+        action_kind=action_kind,
     )
 
 

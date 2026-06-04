@@ -16,6 +16,8 @@ from __future__ import annotations
 
 ROUTES_ADD = "/api/routes/routes/addroute"
 ROUTES_SEARCH = "/api/routes/routes/searchroute"
+ROUTES_GET = "/api/routes/routes/getroute/{uuid}"
+ROUTES_SET = "/api/routes/routes/setroute/{uuid}"
 ROUTES_DEL = "/api/routes/routes/delroute/{uuid}"
 ROUTES_RECONFIGURE = "/api/routes/routes/reconfigure"
 
@@ -27,7 +29,19 @@ ALIAS_ADD = "/api/firewall/alias/addItem"
 ALIAS_SEARCH = "/api/firewall/alias/searchItem"
 ALIAS_GET = "/api/firewall/alias/getItem/{uuid}"
 ALIAS_SET = "/api/firewall/alias/setItem/{uuid}"
+ALIAS_DEL = "/api/firewall/alias/delItem/{uuid}"
 ALIAS_RECONFIGURE = "/api/firewall/alias/reconfigure"
+
+# ---------------------------------------------------------------------------
+# Firewall-Regeln (os-firewall Plugin, Standard ab OPNsense 24+)
+# ---------------------------------------------------------------------------
+
+RULE_ADD = "/api/firewall/filter/addRule"
+RULE_SEARCH = "/api/firewall/filter/searchRule"
+RULE_GET = "/api/firewall/filter/getRule/{uuid}"
+RULE_SET = "/api/firewall/filter/setRule/{uuid}"
+RULE_DEL = "/api/firewall/filter/delRule/{uuid}"
+RULE_APPLY = "/api/firewall/filter/apply"
 
 # ---------------------------------------------------------------------------
 # Discovery (v1.1)

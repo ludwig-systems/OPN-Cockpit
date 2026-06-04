@@ -623,6 +623,8 @@
           <button class="modal-tab" data-tab="updates" role="tab">Updates</button>
           <button class="modal-tab" data-tab="backups" role="tab">Backups</button>
           <button class="modal-tab" data-tab="aliases" role="tab">Aliase</button>
+          <button class="modal-tab" data-tab="routes" role="tab">Routen</button>
+          <button class="modal-tab" data-tab="rules" role="tab">Regeln</button>
         </div>
 
         <div class="modal-body">
@@ -746,12 +748,169 @@
             <div class="alm-list" id="alm-list"></div>
           </div>
 
+          <!-- Tab: Routen -->
+          <div class="modal-tab-pane" data-tab-pane="routes" role="tabpanel" hidden>
+            <div class="alm-toolbar">
+              <input id="rtm-filter" class="form-input" type="search"
+                     placeholder="Filter (Netz, Gateway oder Beschreibung)..." autocomplete="off" />
+              <div class="alm-status" id="rtm-status">—</div>
+            </div>
+            <div class="alm-list" id="rtm-list"></div>
+          </div>
+
+          <!-- Tab: Regeln (Firewall-Filter) -->
+          <div class="modal-tab-pane" data-tab-pane="rules" role="tabpanel" hidden>
+            <div class="alm-toolbar">
+              <input id="frm-filter" class="form-input" type="search"
+                     placeholder="Filter (Beschreibung, Interface, Action)..." autocomplete="off" />
+              <div class="alm-status" id="frm-status">—</div>
+            </div>
+            <div class="form-row" style="margin-bottom:12px;">
+              <button class="btn-secondary action-row-btn" id="frm-add-btn">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="6.5" y1="2" x2="6.5" y2="11"/>
+                  <line x1="2" y1="6.5" x2="11" y2="6.5"/>
+                </svg>
+                <span>Neue Regel</span>
+              </button>
+            </div>
+            <div class="alm-list" id="frm-list"></div>
+          </div>
+
           <div class="form-error" id="device-modal-error" hidden></div>
         </div>
 
         <div class="modal-footer">
           <button class="btn-link" id="device-modal-cancel">Schließen</button>
           <button class="btn-danger" id="device-modal-delete">Gerät löschen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Firewall-Regel (Add / Edit) ================ -->
+    <div class="modal-backdrop" id="rule-modal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title">
+        <div class="modal-header">
+          <h2 id="rule-modal-title">Filter-Regel</h2>
+          <button class="icon-btn modal-close" id="rule-modal-close" aria-label="Schließen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-hint" id="rule-modal-hint" style="margin-bottom:12px;">
+            Diese Regel wird ueber den Cockpit-Plan/Apply-Flow ausgerollt
+            (Pre-Apply-Backup + Audit kommen automatisch dazu).
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-checkbox">
+                <input type="checkbox" id="rl-enabled" checked />
+                <span>Aktiv</span>
+              </label>
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="rl-action">Action</label>
+              <select id="rl-action" class="form-input">
+                <option value="pass">pass</option>
+                <option value="block">block</option>
+                <option value="reject">reject</option>
+              </select>
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="rl-direction">Richtung</label>
+              <select id="rl-direction" class="form-input">
+                <option value="in">in</option>
+                <option value="out">out</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="rl-interface">Interface</label>
+              <input id="rl-interface" class="form-input" type="text" placeholder="lan, opt1, ..." />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="rl-ipprotocol">IP-Version</label>
+              <select id="rl-ipprotocol" class="form-input">
+                <option value="inet">IPv4 (inet)</option>
+                <option value="inet6">IPv6 (inet6)</option>
+              </select>
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="rl-protocol">Protokoll</label>
+              <select id="rl-protocol" class="form-input">
+                <option value="any">any</option>
+                <option value="tcp">tcp</option>
+                <option value="udp">udp</option>
+                <option value="tcp/udp">tcp/udp</option>
+                <option value="icmp">icmp</option>
+                <option value="esp">esp</option>
+                <option value="ah">ah</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="rl-src-net">Quelle (Netz/Alias/any)</label>
+              <input id="rl-src-net" class="form-input" type="text" value="any" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="rl-src-port">Quell-Port</label>
+              <input id="rl-src-port" class="form-input" type="text" placeholder="leer = any" />
+            </div>
+            <div class="form-col">
+              <label class="form-checkbox" style="margin-top:24px;">
+                <input type="checkbox" id="rl-src-not" />
+                <span>Quelle invertieren</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="rl-dst-net">Ziel (Netz/Alias/any)</label>
+              <input id="rl-dst-net" class="form-input" type="text" value="any" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="rl-dst-port">Ziel-Port</label>
+              <input id="rl-dst-port" class="form-input" type="text" placeholder="leer = any" />
+            </div>
+            <div class="form-col">
+              <label class="form-checkbox" style="margin-top:24px;">
+                <input type="checkbox" id="rl-dst-not" />
+                <span>Ziel invertieren</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="rl-gateway">Gateway (optional)</label>
+              <input id="rl-gateway" class="form-input" type="text" placeholder="z. B. WAN_GW" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="rl-sequence">Sequenz (optional)</label>
+              <input id="rl-sequence" class="form-input" type="number" min="1" placeholder="leer = OPNsense-Default" />
+            </div>
+            <div class="form-col">
+              <label class="form-checkbox" style="margin-top:24px;">
+                <input type="checkbox" id="rl-log" />
+                <span>Log aktivieren</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="rl-descr">Beschreibung</label>
+              <input id="rl-descr" class="form-input" type="text" placeholder="Kurztext fuer Audit + UI" />
+            </div>
+          </div>
+          <div class="form-error" id="rule-modal-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="rule-modal-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="rule-modal-confirm">Plan erzeugen</button>
         </div>
       </div>
     </div>

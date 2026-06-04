@@ -30,8 +30,10 @@ from opn_cockpit.core.errors import (
 )
 from opn_cockpit.core.objects._endpoints import (
     ROUTES_ADD,
+    ROUTES_DEL,
     ROUTES_RECONFIGURE,
     ROUTES_SEARCH,
+    ROUTES_SET,
 )
 from opn_cockpit.core.objects.base import (
     AddOutcome,
@@ -98,6 +100,46 @@ def _normalize_cidr(value: str | None) -> str | None:
         return str(ipaddress.ip_network(value.strip(), strict=False))
     except ValueError:
         return None
+
+
+def _raise_if_saved_failed(response: Any, path: str, ctx: RequestContext) -> None:
+    """OPNsense kann mit 200 OK + ``{"result":"failed"}`` antworten - das ist
+    kein Erfolg. Im Failed-Fall wirft die Funktion einen ApiError mit den
+    Validierungs-Details aus dem Body.
+
+    Wird von add/update/delete verwendet damit die Save-Erkennung in einer
+    Stelle steht.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return
+    if not isinstance(body, dict):
+        return
+    result = body.get("result")
+    if not isinstance(result, str) or result.lower() not in {"failed", "error"}:
+        return
+    validations = body.get("validations")
+    detail = ""
+    if isinstance(validations, dict) and validations:
+        detail = "; ".join(
+            f"{k}: {v}" for k, v in validations.items() if v
+        )
+    msg = (
+        f"OPNsense lehnte den Schreibvorgang ab "
+        f"(result='{result}'{(': ' + detail) if detail else ''})."
+    )
+    raise ApiError(
+        msg,
+        context=make_context(
+            host=ctx.target.host,
+            port=ctx.target.port,
+            method="POST",
+            path=path,
+            error_kind="opnsense_save_failed",
+            summary=f"OPNsense lehnte ab: {detail}" if detail else msg,
+        ),
+    )
 
 
 def _row_to_spec(row: dict[str, Any]) -> RouteSpec:
@@ -260,6 +302,164 @@ class RouteAdapter:
             if isinstance(candidate, str) and candidate:
                 uuid = candidate
         return AddOutcome(uuid=uuid, raw_status=response.status_code)
+
+    def update(
+        self,
+        client: HttpClient,
+        ctx: RequestContext,
+        spec: RouteSpec,
+    ) -> AddOutcome:
+        """Modifiziert eine bestehende Route (setroute/{uuid}).
+
+        Identitaet aus ``spec`` (network + gateway) - der Adapter sucht
+        die UUID dazu, schickt dann ``setroute``. Wenn die Route nicht
+        existiert: ValidationError.
+        """
+        parse_cidr(spec.network)
+        validate_gateway_name(spec.gateway)
+        existing_uuid = self._search_uuid(client, ctx, spec.to_identity())
+        if existing_uuid is None:
+            raise ValidationError(
+                f"Route {spec.network} via {spec.gateway} existiert nicht - "
+                "Update nicht moeglich.",
+                context=make_context(
+                    host=ctx.target.host,
+                    port=ctx.target.port,
+                    method="POST",
+                    path=ROUTES_SEARCH,
+                    error_kind="route_not_found",
+                ),
+            )
+        payload = {"route": self.to_payload(spec)}
+        set_path = ROUTES_SET.format(uuid=existing_uuid)
+        response = client.call(
+            ctx.target, ctx.key, ctx.secret,
+            "POST", set_path,
+            json=payload,
+        )
+        _raise_if_saved_failed(response, set_path, ctx)
+        return AddOutcome(uuid=existing_uuid, raw_status=response.status_code)
+
+    def delete(
+        self,
+        client: HttpClient,
+        ctx: RequestContext,
+        ident: RouteIdentity,
+    ) -> AddOutcome:
+        """Loescht eine bestehende Route (delroute/{uuid}).
+
+        Idempotent: wenn die Route schon weg ist, gibt's einen leeren
+        AddOutcome zurueck - Planner sollte das ohnehin als SKIP gemeldet
+        haben, das hier ist die Defense-Line.
+        """
+        existing_uuid = self._search_uuid(client, ctx, ident)
+        if existing_uuid is None:
+            return AddOutcome(uuid=None, raw_status=0)
+        del_path = ROUTES_DEL.format(uuid=existing_uuid)
+        response = client.call(
+            ctx.target, ctx.key, ctx.secret,
+            "POST", del_path,
+            json={},
+        )
+        _raise_if_saved_failed(response, del_path, ctx)
+        return AddOutcome(uuid=existing_uuid, raw_status=response.status_code)
+
+    def diff_for_update(
+        self,
+        current: RouteSpec | None,
+        target_spec: RouteSpec,
+    ) -> Diff:
+        if current is None:
+            return Diff(
+                kind=DiffKind.NEW,
+                summary=(
+                    f"Route {target_spec.network} via {target_spec.gateway} "
+                    "existiert nicht - Update wird beim Apply fehlschlagen."
+                ),
+            )
+        same_descr = (current.descr or "") == (target_spec.descr or "")
+        same_disabled = current.disabled == target_spec.disabled
+        if same_descr and same_disabled:
+            return Diff(
+                kind=DiffKind.SKIP,
+                summary=(
+                    f"Route {target_spec.network} via {target_spec.gateway} "
+                    "bereits identisch - uebersprungen."
+                ),
+            )
+        changes = []
+        if not same_disabled:
+            changes.append(
+                "aktivieren" if not target_spec.disabled else "deaktivieren",
+            )
+        if not same_descr:
+            changes.append("Beschreibung geaendert")
+        return Diff(
+            kind=DiffKind.UPDATE,
+            summary=(
+                f"Route {target_spec.network} via {target_spec.gateway} "
+                f"aktualisieren ({', '.join(changes)})"
+            ),
+        )
+
+    def diff_for_delete(
+        self,
+        current: RouteSpec | None,
+        ident: RouteIdentity,
+    ) -> Diff:
+        if current is None:
+            return Diff(
+                kind=DiffKind.SKIP,
+                summary=(
+                    f"Route {ident.network} via {ident.gateway} existiert "
+                    "nicht - bereits weg."
+                ),
+            )
+        return Diff(
+            kind=DiffKind.DELETE,
+            summary=(
+                f"Route {ident.network} via {ident.gateway} wird geloescht"
+            ),
+        )
+
+    def _search_uuid(
+        self,
+        client: HttpClient,
+        ctx: RequestContext,
+        ident: RouteIdentity,
+    ) -> str | None:
+        """Liefert die OPNsense-UUID einer bestehenden Route oder None.
+
+        Sucht ueber den searchroute-Endpoint und matched per
+        CIDR-normalisiertem Netz + Gateway-Name. Wird von update/delete
+        gerufen - exists liefert nur den Spec, nicht die UUID.
+        """
+        response = client.call(
+            ctx.target, ctx.key, ctx.secret,
+            "POST", ROUTES_SEARCH,
+            json={"current": 1, "rowCount": -1},
+        )
+        try:
+            data: Any = response.json()
+        except ValueError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        rows = data.get("rows")
+        if not isinstance(rows, list):
+            return None
+        ident_net = _normalize_cidr(ident.network)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if _normalize_cidr(row.get("network")) != ident_net:
+                continue
+            if str(row.get("gateway", "")) != ident.gateway:
+                continue
+            uuid = row.get("uuid")
+            if isinstance(uuid, str) and uuid:
+                return uuid
+        return None
 
     def verify(
         self,

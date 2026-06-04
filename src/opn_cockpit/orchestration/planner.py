@@ -27,6 +27,7 @@ from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.core.errors import OpnCockpitError
 from opn_cockpit.core.http_client import HttpClient, HttpTarget
 from opn_cockpit.core.objects.base import (
+    ActionKind,
     Diff,
     DiffKind,
     ObjectAdapter,
@@ -64,6 +65,10 @@ class Plan:
     Enthält die Plan-ID (für ``apply <id>``), den Aktionsnamen, das
     Subsystem und die per-Gerät-Aktionen. ``created_at_utc`` dient nur
     der Anzeige und Audit-Korrelation.
+
+    ``action_kind`` entscheidet, welche Adapter-Method der Executor pro
+    Action ruft: ADD -> ``add``, UPDATE -> ``update``, DELETE -> ``delete``.
+    Default ADD haelt aeltere persistierte Plaene rueckwaerts-kompatibel.
     """
 
     plan_id: str
@@ -71,6 +76,7 @@ class Plan:
     subsystem: str
     created_at_utc: str
     actions: tuple[PlannedDeviceAction, ...] = field(default_factory=tuple)
+    action_kind: ActionKind = ActionKind.ADD
 
     @property
     def target_count(self) -> int:
@@ -131,6 +137,7 @@ class Planner:
         devices: Iterable[Device],
         adapter: ObjectAdapter[Any, Any],
         client: HttpClient,
+        action_kind: ActionKind = ActionKind.ADD,
     ) -> Plan:
         """Erzeugt einen Plan für ``action`` über ``devices`` (eine Spec).
 
@@ -138,7 +145,7 @@ class Planner:
         """
         return self.create_bulk_plan(
             action=action, specs=[spec], devices=devices,
-            adapter=adapter, client=client,
+            adapter=adapter, client=client, action_kind=action_kind,
         )
 
     def create_bulk_plan(
@@ -149,6 +156,7 @@ class Planner:
         devices: Iterable[Device],
         adapter: ObjectAdapter[Any, Any],
         client: HttpClient,
+        action_kind: ActionKind = ActionKind.ADD,
     ) -> Plan:
         """Erzeugt einen Plan über N Specs x M Geräte.
 
@@ -164,7 +172,9 @@ class Planner:
         all_planned: list[PlannedDeviceAction] = []
         for spec in specs:
             all_planned.extend(
-                self._plan_per_device(devices_list, spec, adapter, client)
+                self._plan_per_device(
+                    devices_list, spec, adapter, client, action_kind,
+                ),
             )
 
         plan = Plan(
@@ -173,6 +183,7 @@ class Planner:
             subsystem=adapter.subsystem,
             created_at_utc=created_at,
             actions=tuple(all_planned),
+            action_kind=action_kind,
         )
 
         masked_specs = [adapter.spec_to_dict(spec) for spec in specs]
@@ -197,13 +208,16 @@ class Planner:
         spec: Any,
         adapter: ObjectAdapter[Any, Any],
         client: HttpClient,
+        action_kind: ActionKind,
     ) -> list[PlannedDeviceAction]:
         if not devices:
             return []
         workers = min(self.max_workers, len(devices))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
-                pool.submit(self._plan_one, device, spec, adapter, client)
+                pool.submit(
+                    self._plan_one, device, spec, adapter, client, action_kind,
+                )
                 for device in devices
             ]
             return [future.result() for future in futures]
@@ -214,6 +228,7 @@ class Planner:
         spec: Any,
         adapter: ObjectAdapter[Any, Any],
         client: HttpClient,
+        action_kind: ActionKind,
     ) -> PlannedDeviceAction:
         target = HttpTarget(
             host=device.host,
@@ -231,15 +246,21 @@ class Planner:
                 summary=f"Pre-Check übersprungen: {exc.context.summary or exc.context.error_kind}",
             )
         ctx = RequestContext(target=target, key=key, secret=secret)
+        ident = adapter.identity(spec)
         try:
-            current_state = adapter.exists(client, ctx, adapter.identity(spec))
+            current_state = adapter.exists(client, ctx, ident)
         except OpnCockpitError as exc:
             reason = exc.context.summary or exc.context.error_kind
             return _failed_plan_action(
                 device, spec, adapter,
                 summary=f"Pre-Check fehlgeschlagen: {reason}",
             )
-        diff = adapter.diff(current_state, spec)
+        if action_kind is ActionKind.UPDATE:
+            diff = adapter.diff_for_update(current_state, spec)
+        elif action_kind is ActionKind.DELETE:
+            diff = adapter.diff_for_delete(current_state, ident)
+        else:
+            diff = adapter.diff(current_state, spec)
         payload_masked = mask_dict(adapter.to_payload(spec))
         return PlannedDeviceAction(
             device=device,

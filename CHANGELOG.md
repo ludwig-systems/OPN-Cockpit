@@ -2,6 +2,75 @@
 
 Alle nennenswerten Änderungen pro Release.
 
+## v0.8.0 — in Arbeit — CRUD-Erweiterung
+
+### Firewall-Rules CRUD (Erst-Iteration)
+
+- Neues Subsystem ``firewall_rules`` mit ``RuleAdapter`` +
+  ``RulesController``. Identity = OPNsense-UUID (Rules haben keinen
+  stabilen User-Schluessel - die UI uebergibt die UUID aus der
+  Live-Liste). ``RuleSpec`` deckt die haeufigsten Felder ab: enabled,
+  action, interface, direction, ipprotocol, protocol, source_net/port/not,
+  destination_net/port/not, gateway, log, description, sequence.
+- **Regeln-Tab im Device-Modal**: Live-Liste aller Filter-Regeln via
+  OPNsense-``searchRule`` mit Filter + **Neue Regel** /
+  **Bearbeiten** / **Loeschen**. Edit oeffnet ein dediziertes
+  Rule-Modal (modal-card-wide), Submit erzeugt einen Plan und springt
+  in die Preview.
+- Neue Endpoints:
+  ``GET /api/inventory/devices/{id}/firewall-rules``,
+  ``POST /api/plans/rule``, ``POST /api/plans/rule-update``,
+  ``POST /api/plans/rule-delete``.
+- **Voraussetzung**: ``os-firewall``-Plugin auf der OPNsense
+  (in 24+/26+ Standard). Bei fehlendem Plugin liefert der List-
+  Endpoint ``reachable=false`` mit Hinweis statt 500.
+
+### Route-CRUD vollstaendig
+
+- **Routen-Tab** im Device-Modal: integrierte Liste aller statischen
+  Routen pro Geraet (gezogen ueber den OPNsense-``searchroute``-Endpoint),
+  jeweils mit **Bearbeiten**- und **Loeschen**-Button. Bearbeiten oeffnet
+  das Plan-Modal mit vorbefuelltem Routen-Formular und gesperrter
+  Identitaet (network + gateway); Loeschen geht ueber ein Confirm-Dialog
+  in den Delete-Plan-Flow.
+- ``RouteAdapter`` hat jetzt echte ``update``- und ``delete``-Impls
+  (setroute/{uuid} bzw. delroute/{uuid}) plus ``diff_for_update`` und
+  ``diff_for_delete``. ``_search_uuid``-Helper findet die Routen-UUID
+  via CIDR-normalisiertem Vergleich.
+- Neuer Save-Failed-Helper ``_raise_if_saved_failed`` zieht das frueher
+  in ``add`` inline geprueften ``result=failed``-Pattern in einen
+  gemeinsamen Helper (von add/update/delete genutzt).
+- Neue Endpoints ``GET /api/inventory/devices/{id}/routes``,
+  ``POST /api/plans/route-update`` und ``POST /api/plans/route-delete``.
+
+### Alias-CRUD vollstaendig
+
+- **Alias bearbeiten**: Im Device-Modal → Aliase-Tab steht pro Alias jetzt
+  ein **Bearbeiten**-Button. Oeffnet das Plan-Modal mit den aktuellen
+  Werten vorbefuellt; Submit erzeugt einen ``update_alias``-Plan und
+  landet direkt im Preview. Pre-Apply-Backup + Audit + Post-Apply-
+  Baseline kommen automatisch mit (gleicher Flow wie Add).
+- **Alias loeschen**: Pro Alias ein **Loeschen**-Button mit Confirm.
+  Bei Bestaetigung erzeugt Cockpit einen ``delete_alias``-Plan und
+  navigiert in die Preview. Idempotent: Geraete ohne den Alias werden
+  als SKIP gefuehrt.
+- Neue Endpoints ``POST /api/plans/alias-update`` und
+  ``POST /api/plans/alias-delete``. Verb ``update_alias`` /
+  ``delete_alias`` taucht im Audit + Plan-Listen-Filter auf.
+
+### Architektur
+
+- ``ObjectAdapter``-Protocol um ``update``, ``delete``, ``diff_for_update``,
+  ``diff_for_delete`` erweitert. ``DiffKind.DELETE`` ergaenzt.
+- ``Plan`` traegt jetzt ``action_kind`` (``ActionKind.ADD|UPDATE|DELETE``).
+  Executor switcht die Adapter-Method anhand des Kind; Verify-Erwartung
+  invertiert bei DELETE (found=False == Erfolg). Default ADD haelt
+  pre-0.8-Plaene rueckwaerts-kompatibel.
+- ``RouteAdapter`` hat Stub-Methoden fuer Update/Delete mit
+  ``NotImplementedError`` - Route-CRUD ist die naechste Iteration.
+
+---
+
 ## v0.7.0 — 2026-06-03 — Safety-Nets, Multi-Site-Tools, Windowless-Install
 
 Großer Funktions-Schub rund um die Themen "ich will sehen was passiert

@@ -2180,6 +2180,10 @@
     // Lazy-Load der Tab-Inhalte
     if (tabName === 'aliases') {
       loadAliasesTab().catch(() => {});
+    } else if (tabName === 'routes') {
+      loadRoutesTab().catch(() => {});
+    } else if (tabName === 'rules') {
+      loadRulesTab().catch(() => {});
     } else if (tabName === 'updates') {
       renderUpdatesTab();
     } else if (tabName === 'backups') {
@@ -2319,21 +2323,517 @@
       }
       const actions = document.createElement('div');
       actions.className = 'alm-actions';
-      // Deep-Link zur OPNsense-Alias-Seite. URL-Pfade fuer Alias-Edit
-      // sind /ui/firewall/alias bzw. /firewall_aliases.php je nach Release.
-      // Wir nehmen das aktuelle UI-Path; der Hash filtert per Name nicht
-      // direkt, der User sieht die Alias-Tabelle und klickt manuell rein.
+      // Edit + Delete laufen ueber das Cockpit-Plan/Apply-Framework
+      // (Pre-Apply-Backup + Audit + Drift-Baseline kommen automatisch dazu).
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn-secondary';
+      editBtn.textContent = 'Bearbeiten';
+      editBtn.addEventListener('click', () => openAliasEditFromManager(a));
+      actions.appendChild(editBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn-danger';
+      delBtn.textContent = 'Loeschen';
+      delBtn.addEventListener('click', () => openAliasDeleteFromManager(a));
+      actions.appendChild(delBtn);
+
+      // Sekundaerer Deep-Link in die OPNsense (z. B. fuer Features die
+      // Cockpit nicht abdeckt).
       if (almCurrentDevice) {
         const editLink = document.createElement('a');
         editLink.className = 'btn-link';
         editLink.target = '_blank';
         editLink.rel = 'noopener';
         editLink.href = `https://${almCurrentDevice.host}:${almCurrentDevice.port}/ui/firewall/alias`;
-        editLink.textContent = 'In OPNsense bearbeiten →';
+        editLink.textContent = 'In OPNsense oeffnen';
         actions.appendChild(editLink);
       }
       row.appendChild(actions);
       list.appendChild(row);
+    }
+  }
+
+  function openAliasEditFromManager(alias) {
+    // Plan-Modal als Alias-Edit oeffnen: Felder mit dem aktuellen Stand
+    // vorbefuellen, Selektion auf das aktuelle Geraet einschraenken,
+    // Submit landet auf /api/plans/alias-update. Device-Modal schliessen
+    // damit nicht zwei Modale uebereinander liegen.
+    if (!currentDeviceId) return;
+    const targetDeviceId = currentDeviceId;
+    closeDeviceModal();
+    state.selectedDeviceIds.clear();
+    state.selectedDeviceIds.add(targetDeviceId);
+    renderGrid();
+    planMode = 'alias-update';
+    planPhase = 'input';
+    currentPlan = null;
+    resetPlanInputs();
+    showPlanFieldSet('alias');
+    renderPlanSelectionSummary();
+    showPlanPhase('input');
+    // Felder mit dem aktuellen Stand des Alias vorbelegen
+    $('#pl-alias-name').value = alias.name || '';
+    if ($('#pl-alias-type')) $('#pl-alias-type').value = alias.type || 'host';
+    $('#pl-alias-content').value = (alias.content || []).join(', ');
+    $('#pl-alias-descr').value = alias.description || '';
+    const merge = $('#pl-alias-merge');
+    if (merge) {
+      merge.checked = false;
+      // Update ersetzt komplett - merge-Mode irrefuehrend, deshalb verstecken
+      const mergeRow = merge.closest('.form-row, .form-col, .form-checkbox');
+      if (mergeRow) mergeRow.style.display = 'none';
+    }
+    $('#plan-modal-title').textContent = `Alias "${alias.name}" bearbeiten`;
+    $('#plan-modal-error').hidden = true;
+    $('#plan-preview-error').hidden = true;
+    $('#plan-modal').hidden = false;
+    setTimeout(() => $('#pl-alias-content').focus(), 0);
+  }
+
+  async function openAliasDeleteFromManager(alias) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    const devName = device ? device.name : currentDeviceId;
+    const ok = window.confirm(
+      `Alias "${alias.name}" wirklich auf ${devName} loeschen?\n\n`
+      + `Pre-Apply-Backup wird gezogen; ein Rollback ist via Backup-Tab moeglich.`,
+    );
+    if (!ok) return;
+    try {
+      const r = await apiPost('/api/plans/alias-delete', {
+        name: alias.name,
+        target_device_ids: [currentDeviceId],
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${r.status}`, true);
+        return;
+      }
+      const plan = await r.json();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  // -------------------- Routen-Tab im Device-Modal --------------------
+
+  let rtmRawRoutes = [];
+  let rtmLoadedForDeviceId = null;
+
+  async function loadRoutesTab(force = false) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    if (!device) return;
+    if (!force && rtmLoadedForDeviceId === currentDeviceId && rtmRawRoutes.length) {
+      renderRoutesList();
+      return;
+    }
+    rtmRawRoutes = [];
+    rtmLoadedForDeviceId = currentDeviceId;
+    $('#rtm-status').textContent = 'Lade…';
+    $('#rtm-filter').value = '';
+    $('#rtm-list').innerHTML = '';
+    try {
+      const r = await apiGet(`/api/inventory/devices/${currentDeviceId}/routes`);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        $('#rtm-status').textContent = body.detail || `Fehler ${r.status}`;
+        return;
+      }
+      const data = await r.json();
+      rtmRawRoutes = data.routes || [];
+      $('#rtm-status').textContent = data.summary;
+      renderRoutesList();
+    } catch (err) {
+      $('#rtm-status').textContent = err.message;
+    }
+  }
+
+  function renderRoutesList() {
+    const list = $('#rtm-list');
+    list.innerHTML = '';
+    const filter = ($('#rtm-filter').value || '').trim().toLowerCase();
+    const matching = filter
+      ? rtmRawRoutes.filter((r) =>
+          r.network.toLowerCase().includes(filter)
+          || r.gateway.toLowerCase().includes(filter)
+          || (r.descr || '').toLowerCase().includes(filter))
+      : rtmRawRoutes;
+    if (matching.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.padding = '24px';
+      empty.style.textAlign = 'center';
+      empty.style.color = 'var(--text-subtle)';
+      empty.textContent = filter
+        ? 'Kein Treffer fuer den Filter.'
+        : 'Keine statischen Routen auf diesem Geraet.';
+      list.appendChild(empty);
+      return;
+    }
+    for (const r of matching) {
+      const row = document.createElement('div');
+      row.className = 'alm-row';
+      const head = document.createElement('div');
+      head.className = 'alm-row-head';
+      const name = document.createElement('span');
+      name.className = 'alm-name';
+      name.textContent = r.network;
+      const meta = document.createElement('span');
+      meta.className = 'alm-meta';
+      meta.textContent = `via ${r.gateway}${r.disabled ? ' · deaktiviert' : ''}`;
+      head.appendChild(name);
+      head.appendChild(meta);
+      row.appendChild(head);
+      if (r.descr) {
+        const descr = document.createElement('div');
+        descr.className = 'alm-descr';
+        descr.textContent = r.descr;
+        row.appendChild(descr);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'alm-actions';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn-secondary';
+      editBtn.textContent = 'Bearbeiten';
+      editBtn.addEventListener('click', () => openRouteEditFromManager(r));
+      actions.appendChild(editBtn);
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn-danger';
+      delBtn.textContent = 'Loeschen';
+      delBtn.addEventListener('click', () => openRouteDeleteFromManager(r));
+      actions.appendChild(delBtn);
+      row.appendChild(actions);
+      list.appendChild(row);
+    }
+  }
+
+  function openRouteEditFromManager(route) {
+    if (!currentDeviceId) return;
+    const targetDeviceId = currentDeviceId;
+    closeDeviceModal();
+    state.selectedDeviceIds.clear();
+    state.selectedDeviceIds.add(targetDeviceId);
+    renderGrid();
+    planMode = 'route-update';
+    planPhase = 'input';
+    currentPlan = null;
+    resetPlanInputs();
+    showPlanFieldSet('route');
+    renderPlanSelectionSummary();
+    showPlanPhase('input');
+    $('#pl-route-network').value = route.network || '';
+    $('#pl-route-gateway').value = route.gateway || '';
+    $('#pl-route-descr').value = route.descr || '';
+    $('#pl-route-disabled').checked = !!route.disabled;
+    // Identitaet (network + gateway) bleibt bei Update unveraendert -
+    // im UI deaktivieren damit es klar ist.
+    $('#pl-route-network').readOnly = true;
+    $('#pl-route-gateway').readOnly = true;
+    $('#plan-modal-title').textContent =
+      `Route ${route.network} via ${route.gateway} bearbeiten`;
+    $('#plan-modal-error').hidden = true;
+    $('#plan-preview-error').hidden = true;
+    $('#plan-modal').hidden = false;
+    setTimeout(() => $('#pl-route-descr').focus(), 0);
+  }
+
+  // -------------------- Regeln-Tab im Device-Modal (Firewall-Filter) --------------------
+
+  let frmRawRules = [];
+  let frmLoadedForDeviceId = null;
+  // Mode: 'add' | 'update'. UUID nur bei update gesetzt.
+  let frmEditMode = 'add';
+  let frmEditUuid = '';
+  let frmTargetDeviceId = '';
+
+  async function loadRulesTab(force = false) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    if (!device) return;
+    if (!force && frmLoadedForDeviceId === currentDeviceId && frmRawRules.length) {
+      renderRulesList();
+      return;
+    }
+    frmRawRules = [];
+    frmLoadedForDeviceId = currentDeviceId;
+    $('#frm-status').textContent = 'Lade…';
+    $('#frm-filter').value = '';
+    $('#frm-list').innerHTML = '';
+    try {
+      const r = await apiGet(`/api/inventory/devices/${currentDeviceId}/firewall-rules`);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        $('#frm-status').textContent = body.detail || `Fehler ${r.status}`;
+        return;
+      }
+      const data = await r.json();
+      frmRawRules = data.rules || [];
+      $('#frm-status').textContent = data.summary;
+      renderRulesList();
+    } catch (err) {
+      $('#frm-status').textContent = err.message;
+    }
+  }
+
+  function renderRulesList() {
+    const list = $('#frm-list');
+    list.innerHTML = '';
+    const filter = ($('#frm-filter').value || '').trim().toLowerCase();
+    const matching = filter
+      ? frmRawRules.filter((r) =>
+          (r.description || '').toLowerCase().includes(filter)
+          || (r.interface || '').toLowerCase().includes(filter)
+          || (r.action || '').toLowerCase().includes(filter)
+          || (r.source_net || '').toLowerCase().includes(filter)
+          || (r.destination_net || '').toLowerCase().includes(filter))
+      : frmRawRules;
+    if (matching.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.padding = '24px';
+      empty.style.textAlign = 'center';
+      empty.style.color = 'var(--text-subtle)';
+      empty.textContent = filter
+        ? 'Kein Treffer fuer den Filter.'
+        : 'Keine Filter-Regeln auf diesem Geraet (oder os-firewall-Plugin nicht installiert).';
+      list.appendChild(empty);
+      return;
+    }
+    for (const r of matching) {
+      const row = document.createElement('div');
+      row.className = 'alm-row';
+      const head = document.createElement('div');
+      head.className = 'alm-row-head';
+      const name = document.createElement('span');
+      name.className = 'alm-name';
+      const enabledMarker = r.enabled ? '' : ' (deaktiviert)';
+      name.textContent = `${r.action} · ${r.interface}${enabledMarker}`;
+      const meta = document.createElement('span');
+      meta.className = 'alm-meta';
+      const proto = r.protocol === 'any' ? '' : r.protocol + ' ';
+      meta.textContent = `${proto}${r.source_net}${r.source_port ? ':' + r.source_port : ''} → ${r.destination_net}${r.destination_port ? ':' + r.destination_port : ''}`;
+      head.appendChild(name);
+      head.appendChild(meta);
+      row.appendChild(head);
+      if (r.description) {
+        const descr = document.createElement('div');
+        descr.className = 'alm-descr';
+        descr.textContent = r.description;
+        row.appendChild(descr);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'alm-actions';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn-secondary';
+      editBtn.textContent = 'Bearbeiten';
+      editBtn.addEventListener('click', () => openRuleEditModal(r));
+      actions.appendChild(editBtn);
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn-danger';
+      delBtn.textContent = 'Loeschen';
+      delBtn.addEventListener('click', () => deleteRuleFromManager(r));
+      actions.appendChild(delBtn);
+      row.appendChild(actions);
+      list.appendChild(row);
+    }
+  }
+
+  function openRuleAddModal() {
+    if (!currentDeviceId) return;
+    frmEditMode = 'add';
+    frmEditUuid = '';
+    frmTargetDeviceId = currentDeviceId;
+    $('#rule-modal-title').textContent = 'Neue Filter-Regel';
+    // Felder auf Defaults
+    $('#rl-enabled').checked = true;
+    $('#rl-action').value = 'pass';
+    $('#rl-direction').value = 'in';
+    $('#rl-interface').value = '';
+    $('#rl-ipprotocol').value = 'inet';
+    $('#rl-protocol').value = 'any';
+    $('#rl-src-net').value = 'any';
+    $('#rl-src-port').value = '';
+    $('#rl-src-not').checked = false;
+    $('#rl-dst-net').value = 'any';
+    $('#rl-dst-port').value = '';
+    $('#rl-dst-not').checked = false;
+    $('#rl-gateway').value = '';
+    $('#rl-sequence').value = '';
+    $('#rl-log').checked = false;
+    $('#rl-descr').value = '';
+    $('#rule-modal-error').hidden = true;
+    $('#rule-modal').hidden = false;
+    setTimeout(() => $('#rl-interface').focus(), 0);
+  }
+
+  function openRuleEditModal(rule) {
+    if (!currentDeviceId) return;
+    frmEditMode = 'update';
+    frmEditUuid = rule.uuid;
+    frmTargetDeviceId = currentDeviceId;
+    $('#rule-modal-title').textContent =
+      `Regel bearbeiten (${rule.description || rule.uuid})`;
+    $('#rl-enabled').checked = !!rule.enabled;
+    $('#rl-action').value = rule.action || 'pass';
+    $('#rl-direction').value = rule.direction || 'in';
+    $('#rl-interface').value = rule.interface || '';
+    $('#rl-ipprotocol').value = rule.ipprotocol || 'inet';
+    $('#rl-protocol').value = rule.protocol || 'any';
+    $('#rl-src-net').value = rule.source_net || 'any';
+    $('#rl-src-port').value = rule.source_port || '';
+    $('#rl-src-not').checked = !!rule.source_not;
+    $('#rl-dst-net').value = rule.destination_net || 'any';
+    $('#rl-dst-port').value = rule.destination_port || '';
+    $('#rl-dst-not').checked = !!rule.destination_not;
+    $('#rl-gateway').value = rule.gateway || '';
+    $('#rl-sequence').value = (rule.sequence === null || rule.sequence === undefined) ? '' : rule.sequence;
+    $('#rl-log').checked = !!rule.log;
+    $('#rl-descr').value = rule.description || '';
+    $('#rule-modal-error').hidden = true;
+    $('#rule-modal').hidden = false;
+  }
+
+  function closeRuleModal() {
+    $('#rule-modal').hidden = true;
+    frmEditMode = 'add';
+    frmEditUuid = '';
+    frmTargetDeviceId = '';
+  }
+
+  async function submitRuleModal() {
+    if (!frmTargetDeviceId) {
+      showRuleModalError('Kein Ziel-Geraet bekannt - Modal neu oeffnen.');
+      return;
+    }
+    const interfaceVal = $('#rl-interface').value.trim();
+    if (!interfaceVal) {
+      showRuleModalError('Interface ist Pflichtfeld.');
+      return;
+    }
+    const seqRaw = $('#rl-sequence').value.trim();
+    const sequence = seqRaw === '' ? null : Number(seqRaw);
+    if (sequence !== null && !Number.isInteger(sequence)) {
+      showRuleModalError('Sequenz muss eine Ganzzahl sein.');
+      return;
+    }
+    const payload = {
+      enabled: $('#rl-enabled').checked,
+      action: $('#rl-action').value,
+      interface: interfaceVal,
+      direction: $('#rl-direction').value,
+      ipprotocol: $('#rl-ipprotocol').value,
+      protocol: $('#rl-protocol').value,
+      source_net: $('#rl-src-net').value.trim() || 'any',
+      source_port: $('#rl-src-port').value.trim(),
+      source_not: $('#rl-src-not').checked,
+      destination_net: $('#rl-dst-net').value.trim() || 'any',
+      destination_port: $('#rl-dst-port').value.trim(),
+      destination_not: $('#rl-dst-not').checked,
+      gateway: $('#rl-gateway').value.trim(),
+      log: $('#rl-log').checked,
+      description: $('#rl-descr').value.trim(),
+      sequence,
+      target_device_ids: [frmTargetDeviceId],
+    };
+    let url = '/api/plans/rule';
+    if (frmEditMode === 'update') {
+      payload.uuid = frmEditUuid;
+      url = '/api/plans/rule-update';
+    }
+    const confirm = $('#rule-modal-confirm');
+    confirm.disabled = true;
+    confirm.textContent = 'Erzeuge Plan…';
+    try {
+      const r = await apiPost(url, payload);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showRuleModalError(body.detail || `Fehler ${r.status}`);
+        return;
+      }
+      const plan = await r.json();
+      closeRuleModal();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showRuleModalError(err.message);
+    } finally {
+      confirm.disabled = false;
+      confirm.textContent = 'Plan erzeugen';
+    }
+  }
+
+  function showRuleModalError(msg) {
+    const box = $('#rule-modal-error');
+    box.textContent = msg;
+    box.hidden = false;
+  }
+
+  async function deleteRuleFromManager(rule) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    const devName = device ? device.name : currentDeviceId;
+    const label = rule.description || rule.uuid;
+    const ok = window.confirm(
+      `Regel "${label}" wirklich auf ${devName} loeschen?\n\n`
+      + `Pre-Apply-Backup wird gezogen; ein Rollback ist via Backup-Tab moeglich.`,
+    );
+    if (!ok) return;
+    try {
+      const r = await apiPost('/api/plans/rule-delete', {
+        uuid: rule.uuid,
+        target_device_ids: [currentDeviceId],
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${r.status}`, true);
+        return;
+      }
+      const plan = await r.json();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  async function openRouteDeleteFromManager(route) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    const devName = device ? device.name : currentDeviceId;
+    const ok = window.confirm(
+      `Route ${route.network} via ${route.gateway} wirklich auf ${devName} loeschen?\n\n`
+      + `Pre-Apply-Backup wird gezogen; ein Rollback ist via Backup-Tab moeglich.`,
+    );
+    if (!ok) return;
+    try {
+      const r = await apiPost('/api/plans/route-delete', {
+        network: route.network,
+        gateway: route.gateway,
+        target_device_ids: [currentDeviceId],
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${r.status}`, true);
+        return;
+      }
+      const plan = await r.json();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showToast(err.message, true);
     }
   }
 
@@ -2809,6 +3309,9 @@
   function resetPlanInputs() {
     $('#pl-route-network').value = '';
     $('#pl-route-gateway').value = '';
+    // Identitaets-Felder im naechsten Add-Plan wieder editierbar machen
+    $('#pl-route-network').readOnly = false;
+    $('#pl-route-gateway').readOnly = false;
     $('#pl-route-descr').value = '';
     $('#pl-route-disabled').checked = false;
     $('#pl-alias-name').value = '';
@@ -2817,6 +3320,12 @@
     $('#pl-alias-descr').value = '';
     $('#pl-alias-merge').checked = false;
     $('#pl-confirm').checked = false;
+    // Merge-Checkbox-Row wieder einblenden (alias-update mode hatte sie versteckt)
+    const merge = $('#pl-alias-merge');
+    if (merge) {
+      const mergeRow = merge.closest('.form-row, .form-col, .form-checkbox');
+      if (mergeRow) mergeRow.style.display = '';
+    }
     // Suggestion-Caches leeren — sonst greift F19-Rebrowse fuer Eintraege
     // die vom vorherigen Geraet kamen.
     aliasSuggestionTypes = new Map();
@@ -2885,7 +3394,7 @@
     }
     let body = null;
     let url = null;
-    if (planMode === 'route') {
+    if (planMode === 'route' || planMode === 'route-update') {
       const network = $('#pl-route-network').value.trim();
       const gateway = $('#pl-route-gateway').value.trim();
       if (!network || !gateway) {
@@ -2898,7 +3407,7 @@
         disabled: $('#pl-route-disabled').checked,
         target_device_ids: Array.from(state.selectedDeviceIds),
       };
-      url = '/api/plans/route';
+      url = planMode === 'route-update' ? '/api/plans/route-update' : '/api/plans/route';
     } else {
       const name = $('#pl-alias-name').value.trim();
       const type = $('#pl-alias-type').value;
@@ -2913,15 +3422,26 @@
       if (!content.length) {
         return showPlanError('Mindestens ein Alias-Inhalt erforderlich.');
       }
-      body = {
-        name,
-        type,
-        content,
-        descr: $('#pl-alias-descr').value.trim(),
-        merge_mode: $('#pl-alias-merge').checked ? 'append' : 'create',
-        target_device_ids: Array.from(state.selectedDeviceIds),
-      };
-      url = '/api/plans/alias';
+      if (planMode === 'alias-update') {
+        body = {
+          name,
+          type,
+          content,
+          descr: $('#pl-alias-descr').value.trim(),
+          target_device_ids: Array.from(state.selectedDeviceIds),
+        };
+        url = '/api/plans/alias-update';
+      } else {
+        body = {
+          name,
+          type,
+          content,
+          descr: $('#pl-alias-descr').value.trim(),
+          merge_mode: $('#pl-alias-merge').checked ? 'append' : 'create',
+          target_device_ids: Array.from(state.selectedDeviceIds),
+        };
+        url = '/api/plans/alias';
+      }
     }
 
     const next = $('#plan-next-btn');
@@ -3188,7 +3708,9 @@
       const response = await apiGet('/api/profiles');
       if (!response.ok) return;
       const data = await response.json();
-      const wantedSubsystem = planMode === 'route' ? 'routes' : 'firewall_alias';
+      const wantedSubsystem =
+        (planMode === 'route' || planMode === 'route-update')
+          ? 'routes' : 'firewall_alias';
       planProfiles = (data.profiles || []).filter((p) => p.subsystem === wantedSubsystem);
       for (const p of planProfiles) {
         const opt = document.createElement('option');
@@ -3246,7 +3768,7 @@
     let spec;
     let action;
     let subsystem;
-    if (planMode === 'route') {
+    if (planMode === 'route' || planMode === 'route-update') {
       spec = {
         network: $('#pl-route-network').value.trim(),
         gateway: $('#pl-route-gateway').value.trim(),
@@ -5334,6 +5856,21 @@
     // Aliase-Tab im Device-Modal: Filter-Input
     const almFilter = $('#alm-filter');
     if (almFilter) almFilter.addEventListener('input', renderAliasManagerList);
+    const rtmFilter = $('#rtm-filter');
+    if (rtmFilter) rtmFilter.addEventListener('input', renderRoutesList);
+    const frmFilter = $('#frm-filter');
+    if (frmFilter) frmFilter.addEventListener('input', renderRulesList);
+    const frmAdd = $('#frm-add-btn');
+    if (frmAdd) frmAdd.addEventListener('click', openRuleAddModal);
+    // Rule-Modal-Buttons
+    const ruleCancel = $('#rule-modal-cancel');
+    if (ruleCancel) ruleCancel.addEventListener('click', closeRuleModal);
+    const ruleClose = $('#rule-modal-close');
+    if (ruleClose) ruleClose.addEventListener('click', closeRuleModal);
+    const ruleConfirm = $('#rule-modal-confirm');
+    if (ruleConfirm) ruleConfirm.addEventListener('click', () => {
+      submitRuleModal().catch((err) => showRuleModalError(err.message));
+    });
     // Device-Modal Tab-Switching
     document.querySelectorAll('#device-modal-tabs .modal-tab').forEach((btn) => {
       btn.addEventListener('click', () => switchDeviceTab(btn.dataset.tab));

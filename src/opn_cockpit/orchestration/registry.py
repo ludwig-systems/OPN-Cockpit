@@ -13,6 +13,7 @@ from typing import Any
 
 from opn_cockpit.core.objects.aliases import AliasAdapter, AliasesController
 from opn_cockpit.core.objects.base import ObjectAdapter, SubsystemController
+from opn_cockpit.core.objects.firewall_rules import RuleAdapter, RulesController
 from opn_cockpit.core.objects.routes import RouteAdapter, RoutesController
 
 
@@ -41,9 +42,16 @@ FIREWALL_ALIAS = SubsystemBinding(
     controller=AliasesController(),
 )
 
+FIREWALL_RULES = SubsystemBinding(
+    name="firewall_rules",
+    adapter=RuleAdapter(),
+    controller=RulesController(),
+)
+
 _REGISTRY: dict[str, SubsystemBinding] = {
     ROUTES.name: ROUTES,
     FIREWALL_ALIAS.name: FIREWALL_ALIAS,
+    FIREWALL_RULES.name: FIREWALL_RULES,
 }
 
 

@@ -43,6 +43,7 @@ from opn_cockpit.core.errors import (
 )
 from opn_cockpit.core.http_client import HttpClient, HttpTarget
 from opn_cockpit.core.objects.base import (
+    ActionKind,
     DiffKind,
     ObjectAdapter,
     RequestContext,
@@ -156,6 +157,7 @@ class Executor:
                     controller=controller,
                     client=client,
                     action_name=plan.action,
+                    action_kind=plan.action_kind,
                     plan_id=plan.plan_id,
                 ): pipeline
                 for pipeline in pipelines
@@ -188,6 +190,7 @@ class Executor:
         controller: SubsystemController,
         client: HttpClient,
         action_name: str,
+        action_kind: ActionKind,
         plan_id: str,
     ) -> Result:
         """Phasen-Pipeline für genau ein Gerät. Wirft NIE eine Exception."""
@@ -200,6 +203,7 @@ class Executor:
                 controller=controller,
                 client=client,
                 plan_id=plan_id,
+                action_kind=action_kind,
                 start=start,
             )
         except OpnCockpitError as exc:
@@ -232,6 +236,7 @@ class Executor:
         controller: SubsystemController,
         client: HttpClient,
         plan_id: str,
+        action_kind: ActionKind,
         start: float,
     ) -> Result:
         device = pipeline.device
@@ -292,6 +297,8 @@ class Executor:
                 client=client,
                 ctx=ctx,
                 to_write=to_write,
+                action_kind=action_kind,
+                plan_id=plan_id,
                 start=start,
             )
         finally:
@@ -400,13 +407,25 @@ class Executor:
         client: HttpClient,
         ctx: RequestContext,
         to_write: list[PlannedDeviceAction],
+        action_kind: ActionKind,
+        plan_id: str,
         start: float,
     ) -> Result:
         add_outcomes: list[AddOutcome] = []
         # ----- WRITE -----
+        # action_kind entscheidet welche Adapter-Method gerufen wird:
+        # ADD -> add, UPDATE -> update, DELETE -> delete. Verify-Erwartung
+        # invertiert sich bei DELETE (Eintrag MUSS nach Reconfigure weg sein).
         try:
             for action in to_write:
-                add_outcome = adapter.add(client, ctx, action.target_spec)
+                if action_kind is ActionKind.DELETE:
+                    add_outcome = adapter.delete(
+                        client, ctx, adapter.identity(action.target_spec),
+                    )
+                elif action_kind is ActionKind.UPDATE:
+                    add_outcome = adapter.update(client, ctx, action.target_spec)
+                else:
+                    add_outcome = adapter.add(client, ctx, action.target_spec)
                 add_outcomes.append(add_outcome)
         except OpnCockpitError as exc:
             return _make_failed(
@@ -443,6 +462,10 @@ class Executor:
             )
 
         # ----- VERIFY -----
+        # Bei DELETE wird "found=False" zum Erfolgs-Signal: der Eintrag soll
+        # nach reconfigure weg sein. Bei ADD/UPDATE bleibt "found=True"
+        # das Erfolgs-Signal.
+        expected_found = action_kind is not ActionKind.DELETE
         last_verify: VerifyOutcome | None = None
         for action in to_write:
             try:
@@ -460,10 +483,17 @@ class Executor:
                     duration_ms=_elapsed_ms(start),
                     add_outcome=add_outcomes[0] if add_outcomes else None,
                 )
-            if not verify_outcome.found:
-                err = VerificationError(
-                    f"Read-back leer für {adapter.identity(action.target_spec)}."
-                )
+            if verify_outcome.found is not expected_found:
+                if expected_found:
+                    err_msg = (
+                        f"Read-back leer für {adapter.identity(action.target_spec)}."
+                    )
+                else:
+                    err_msg = (
+                        f"Eintrag '{adapter.identity(action.target_spec)}' "
+                        "ist nach Loeschung noch sichtbar."
+                    )
+                err = VerificationError(err_msg)
                 return Result(
                     device_id=device.id,
                     subsystem=adapter.subsystem,
@@ -477,19 +507,22 @@ class Executor:
             last_verify = verify_outcome
 
         # ----- POST-APPLY-BACKUP -----
-        # Nach erfolgreichem Apply einen neuen Drift-Baseline-Snapshot ziehen.
-        # Ohne diesen Schritt zeigt die Drift-Erkennung sofort nach Apply
-        # einen False-Positive, weil der Pre-Apply-Backup per Definition
-        # AELTER ist als die jetzt frisch geschriebene Konfig. Fehler hier
-        # sollen den Apply NICHT als Fehler markieren - der eigentliche
-        # Rollout ist erfolgreich. Nur Audit, keine Status-Aenderung.
-        with contextlib.suppress(Exception):
-            self._take_post_apply_backup(
-                client=client,
-                ctx=ctx,
-                device=device,
-                plan_id=plan_id,
-            )
+        # Nach erfolgreichem Apply einen neuen Drift-Baseline-Snapshot ziehen,
+        # damit die Drift-Erkennung nicht den Pre-Apply-Backup als Baseline
+        # nutzt (was zu False-Positive-Drift fuehrte). Symmetrisch zum
+        # Pre-Apply-Backup: nur wenn auto_backup_before_apply an ist, holen
+        # wir auch das Post-Apply-Backup. Fehler hier blockieren den Apply
+        # NICHT - der Rollout ist bereits erfolgreich. Nur Audit, keine
+        # Status-Aenderung.
+        post_apply_settings = self.session.opened.data.settings
+        if post_apply_settings.auto_backup_before_apply:
+            with contextlib.suppress(Exception):
+                self._take_post_apply_backup(
+                    client=client,
+                    ctx=ctx,
+                    device=device,
+                    plan_id=plan_id,
+                )
 
         return Result(
             device_id=device.id,

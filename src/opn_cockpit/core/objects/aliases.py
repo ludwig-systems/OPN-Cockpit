@@ -35,6 +35,7 @@ from opn_cockpit.core.errors import (
 )
 from opn_cockpit.core.objects._endpoints import (
     ALIAS_ADD,
+    ALIAS_DEL,
     ALIAS_GET,
     ALIAS_RECONFIGURE,
     ALIAS_SEARCH,
@@ -321,6 +322,140 @@ class AliasAdapter:
             if isinstance(candidate, str) and candidate:
                 uuid = candidate
         return AddOutcome(uuid=uuid, raw_status=response.status_code)
+
+    # ----- update / delete -----
+
+    def update(
+        self,
+        client: HttpClient,
+        ctx: RequestContext,
+        spec: AliasSpec,
+    ) -> AddOutcome:
+        """Modifiziert einen bestehenden Alias (setItem/{uuid}).
+
+        Im Gegensatz zu ``add(merge_mode="append")`` ersetzt update den
+        kompletten Inhalt + Beschreibung mit der Soll-Spec. Wenn der Alias
+        nicht existiert, schlaegt der Call mit ValidationError fehl.
+        """
+        validate_alias_name(spec.name)
+        validate_alias_type(spec.type)
+        existing_uuid = self._search_uuid(client, ctx, spec.name)
+        if existing_uuid is None:
+            raise ValidationError(
+                f"Alias '{spec.name}' existiert nicht - Update nicht moeglich.",
+                context=make_context(
+                    host=ctx.target.host,
+                    port=ctx.target.port,
+                    method="POST",
+                    path=ALIAS_SEARCH,
+                    error_kind="alias_not_found",
+                ),
+            )
+        payload = {"alias": self.to_payload(spec)}
+        set_path = ALIAS_SET.format(uuid=existing_uuid)
+        response = client.call(
+            ctx.target, ctx.key, ctx.secret,
+            "POST", set_path,
+            json=payload,
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        _raise_if_not_saved(body, set_path, ctx)
+        return AddOutcome(uuid=existing_uuid, raw_status=response.status_code)
+
+    def delete(
+        self,
+        client: HttpClient,
+        ctx: RequestContext,
+        ident: AliasIdentity,
+    ) -> AddOutcome:
+        """Loescht einen Alias (delItem/{uuid})."""
+        existing_uuid = self._search_uuid(client, ctx, ident.name)
+        if existing_uuid is None:
+            # Schon weg - idempotent als "ok" zurueckgeben damit Re-Apply
+            # nicht failt. Der Planner-Diff sollte das bereits als SKIP
+            # gemeldet haben; das hier ist die letzte Defense-Line.
+            return AddOutcome(uuid=None, raw_status=0)
+        del_path = ALIAS_DEL.format(uuid=existing_uuid)
+        response = client.call(
+            ctx.target, ctx.key, ctx.secret,
+            "POST", del_path,
+            json={},
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        _raise_if_not_saved(body, del_path, ctx)
+        return AddOutcome(uuid=existing_uuid, raw_status=response.status_code)
+
+    def diff_for_update(
+        self,
+        current: AliasSpec | None,
+        target: AliasSpec,
+    ) -> Diff:
+        """Diff fuer Action-Kind UPDATE: target existiert (sonst Fehler), ist
+        identisch (-> SKIP) oder weicht ab (-> UPDATE).
+        """
+        if current is None:
+            return Diff(
+                kind=DiffKind.NEW,
+                summary=(
+                    f"Alias '{target.name}' existiert nicht - Update wird "
+                    "beim Apply fehlschlagen."
+                ),
+            )
+        same_content = set(current.content) == set(target.content)
+        same_descr = (current.descr or "") == (target.descr or "")
+        same_type = current.type == target.type
+        if same_content and same_descr and same_type:
+            return Diff(
+                kind=DiffKind.SKIP,
+                summary=(
+                    f"Alias '{target.name}' bereits identisch - uebersprungen."
+                ),
+            )
+        changes = []
+        if not same_type:
+            changes.append(f"Typ {current.type} -> {target.type}")
+        if not same_content:
+            added = [c for c in target.content if c not in set(current.content)]
+            removed = [c for c in current.content if c not in set(target.content)]
+            if added:
+                changes.append(f"+{len(added)}")
+            if removed:
+                changes.append(f"-{len(removed)}")
+        if not same_descr:
+            changes.append("Beschreibung geaendert")
+        return Diff(
+            kind=DiffKind.UPDATE,
+            summary=f"Alias '{target.name}' aktualisieren ({', '.join(changes)})",
+        )
+
+    def diff_for_delete(
+        self,
+        current: AliasSpec | None,
+        ident: AliasIdentity,
+    ) -> Diff:
+        """Diff fuer Action-Kind DELETE: existiert -> wird geloescht,
+        existiert nicht -> SKIP (idempotent).
+        """
+        if current is None:
+            return Diff(
+                kind=DiffKind.SKIP,
+                summary=(
+                    f"Alias '{ident.name}' existiert nicht - bereits weg."
+                ),
+            )
+        return Diff(
+            kind=DiffKind.DELETE,
+            summary=(
+                f"Alias '{ident.name}' wird geloescht "
+                f"({current.type}, {len(current.content)} Eintrag/Einträge)"
+            ),
+        )
 
     def _append(
         self,

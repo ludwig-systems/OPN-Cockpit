@@ -549,6 +549,55 @@ class DeviceAliasesResponse(BaseModel):
     checked_at_iso: str
 
 
+class RouteEntryResponse(BaseModel):
+    """Einzelne statische Route eines Geraets, sortierbar fuer die UI."""
+
+    network: str
+    gateway: str
+    descr: str
+    disabled: bool
+
+
+class DeviceRoutesResponse(BaseModel):
+    device_id: str
+    device_name: str
+    reachable: bool
+    summary: str
+    routes: list[RouteEntryResponse]
+    checked_at_iso: str
+
+
+class RuleEntryResponse(BaseModel):
+    """Eine Firewall-Filter-Regel mit Live-UUID fuer Edit/Delete."""
+
+    uuid: str
+    enabled: bool
+    action: str
+    interface: str
+    direction: str
+    ipprotocol: str
+    protocol: str
+    source_net: str
+    source_port: str
+    source_not: bool
+    destination_net: str
+    destination_port: str
+    destination_not: bool
+    gateway: str
+    log: bool
+    description: str
+    sequence: int | None = None
+
+
+class DeviceRulesResponse(BaseModel):
+    device_id: str
+    device_name: str
+    reachable: bool
+    summary: str
+    rules: list[RuleEntryResponse]
+    checked_at_iso: str
+
+
 # ---------------------------------------------------------------------------
 # Backups (v0.7 Safety-Nets)
 # ---------------------------------------------------------------------------
@@ -598,6 +647,89 @@ class AliasPlanRequest(BaseModel):
     content: list[str] = Field(..., min_length=1)
     descr: str = Field("", max_length=200)
     merge_mode: str = Field("create", pattern="^(create|append)$")
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class AliasUpdatePlanRequest(BaseModel):
+    """Plan-Erzeugung fuer einen Alias-Edit (vorhandenen Alias modifizieren)."""
+
+    name: str = Field(..., min_length=1, max_length=120)
+    type: str = Field(..., min_length=1, max_length=40)
+    content: list[str] = Field(..., min_length=1)
+    descr: str = Field("", max_length=200)
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class AliasDeletePlanRequest(BaseModel):
+    """Plan-Erzeugung fuer einen Alias-Delete (vorhandenen Alias entfernen)."""
+
+    name: str = Field(..., min_length=1, max_length=120)
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class RouteUpdatePlanRequest(BaseModel):
+    """Plan-Erzeugung fuer einen Route-Edit (vorhandene Route modifizieren).
+
+    Identitaet bleibt (network, gateway); descr und disabled sind editierbar.
+    """
+
+    network: str = Field(..., min_length=1, max_length=100)
+    gateway: str = Field(..., min_length=1, max_length=120)
+    descr: str = Field("", max_length=200)
+    disabled: bool = False
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class RouteDeletePlanRequest(BaseModel):
+    """Plan-Erzeugung fuer einen Route-Delete (vorhandene Route entfernen)."""
+
+    network: str = Field(..., min_length=1, max_length=100)
+    gateway: str = Field(..., min_length=1, max_length=120)
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class _RulePayloadBase(BaseModel):
+    """Gemeinsame Felder von Rule-Add und Rule-Update."""
+
+    enabled: bool = True
+    action: str = Field("pass", pattern="^(pass|block|reject)$")
+    interface: str = Field(..., min_length=1, max_length=80)
+    direction: str = Field("in", pattern="^(in|out)$")
+    ipprotocol: str = Field("inet", pattern="^(inet|inet6)$")
+    protocol: str = Field("any", max_length=20)
+    source_net: str = Field("any", max_length=120)
+    source_port: str = Field("", max_length=80)
+    source_not: bool = False
+    destination_net: str = Field("any", max_length=120)
+    destination_port: str = Field("", max_length=80)
+    destination_not: bool = False
+    gateway: str = Field("", max_length=120)
+    log: bool = False
+    description: str = Field("", max_length=200)
+    sequence: int | None = Field(None, ge=1, le=100000)
+
+
+class RulePlanRequest(_RulePayloadBase):
+    """Plan-Erzeugung fuer einen neuen Filter-Regel-Eintrag auf 1..N Geraeten."""
+
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class RuleUpdatePlanRequest(_RulePayloadBase):
+    """Plan-Erzeugung fuer einen Filter-Regel-Edit.
+
+    UUID identifiziert die zu editierende Regel; die UI liest sie aus
+    der Live-Liste und schickt sie zurueck.
+    """
+
+    uuid: str = Field(..., min_length=1, max_length=64)
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class RuleDeletePlanRequest(BaseModel):
+    """Plan-Erzeugung fuer einen Filter-Regel-Delete."""
+
+    uuid: str = Field(..., min_length=1, max_length=64)
     target_device_ids: list[str] = Field(..., min_length=1)
 
 

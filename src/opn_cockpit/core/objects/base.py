@@ -61,6 +61,23 @@ class DiffKind(StrEnum):
     NEW = "new"
     SKIP = "skip"
     UPDATE = "update"
+    DELETE = "delete"
+
+
+class ActionKind(StrEnum):
+    """Verb des Plans: was tut der Executor pro Aktion?
+
+    Ein Plan ist immer einheitlich (add ODER update ODER delete) - eine
+    Mischung waere in der UI verwirrend und im Audit schwer nachvollziehbar.
+
+    * ``ADD`` - neues Objekt anlegen (heutige Default-Aktion).
+    * ``UPDATE`` - bestehendes Objekt modifizieren (ruft Adapter.update).
+    * ``DELETE`` - bestehendes Objekt entfernen (ruft Adapter.delete).
+    """
+
+    ADD = "add"
+    UPDATE = "update"
+    DELETE = "delete"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +133,34 @@ class ObjectAdapter(Protocol[TSpec, TIdent]):
         aufrufen, bevor sie einmal ``reconfigure`` triggern.
         """
 
+    def update(
+        self,
+        client: HttpClient,
+        ctx: RequestContext,
+        spec: TSpec,
+    ) -> AddOutcome:
+        """Modifiziert ein bestehendes Objekt am Gerät.
+
+        Setzt voraus, dass das Objekt existiert (per Identitaet aus ``spec``);
+        der Planner stellt das via ``exists`` sicher. Aktiviert nicht selbst —
+        ``SubsystemController.reconfigure`` ist zustaendig. Adapter, die
+        Update nicht unterstuetzen, sollen ``NotImplementedError`` werfen.
+        """
+
+    def delete(
+        self,
+        client: HttpClient,
+        ctx: RequestContext,
+        ident: TIdent,
+    ) -> AddOutcome:
+        """Entfernt ein bestehendes Objekt am Gerät anhand seiner Identitaet.
+
+        Setzt voraus, dass das Objekt existiert (Planner stellt das via
+        ``exists`` sicher). Aktiviert nicht selbst — Reconfigure ist
+        zustaendig. Adapter ohne Delete-Support werfen
+        ``NotImplementedError``.
+        """
+
     def verify(
         self,
         client: HttpClient,
@@ -129,10 +174,33 @@ class ObjectAdapter(Protocol[TSpec, TIdent]):
         """
 
     def diff(self, current: TSpec | None, target_spec: TSpec) -> Diff:
-        """Vergleicht aktuellen Zustand mit dem Soll-Zustand.
+        """Vergleicht aktuellen Zustand mit dem Soll-Zustand fuer ADD-Plaene.
 
         Liefert ``DiffKind.NEW`` / ``SKIP`` / ``UPDATE`` und eine kurze,
         menschlich lesbare Zusammenfassung für die Vorschau.
+        """
+
+    def diff_for_update(
+        self, current: TSpec | None, target_spec: TSpec,
+    ) -> Diff:
+        """Diff fuer UPDATE-Plaene. Adapter ohne Update-Support werfen
+        ``NotImplementedError``.
+
+        Erwartete Klassifikation:
+        * ``current is None`` -> Hinweis-Diff (Apply wird fehlschlagen).
+        * identisch -> ``SKIP``.
+        * abweichend -> ``UPDATE``.
+        """
+
+    def diff_for_delete(
+        self, current: TSpec | None, ident: TIdent,
+    ) -> Diff:
+        """Diff fuer DELETE-Plaene. Adapter ohne Delete-Support werfen
+        ``NotImplementedError``.
+
+        Erwartete Klassifikation:
+        * ``current is None`` -> ``SKIP`` (idempotent).
+        * existiert -> ``DELETE``.
         """
 
     def to_payload(self, spec: TSpec) -> dict[str, Any]:
@@ -186,6 +254,7 @@ class SubsystemController(Protocol):
 from opn_cockpit.core.result import AddOutcome, VerifyOutcome  # noqa: E402
 
 __all__ = [
+    "ActionKind",
     "AddOutcome",
     "Diff",
     "DiffKind",

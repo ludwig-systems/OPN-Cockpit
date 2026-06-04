@@ -83,6 +83,7 @@ from opn_cockpit.web.api.schemas import (
     DeviceApiKeyResponse,
     DeviceCreateRequest,
     DeviceResponse,
+    DeviceRoutesResponse,
     DeviceUpdateRequest,
     DriftStatusEntry,
     DriftStatusRequest,
@@ -94,6 +95,9 @@ from opn_cockpit.web.api.schemas import (
     HeartbeatRequest,
     HeartbeatResponse,
     InventoryResponse,
+    DeviceRulesResponse,
+    RouteEntryResponse,
+    RuleEntryResponse,
     SyncAliasRequest,
     SyncAliasResponse,
     TagSummary,
@@ -941,6 +945,206 @@ def get_device_aliases(
             )
             for a in extracted
         ],
+        checked_at_iso=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/routes  - Live-Routen pro Geraet
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/routes",
+    response_model=DeviceRoutesResponse,
+)
+def get_device_routes(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> DeviceRoutesResponse:
+    """Liefert die Live-Routen eines Geraets via OPNsense-searchroute-API.
+
+    Read-only - Edit/Delete laufen ueber den Plan/Apply-Flow. Pro Eintrag:
+    Netzwerk, Gateway, Beschreibung, Disabled-Flag. Wenn das Geraet nicht
+    erreichbar ist, kommt eine leere Liste mit ``reachable=False`` zurueck.
+    """
+    # Spaeter Import, weil routes.py wegen RouteAdapter wiederum HttpClient
+    # zieht und ein zirkulaerer Top-Level-Import unerwuenscht waere.
+    from opn_cockpit.core.objects._endpoints import ROUTES_SEARCH  # noqa: PLC0415
+
+    devices_by_id = {d.id: d for d in session.opened.data.devices}
+    device = devices_by_id.get(device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(device, session)
+    timestamp = _iso_now()
+
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    try:
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            response = client.call(
+                tgt, device.api_key, device.api_secret,
+                "POST", ROUTES_SEARCH,
+                json={"current": 1, "rowCount": -1},
+            )
+    except OpnCockpitError as exc:
+        reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+        return DeviceRoutesResponse(
+            device_id=device.id,
+            device_name=device.name,
+            reachable=False,
+            summary=f"Routen nicht ladbar: {reason}",
+            routes=[],
+            checked_at_iso=timestamp,
+        )
+
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        rows = []
+
+    entries: list[RouteEntryResponse] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_disabled = row.get("disabled", "0")
+        disabled = str(raw_disabled).strip() not in ("", "0", "false", "False")
+        entries.append(RouteEntryResponse(
+            network=str(row.get("network", "")),
+            gateway=str(row.get("gateway", "")),
+            descr=str(row.get("descr", "")),
+            disabled=disabled,
+        ))
+
+    session.touch()
+    return DeviceRoutesResponse(
+        device_id=device.id,
+        device_name=device.name,
+        reachable=True,
+        summary=f"{len(entries)} Route(n) live geladen.",
+        routes=entries,
+        checked_at_iso=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/firewall-rules  - Live-Rules pro Geraet
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/firewall-rules",
+    response_model=DeviceRulesResponse,
+)
+def get_device_firewall_rules(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> DeviceRulesResponse:
+    """Liefert die Live-Filter-Regeln eines Geraets via OPNsense-searchRule.
+
+    Setzt das ``os-firewall``-Plugin auf der OPNsense voraus (ab 24+ Standard).
+    Wenn der Endpoint nicht antwortet (z. B. Plugin fehlt), wird ein
+    Fehler im ``summary`` zurueckgegeben statt 500 - die UI soll das
+    sauber rendern koennen.
+    """
+    # Spaete Imports vermeiden zirkulaere Imports zwischen Inventory und
+    # objects/firewall_rules.
+    from opn_cockpit.core.objects._endpoints import RULE_SEARCH  # noqa: PLC0415
+    from opn_cockpit.core.objects.firewall_rules import _row_to_spec  # noqa: PLC0415
+
+    devices_by_id = {d.id: d for d in session.opened.data.devices}
+    device = devices_by_id.get(device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(device, session)
+    timestamp = _iso_now()
+
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    try:
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            response = client.call(
+                tgt, device.api_key, device.api_secret,
+                "POST", RULE_SEARCH,
+                json={"current": 1, "rowCount": -1},
+            )
+    except OpnCockpitError as exc:
+        reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+        return DeviceRulesResponse(
+            device_id=device.id,
+            device_name=device.name,
+            reachable=False,
+            summary=(
+                f"Filter-Regeln nicht ladbar: {reason}. "
+                "Pruefe ob das os-firewall-Plugin auf der OPNsense installiert ist."
+            ),
+            rules=[],
+            checked_at_iso=timestamp,
+        )
+
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        rows = []
+
+    entries: list[RuleEntryResponse] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        uuid = str(row.get("uuid", ""))
+        spec = _row_to_spec(row, uuid=uuid)
+        entries.append(RuleEntryResponse(
+            uuid=spec.uuid,
+            enabled=spec.enabled,
+            action=spec.action,
+            interface=spec.interface,
+            direction=spec.direction,
+            ipprotocol=spec.ipprotocol,
+            protocol=spec.protocol,
+            source_net=spec.source_net,
+            source_port=spec.source_port,
+            source_not=spec.source_not,
+            destination_net=spec.destination_net,
+            destination_port=spec.destination_port,
+            destination_not=spec.destination_not,
+            gateway=spec.gateway,
+            log=spec.log,
+            description=spec.description,
+            sequence=spec.sequence,
+        ))
+
+    session.touch()
+    return DeviceRulesResponse(
+        device_id=device.id,
+        device_name=device.name,
+        reachable=True,
+        summary=f"{len(entries)} Regel(n) live geladen.",
+        rules=entries,
         checked_at_iso=timestamp,
     )
 
