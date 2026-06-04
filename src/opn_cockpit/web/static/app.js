@@ -1504,12 +1504,37 @@
       const data = await r.json();
       showToast(`Plan erzeugt: ${data.source_summary} → ${data.target_count} Gerät(e)`);
       closeCompareModal();
-      // Springe in den Plan-View
-      if (typeof openPlanModal === 'function') {
-        openPlanModal(data.plan_id);
-      }
+      // In die Vorschau-Phase des Plan-Modals springen — Plan ist
+      // server-seitig schon befuellt, User muss nur reviewen + applyen.
+      await openExistingPlanInPreview(data.plan_id);
     } catch (err) {
       showToast(`Sync fehlgeschlagen: ${err.message}`);
+    }
+  }
+
+  async function openExistingPlanInPreview(planId) {
+    // Holt einen bereits erzeugten Plan und oeffnet den Plan-Modal direkt
+    // in der Vorschau-Phase (statt im leeren Input-Form). Wird vom Sync-
+    // Pfad aus der Compare-Matrix gebraucht.
+    try {
+      const response = await apiGet(`/api/plans/${encodeURIComponent(planId)}`);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        showToast('Plan nicht abrufbar — vielleicht wurde er gelöscht.', true);
+        return;
+      }
+      currentPlan = await response.json();
+      planMode = currentPlan.subsystem === 'routes' ? 'route' : 'alias';
+      retryDeviceIds = null;
+      planPhase = 'preview';
+      $('#plan-modal-title').textContent = 'Sync: Plan-Vorschau';
+      $('#plan-modal-error').hidden = true;
+      $('#plan-preview-error').hidden = true;
+      $('#plan-modal').hidden = false;
+      renderPreview(currentPlan);
+      showPlanPhase('preview');
+    } catch (err) {
+      showToast(err.message, true);
     }
   }
 
