@@ -2,6 +2,113 @@
 
 Alle nennenswerten Änderungen pro Release.
 
+## v0.7.0 — 2026-06-03 — Safety-Nets, Multi-Site-Tools, Windowless-Install
+
+Großer Funktions-Schub rund um die Themen "ich will sehen was passiert
+bevor es schiefgeht" (Safety-Nets), "ich will meine N gleichen Boxen
+synchron halten" (Multi-Site-Tools) und "der Single-User-Desktop soll
+nicht mit Konsolen-Fenster nerven" (Windowless-Install).
+
+### Safety-Nets
+
+- **Auto-Backup vor Apply** (v0.7 #2): Der Executor zieht vor jedem
+  schreibenden Apply automatisch ein gzip-Backup pro Gerät. Scheitert
+  das Backup, wird der Apply auf diesem Gerät blockiert (Audit:
+  `backup_blocked`). Retention 30 (default).
+- **Cert-Ablauf-Badge** (v0.7 #3): Karten zeigen gelben Badge bei
+  Cert-Restlaufzeit < 30 Tagen, rot bei < 7 Tagen. Klick öffnet
+  Cert-Detail-Liste pro Gerät mit Aussteller, IN-USE-Marker.
+- **Scheduled Auto-Backup** (v0.7 #4): Hintergrund-Thread zieht im
+  konfigurierten Intervall (Default 24h) ein Backup pro Gerät. Eigener
+  Retention-Pool, separat vom Pre-Apply. Default AUS (Opt-In).
+- **Config-Drift-Erkennung** (v0.7 #5): Vergleich der Live-OPNsense-
+  Config-Hashes (volatile `<revision>`-Blöcke gestripped) gegen das
+  letzte lokale Backup. Drift-Badge auf der Kachel wenn ungleich.
+  Default AUS.
+
+### Multi-Site-Tools
+
+- **Config-Compare zwischen N Geräten**: "Vergleichen"-Button erscheint
+  ab 2 selektierten Geräten. Matrix zeigt Aliase pro Gerät mit Status
+  (present/absent/drift/unreachable). Drift-Zeilen gelb markiert.
+  Erste Iteration: nur Aliases; Routes/Firewall-Rules folgen.
+- **Alias-Sync (Master → Targets)**: In jeder Drift-Row gibt es einen
+  "Sync…"-Button. Wählt einen Master (bei mehreren Varianten via
+  Prompt), erzeugt einen add_alias-Plan für alle anderen Geräte der
+  Zeile. Springt nach Erfolg in den Plan-View.
+- **Alias-Manager-View** (read-only): Pro Gerät eine durchsuchbare
+  Liste aller Aliase mit Inhalt, Beschreibung, Deep-Link zur OPNsense-
+  Bearbeitung. Vorbereitung für künftigen Edit/Delete-Adapter.
+- **Auto-Retry-Queue für Mobile-Racks**: Wenn Geräte beim Apply als
+  FAILED zurückkommen, schedult Cockpit automatisch einen Retry-Job.
+  Default-Wartezeit 7 Tage, Intervall 5 Min. Sobald die Box wieder
+  erreichbar ist, zieht der Watcher den Plan ohne weiteres Zutun nach.
+
+### Diagnose-Verbesserungen
+
+- **TCP-Timeout-Aufsplittung**: `connect_timeout` vs `read_timeout`
+  in `error_kind` und Frontend-Anzeige. Halbiert Diagnose-Suchfeld.
+- **ICMP-Probe-Fallback** bei `connect_timeout`: Wenn die Box per Ping
+  erreichbar ist aber TCP nicht, sagt Cockpit jetzt "Host antwortet
+  auf Ping, aber Port X ist zu — Firewall/Routing/Service-Status
+  prüfen". Spart bei asymmetrischen Routing-Setups Stunden Diagnose.
+
+### Installer + Setup
+
+- **Windowless Single-User-Install (Windows)**: Desktop-Shortcut
+  nutzt jetzt `opn-cockpitw.exe` (= pythonw.exe-Kopie). Kein
+  schwarzes Konsolen-Fenster mehr beim Doppelklick. Logs landen in
+  `%APPDATA%\OPN-Cockpit\logs\opn-cockpit.log` (Auto-Redirect bei
+  `sys.stdout==None`, naive Rotation bei >5 MiB).
+- **Uninstaller-Sanierung**: Service wird jetzt sauber entfernt
+  (nicht nur gestoppt), bundle/python/scripts werden zuverlässig
+  geräumt, kein Lock-out-Problem mehr beim Re-Install.
+- **Proxmox-Helper-Wizard**:
+  - Getrennte und sprechende Fragen für Container-Rootfs-Storage und
+    Template-Storage (vorher mehrfach verwechselt)
+  - Locale wird auf `C.UTF-8` gesetzt → keine `apt-listchanges`-
+    Warnings mehr während des Installs
+  - Container-Notes-Feld wird automatisch mit Login + Update-One-Liner
+    + GitHub-Links befüllt (Markdown-gerendert in Proxmox-UI)
+  - Deutlicher Hard-Reload-Hinweis am Ende des Updates
+
+### UX-Politur
+
+- **Nativer Windows-Datei-Dialog im Tresor-Switch-Modal**: "Datei
+  suchen..."-Button öffnet `comdlg32.GetOpenFileNameW` auf dem Server
+  (Single-User-Mode + Windows). Single-User-Vault-Path-Restriktion
+  entfernt → USB-Sticks etc. funktionieren ohne Konfiguration.
+- **API-Key sichtbar im Edit-Dialog** zur Verifikation (Secret bleibt
+  maskiert).
+
+### Bug-Fixes
+
+- **Cert-Inventur**: `/api/trust/cert/search` liefert nur Metadaten,
+  Validity-Felder kamen leer durch. Fix: pro Cert `/cert/get/<uuid>`
+  nachschieben und PEM lokal mit `cryptography.x509` parsen.
+- **TLS-Verifikations-Fehler** als eigene Kategorie statt Netzwerk-
+  Fehler (vorher: "nicht erreichbar: network"; jetzt: "TLS-Verifikation
+  fehlgeschlagen: Cert ungültig").
+- **Hostname-Validierung** akzeptiert ganze URLs (`https://host.lan/`
+  → `host.lan`) und interne TLDs (`.lan`, `.local`).
+- **Whitespace im API-Secret** wird beim Speichern getrimmt.
+- **Plan-Cancel räumt Plan auf**: "Plan verwerfen"-Button auf Vorschau
+  + automatisches Aufräumen beim Abbrechen aus der Bearbeitungs-Phase.
+
+### Internal
+
+- `BackupScheduler` (web/backup_scheduler.py) als neuer Daemon-Thread,
+  Pattern analog zum bestehenden RetryWatcher.
+- `core/config_drift.py` + `core/config_compare.py` als neue Module
+  für die XML-Hash- bzw. Matrix-Logik.
+- `SessionManager.snapshot_active()` für den Scheduler-Tick.
+- Neue AuditEventKinds: `SCHEDULED_BACKUP`.
+- VaultSettings erweitert um 7 neue Felder (alle mit Defaults für
+  Backwards-Compat mit alten Tresoren).
+- `iputils-ping` im Linux-Installer (für ICMP-Probe).
+
+---
+
 ## v0.6.0 — 2026-06-01 — Multi-User-Server + Linux-Deployment
 
 Erste Release-Version mit echter Mehr-Plattform- und Mehr-Nutzer-Auslieferung.
