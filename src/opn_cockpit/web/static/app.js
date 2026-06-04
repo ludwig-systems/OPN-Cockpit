@@ -2182,6 +2182,8 @@
       loadAliasesTab().catch(() => {});
     } else if (tabName === 'updates') {
       renderUpdatesTab();
+    } else if (tabName === 'backups') {
+      loadBackupsTab().catch(() => {});
     }
   }
 
@@ -2228,6 +2230,8 @@
     almLoadedForDeviceId = null;
     almRawAliases = [];
     almCurrentDevice = null;
+    bhLoadedForDeviceId = null;
+    currentBackupDeviceId = null;
   }
 
   // -------------------- Aliase als Tab im Device-Modal --------------------
@@ -3893,15 +3897,24 @@
   // -------------------- Backup-History-Modal --------------------
 
   let currentBackupDeviceId = null;
+  let bhLoadedForDeviceId = null;
 
   async function openBackupHistoryModal(deviceId) {
-    currentBackupDeviceId = deviceId;
-    const device = state.devices.find((d) => d.id === deviceId);
-    $('#bh-title').textContent = device
-      ? `Backups: ${device.name}`
-      : 'Backups';
+    // Backup-Liste ist jetzt ein Tab im Device-Modal. Wenn das Modal noch
+    // nicht offen ist (z.B. Klick aufs Backup-Badge auf der Kachel),
+    // oeffnen wir es und schalten auf den Backups-Tab.
+    if ($('#device-modal').hidden) {
+      openDeviceModal(deviceId);
+    }
+    switchDeviceTab('backups');
+  }
+
+  async function loadBackupsTab(force = false) {
+    if (!currentDeviceId) return;
+    if (!force && bhLoadedForDeviceId === currentDeviceId) return;
+    currentBackupDeviceId = currentDeviceId;
+    bhLoadedForDeviceId = currentDeviceId;
     $('#bh-list').innerHTML = '<div class="form-hint">Lade…</div>';
-    $('#backup-history-modal').hidden = false;
     await refreshBackupHistory();
   }
 
@@ -4024,10 +4037,8 @@
     }
   }
 
-  function closeBackupHistoryModal() {
-    $('#backup-history-modal').hidden = true;
-    currentBackupDeviceId = null;
-  }
+  // closeBackupHistoryModal entfaellt - Backup-History ist jetzt ein Tab
+  // im Device-Modal; das Modal-Schliessen raeumt den State per closeDeviceModal auf.
 
   // -------------------- Cert-Detail-Modal --------------------
 
@@ -5150,11 +5161,8 @@
       vsBtn.addEventListener('click', openVaultSettingsModal);
       $('#vault-settings-close').addEventListener('click', closeVaultSettingsModal);
       $('#vault-settings-cancel').addEventListener('click', closeVaultSettingsModal);
-      $('#bh-close').addEventListener('click', closeBackupHistoryModal);
-      $('#bh-cancel').addEventListener('click', closeBackupHistoryModal);
-      $('#backup-history-modal').addEventListener('click', (e) => {
-        if (e.target.id === 'backup-history-modal') closeBackupHistoryModal();
-      });
+      // (Backup-History ist jetzt ein Tab im Device-Modal - keine eigenen
+      // bh-close/bh-cancel-Bindings noetig.)
       $('#cd-close').addEventListener('click', closeCertDetailModal);
       $('#cd-cancel').addEventListener('click', closeCertDetailModal);
       $('#cert-detail-modal').addEventListener('click', (e) => {
@@ -5280,6 +5288,12 @@
     $('#device-edit-btn').addEventListener('click', doEditFromDetail);
     $('#device-duplicate-btn').addEventListener('click', doDuplicate);
     $('#device-backup-btn').addEventListener('click', doBackupDownload);
+    const backupNowBtn = $('#device-backup-now-btn');
+    if (backupNowBtn) backupNowBtn.addEventListener('click', async () => {
+      await doBackupDownload();
+      bhLoadedForDeviceId = null;
+      await loadBackupsTab(true);
+    });
     $('#device-update-check-btn').addEventListener('click', doFirmwareCheck);
     // Aliase-Tab im Device-Modal: Filter-Input
     const almFilter = $('#alm-filter');
