@@ -167,6 +167,20 @@ mitgenommen haben:
   nur Geräte mit mindestens einem der Tags" aktualisiert — die ACL
   ist seit v3.0 Iter 4 (Mai 2026) live, der Hint war veraltet.
 
+### Phase 3 (nach zweitem v0.7-Test)
+
+- **Post-Apply-Backup**: Nach jedem erfolgreich verifizierten Apply
+  zieht der Executor ein zweites Backup (`trigger="post-apply"`) und
+  schreibt es in den gleichen Retention-Pool wie pre-apply/manual.
+  Damit wird die Drift-Erkennung nach Apply nicht mehr von der
+  Pre-Apply-Baseline als False-Positive ausgelöst — der neueste
+  Snapshot reflektiert die jetzt-live-Konfig.
+- **"Backup erzeugen" im Backups-Tab** (statt "Backup ziehen"):
+  Neuer Endpoint `POST /api/inventory/devices/{id}/backups` erzeugt
+  ein Backup ausschließlich auf dem Server (lokal persistiert, kein
+  Browser-Download-Dialog). Der "Backup herunterladen"-Button im
+  Info-Tab bleibt unverändert (XML-Stream zum Client).
+
 ---
 
 ## v0.6.0 — 2026-06-01 — Multi-User-Server + Linux-Deployment

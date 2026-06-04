@@ -2521,6 +2521,42 @@
     }
   }
 
+  async function doBackupCreateServer() {
+    // Backup auf dem Server erzeugen + persistieren, OHNE Download-Popup.
+    // Verwendet vom Backups-Tab im Device-Modal ("Backup erzeugen").
+    if (!currentDeviceId) return;
+    const btn = $('#device-backup-now-btn');
+    if (!btn) return;
+    const labelSpan = btn.querySelector('span');
+    const originalLabel = labelSpan ? labelSpan.textContent : btn.textContent;
+    btn.disabled = true;
+    if (labelSpan) labelSpan.textContent = 'Erzeuge Backup…';
+    try {
+      const r = await apiPost(
+        `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/backups`,
+      );
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        let detail = `Fehler ${r.status}`;
+        try {
+          const body = await r.json();
+          if (body.detail) detail = body.detail;
+        } catch (_e) { /* nicht-json ist ok */ }
+        showToast(detail, true);
+        return;
+      }
+      const body = await r.json();
+      showToast(
+        `Backup erzeugt (${formatBytes(body.size_bytes)}, gespeichert auf Server).`,
+      );
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      if (labelSpan) labelSpan.textContent = originalLabel;
+    }
+  }
+
   function formatBytes(n) {
     if (n < 1024) return `${n} B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -5290,7 +5326,7 @@
     $('#device-backup-btn').addEventListener('click', doBackupDownload);
     const backupNowBtn = $('#device-backup-now-btn');
     if (backupNowBtn) backupNowBtn.addEventListener('click', async () => {
-      await doBackupDownload();
+      await doBackupCreateServer();
       bhLoadedForDeviceId = null;
       await loadBackupsTab(true);
     });

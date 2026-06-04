@@ -1244,6 +1244,129 @@ def _download_device_backup_impl(device_id: str, session: Session) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# POST /api/inventory/devices/{id}/backups  - Backup erzeugen (Server-only)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/devices/{device_id}/backups",
+    response_model=BackupResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_device_backup(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> BackupResponse:
+    """Erzeugt ein Konfig-Backup ausschliesslich auf dem Server.
+
+    Anders als der GET-Endpoint laedt diese Route NICHTS zum Browser herunter -
+    sie holt die aktuelle Konfig von der OPNsense, persistiert sie als
+    ``trigger="manual"`` lokal (sichtbar im Backups-Tab) und liefert nur
+    die Metadaten. Use-Case: User will "schnell mal sichern" ohne
+    Save-Dialog.
+    """
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+
+    target = HttpTarget(
+        host=vault_device.host,
+        port=vault_device.port,
+        verify=vault_device.tls_verify,
+    )
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+    try:
+        with HttpClient(targets=[target], tuning=tuning) as client:
+            content = download_backup(
+                client, target, vault_device.api_key, vault_device.api_secret,
+            )
+    except AuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                f"Backup abgelehnt: {exc.context.summary or 'API-Schluessel ungueltig'}."
+            ),
+        ) from exc
+    except UnreachableError as exc:
+        sc = (
+            status.HTTP_502_BAD_GATEWAY
+            if exc.context.error_kind == "tls"
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        raise HTTPException(
+            status_code=sc,
+            detail=f"Geraet nicht erreichbar: {exc.context.summary or exc.context.error_kind}.",
+        ) from exc
+    except (ValidationError, ApiError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OPNsense-Antwort fehlerhaft: {exc.context.summary or exc.context.error_kind}.",
+        ) from exc
+    except EgressDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Egress verweigert: {exc.context.summary or exc.context.error_kind}.",
+        ) from exc
+    except OpnCockpitError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Backup-Erzeugung fehlgeschlagen ({exc.context.error_kind}): "
+                   f"{exc.context.summary or '-'}.",
+        ) from exc
+
+    try:
+        record = append_backup(
+            device_id,
+            content,
+            trigger="manual",
+            device_name_at_creation=vault_device.name,
+        )
+    except BackupStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Backup-Persistenz fehlgeschlagen: {exc}",
+        ) from exc
+
+    try:
+        prune_backups(
+            device_id,
+            retention_pre_apply=settings.backup_retention_pre_apply,
+            retention_scheduled=settings.backup_retention_scheduled,
+        )
+    except BackupStoreError:
+        _log.exception(
+            "Backup-Pruning fuer device_id=%s nach manueller Erzeugung fehlgeschlagen.",
+            device_id,
+        )
+
+    get_audit_backend().append(
+        AuditEventKind.BACKUP_DOWNLOADED,
+        actor=audit_actor(session),
+        action="backup_create_server",
+        target_device_id=device_id,
+        target_device_name=vault_device.name,
+        summary=(
+            f"Konfig-Backup erzeugt (Server) fuer {vault_device.name} "
+            f"({len(content)} Bytes, id={record.id})"
+        ),
+    )
+    session.touch()
+    return _record_to_response(record)
+
+
+# ---------------------------------------------------------------------------
 # GET /api/inventory/devices/{id}/backups  - Liste lokaler Backups
 # GET /api/inventory/devices/{id}/backups/{backup_id}  - Download lokaler Backup
 # DELETE /api/inventory/devices/{id}/backups/{backup_id}  - Loeschen

@@ -717,9 +717,11 @@
           <div class="modal-tab-pane" data-tab-pane="backups" role="tabpanel" hidden>
             <div class="form-hint" style="margin-bottom:12px;">
               Lokal gespeicherte Konfig-Backups dieses Geraets. Pre-Apply-
-              Backups entstehen vor jedem Schreibvorgang, manuelle beim
-              Klick auf "Backup herunterladen" im Info-Tab, geplante via
-              Tresor-Einstellung "Geplante Auto-Backups".
+              Backups entstehen vor jedem Schreibvorgang, Post-Apply-Backups
+              direkt nach einem erfolgreichen Plan-Apply (Drift-Baseline),
+              manuelle beim Klick auf "Backup erzeugen" oder "Backup
+              herunterladen" im Info-Tab, geplante via Tresor-Einstellung
+              "Geplante Auto-Backups".
             </div>
             <div class="form-row" style="margin-bottom:12px;">
               <button class="btn-secondary action-row-btn" id="device-backup-now-btn">
@@ -728,7 +730,7 @@
                   <polyline points="4 5.5 6.5 8 9 5.5"/>
                   <path d="M2 9.5v1.5h9V9.5"/>
                 </svg>
-                <span>Backup jetzt ziehen</span>
+                <span>Backup erzeugen</span>
               </button>
             </div>
             <div id="bh-list" class="backup-list"></div>
