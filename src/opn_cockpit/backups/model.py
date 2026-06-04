@@ -10,10 +10,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-# Erlaubte Trigger-Werte. ``manual`` = User-Klick auf "Backup herunterladen",
-# ``pre-apply`` = automatisch vor einem Plan-Apply, ``scheduled`` = aus
-# dem Hintergrund-Scheduler (kommt mit v0.7-#4).
-BACKUP_TRIGGERS: frozenset[str] = frozenset({"manual", "pre-apply", "scheduled"})
+# Erlaubte Trigger-Werte. ``manual`` = User-Klick auf "Backup herunterladen"
+# oder "Backup erzeugen", ``pre-apply`` = automatisch vor einem Plan-Apply,
+# ``post-apply`` = automatisch nach erfolgreichem Plan-Apply (neue
+# Drift-Baseline), ``scheduled`` = aus dem Hintergrund-Scheduler.
+BACKUP_TRIGGERS: frozenset[str] = frozenset(
+    {"manual", "pre-apply", "post-apply", "scheduled"},
+)
 
 
 @dataclass(frozen=True, slots=True)

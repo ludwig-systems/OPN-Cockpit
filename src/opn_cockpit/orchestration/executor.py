@@ -476,6 +476,21 @@ class Executor:
                 )
             last_verify = verify_outcome
 
+        # ----- POST-APPLY-BACKUP -----
+        # Nach erfolgreichem Apply einen neuen Drift-Baseline-Snapshot ziehen.
+        # Ohne diesen Schritt zeigt die Drift-Erkennung sofort nach Apply
+        # einen False-Positive, weil der Pre-Apply-Backup per Definition
+        # AELTER ist als die jetzt frisch geschriebene Konfig. Fehler hier
+        # sollen den Apply NICHT als Fehler markieren - der eigentliche
+        # Rollout ist erfolgreich. Nur Audit, keine Status-Aenderung.
+        with contextlib.suppress(Exception):
+            self._take_post_apply_backup(
+                client=client,
+                ctx=ctx,
+                device=device,
+                plan_id=plan_id,
+            )
+
         return Result(
             device_id=device.id,
             subsystem=adapter.subsystem,
@@ -485,6 +500,86 @@ class Executor:
             add_outcome=add_outcomes[0] if add_outcomes else None,
             verify_outcome=last_verify,
         )
+
+    def _take_post_apply_backup(
+        self,
+        *,
+        client: HttpClient,
+        ctx: RequestContext,
+        device: Device,
+        plan_id: str,
+    ) -> None:
+        """Zieht nach erfolgreichem Apply ein neues Backup als Drift-Baseline.
+
+        Defensiv: jede Exception wird hier still geschluckt - der Apply
+        gilt bereits als VERIFIED, ein nachgelagertes Backup-Problem
+        darf den Erfolgsstatus nicht entwerten. Wir loggen das fuer
+        Operations-Visibility und schreiben einen Audit-Eintrag - das
+        reicht. Bei wiederholtem Fehlschlag bekommt der User die Drift-
+        Warnung; das ist akzeptabel und weniger irrefuehrend als ein
+        falsches FAILED.
+        """
+        try:
+            content = download_backup(client, ctx.target, ctx.key, ctx.secret)
+        except OpnCockpitError as exc:
+            reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+            self.audit.append(
+                AuditEventKind.PRE_APPLY_BACKUP,
+                action="post_apply_backup",
+                target_device_id=device.id,
+                target_device_name=device.name,
+                error_kind=exc.context.error_kind,
+                summary=(
+                    f"Post-Apply-Backup FEHLGESCHLAGEN bei '{device.name}' "
+                    f"(Plan {plan_id}): {reason}. Drift-Erkennung kann "
+                    f"False-Positive zeigen bis manuell ein Backup gezogen wird."
+                ),
+            )
+            return
+
+        try:
+            record: BackupRecord = append_backup(
+                device.id,
+                content,
+                trigger="post-apply",
+                related_plan_id=plan_id,
+                device_name_at_creation=device.name,
+                storage_root=self.backup_storage_root,
+            )
+        except BackupStoreError as exc:
+            self.audit.append(
+                AuditEventKind.PRE_APPLY_BACKUP,
+                action="post_apply_backup",
+                target_device_id=device.id,
+                target_device_name=device.name,
+                error_kind="store_error",
+                summary=(
+                    f"Post-Apply-Backup KONNTE NICHT GESPEICHERT werden "
+                    f"bei '{device.name}' (Plan {plan_id}): {exc}"
+                ),
+            )
+            return
+
+        self.audit.append(
+            AuditEventKind.PRE_APPLY_BACKUP,
+            action="post_apply_backup",
+            target_device_id=device.id,
+            target_device_name=device.name,
+            summary=(
+                f"Post-Apply-Backup ok fuer '{device.name}' "
+                f"(Plan {plan_id}, {record.size_bytes} Bytes -> "
+                f"{record.size_compressed} Bytes gzip). Neue Drift-Baseline."
+            ),
+        )
+
+        settings = self.session.opened.data.settings
+        with contextlib.suppress(BackupStoreError):
+            prune_backups(
+                device.id,
+                retention_pre_apply=settings.backup_retention_pre_apply,
+                retention_scheduled=settings.backup_retention_scheduled,
+                storage_root=self.backup_storage_root,
+            )
 
     # ----- Audit-Eintrag pro Geräte-Ergebnis -----
 

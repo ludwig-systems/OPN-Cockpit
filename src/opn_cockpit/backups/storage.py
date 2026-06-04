@@ -254,8 +254,9 @@ def prune_backups(
 ) -> list[BackupRecord]:
     """Loescht alte Backups gemaess Retention-Limits.
 
-    ``manual`` und ``pre-apply`` teilen sich den Pre-Apply-Pool (User
-    erwartet, dass manuelle Backups nicht ploetzlich weg sind).
+    ``manual``, ``pre-apply`` und ``post-apply`` teilen sich den
+    Pre-Apply-Pool (User erwartet, dass manuelle Backups nicht
+    ploetzlich weg sind und Pre/Post-Apply-Paare zusammen verfallen).
     ``scheduled`` hat einen separaten Pool.
 
     Limit <= 0 deaktiviert das Pruning fuer den Pool (defensiv -
@@ -270,7 +271,9 @@ def prune_backups(
     if not device_dir.exists():
         return []
     records = _read_index(device_dir)
-    pre_apply_pool = [r for r in records if r.trigger in ("manual", "pre-apply")]
+    pre_apply_pool = [
+        r for r in records if r.trigger in ("manual", "pre-apply", "post-apply")
+    ]
     scheduled_pool = [r for r in records if r.trigger == "scheduled"]
 
     keep_pre = _keep_newest(pre_apply_pool, retention_pre_apply)
