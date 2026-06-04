@@ -157,8 +157,16 @@
         <div class="login-view" data-view="picker">
           <p class="login-hint" id="login-hint"></p>
 
-          <label class="form-label" for="vault-select">Tresor</label>
-          <select id="vault-select" class="form-select"></select>
+          <label class="form-label" for="login-vault-path">Pfad zum Tresor</label>
+          <div class="form-input-with-button">
+            <input id="login-vault-path" class="form-input" type="text"
+                   placeholder="z. B. C:\Users\du\Documents\firewalls.opnvault"
+                   autocomplete="off" spellcheck="false" data-lpignore="true" />
+            <button type="button" class="btn-input-adornment" id="login-browse-btn" hidden>
+              Datei suchen…
+            </button>
+          </div>
+          <div id="login-known-vaults" class="ssw-known-vaults" hidden></div>
 
           <label class="form-label" for="password-input">Master-Passwort</label>
           <input

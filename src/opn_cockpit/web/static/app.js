@@ -400,34 +400,55 @@
     const response = await apiGet('/api/vaults');
     if (!response.ok) throw new Error('Konnte Tresor-Liste nicht abrufen.');
     const data = await response.json();
-    const select = $('#vault-select');
-    select.innerHTML = '';
+
+    const pathInput = $('#login-vault-path');
+    const knownBox = $('#login-known-vaults');
+    knownBox.innerHTML = '';
 
     if (!data.vaults || data.vaults.length === 0) {
       $('#login-hint').textContent =
-        'Es wurde noch kein Tresor gefunden. Klicke „Neuen Tresor anlegen…" um zu starten.';
-      $('#unlock-btn').disabled = true;
-      $('#password-input').disabled = true;
-      select.disabled = true;
-      select.innerHTML = '<option>(kein Tresor vorhanden)</option>';
+        'Es wurde noch kein Tresor gefunden. Klicke „Neuen Tresor anlegen…" um zu starten, oder waehle einen Tresor von einem anderen Speicherort (z. B. USB-Stick).';
+      pathInput.value = '';
+      knownBox.hidden = true;
     } else {
       const n = data.vaults.length;
       $('#login-hint').textContent =
         n === 1
           ? 'Ein Tresor gefunden — bitte Passwort eingeben.'
-          : `${n} Tresore gefunden — bitte einen auswählen.`;
-      data.vaults.forEach((v) => {
-        const opt = document.createElement('option');
-        opt.value = v.path;
-        opt.textContent = `${v.filename}    —    ${v.path}`;
-        if (v.is_default) opt.selected = true;
-        select.appendChild(opt);
-      });
+          : `${n} Tresore gefunden — anklicken oder Pfad eintragen.`;
+      // Default vault als vorausgefuelltes Pfad-Feld
+      const def = data.vaults.find((v) => v.is_default) || data.vaults[0];
+      if (def && !pathInput.value) pathInput.value = def.path;
+
+      // Bekannte Tresore als Klick-Chips unter dem Pfad-Input
+      const label = document.createElement('div');
+      label.className = 'ssw-known-vaults-label';
+      label.textContent = 'Bekannte Tresore (Klick uebernimmt den Pfad):';
+      knownBox.appendChild(label);
+      for (const v of data.vaults) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'ssw-vault-chip';
+        chip.textContent = v.filename;
+        chip.title = v.path;
+        chip.addEventListener('click', () => {
+          pathInput.value = v.path;
+          $('#password-input').focus();
+        });
+        knownBox.appendChild(chip);
+      }
+      knownBox.hidden = false;
+      // Button + Passwort sind im neuen Markup immer enabled
       $('#unlock-btn').disabled = false;
       $('#password-input').disabled = false;
-      select.disabled = false;
-      $('#password-input').focus();
+      setTimeout(() => $('#password-input').focus(), 0);
     }
+
+    // "Datei suchen..."-Button nur im Single-User-Mode anzeigen.
+    // Im Multi-User-Server-Mode laeuft der Server remote, der native
+    // Picker waere dort unsichtbar.
+    const browseBtn = $('#login-browse-btn');
+    if (browseBtn) browseBtn.hidden = state.serverMode === 'user-db';
 
     const nameInput = $('#new-vault-name');
     const dirInput = $('#new-vault-directory');
@@ -435,6 +456,42 @@
     if (dirInput && !dirInput.value) dirInput.value = data.suggested_new_directory || '';
     renderPathSuggestions(data.path_suggestions || []);
     updateVaultTargetPreview();
+  }
+
+  async function pickLoginVaultFile() {
+    // Triggert serverseitig den nativen Windows-File-Dialog (gleicher
+    // Endpoint wie der Tresor-Switch-Modal nach dem Login).
+    const btn = $('#login-browse-btn');
+    if (btn) btn.disabled = true;
+    try {
+      const response = await apiGet('/api/files/pick-file');
+      if (response.status === 403) {
+        showLoginError('Datei-Picker steht nur im Single-User-Mode zur Verfuegung.');
+        return;
+      }
+      if (response.status === 501) {
+        showLoginError('Datei-Picker steht derzeit nur unter Windows zur Verfuegung. Bitte Pfad eintragen.');
+        return;
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        showLoginError(data.detail || 'Datei-Picker fehlgeschlagen.');
+        return;
+      }
+      const data = await response.json();
+      if (data.cancelled || !data.path) return;
+      $('#login-vault-path').value = data.path;
+      $('#password-input').focus();
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function showLoginError(msg) {
+    const box = $('#login-error');
+    if (!box) return;
+    box.textContent = msg;
+    box.hidden = false;
   }
 
   function joinPath(dir, filename) {
@@ -631,9 +688,16 @@
   }
 
   async function doUnlock() {
-    const path = $('#vault-select').value;
+    const path = $('#login-vault-path').value.trim();
     const password = $('#password-input').value;
-    if (!path || !password) return;
+    if (!path) {
+      showLoginError('Bitte Pfad zum Tresor eintragen oder bekannten Tresor anklicken.');
+      return;
+    }
+    if (!password) {
+      showLoginError('Master-Passwort fehlt.');
+      return;
+    }
     const errorBox = $('#login-error');
     errorBox.hidden = true;
 
@@ -4688,6 +4752,12 @@
     $('#unlock-btn').addEventListener('click', doUnlock);
     $('#password-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doUnlock();
+    });
+    const loginBrowse = $('#login-browse-btn');
+    if (loginBrowse) loginBrowse.addEventListener('click', pickLoginVaultFile);
+    const loginPath = $('#login-vault-path');
+    if (loginPath) loginPath.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('#password-input').focus();
     });
     $('#create-vault-btn').addEventListener('click', () => {
       showLoginView('create');
