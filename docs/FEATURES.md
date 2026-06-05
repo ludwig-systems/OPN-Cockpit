@@ -228,35 +228,162 @@ Sicht auf die Box kappt (Filter-Regel, Interface-Down, Routing-Fehler).
 
 ### Setup
 
-Pro Gerät, das das Feature nutzen soll:
+Pro Gerät, das das Feature nutzen soll, in vier Schritten:
 
-1. **Auf der OPNsense:** SSH-Service einschalten (System → Settings → 
-   Administration), User mit Shell-Zugang anlegen oder den
-   bestehenden `root` mit Public-Key-Auth ausstatten
-   (`Login: SSH only` empfohlen).
-2. **Private Key generieren** (auf deinem PAW):
+#### Schritt 1: SSH auf der OPNsense aktivieren
+
+OPNsense → **System → Settings → Administration**, im Block *Secure
+Shell*:
+
+- ☑ **Enable Secure Shell**
+- ☑ **Permit root user login** *(falls du `root` für den Rollback nutzen
+  willst — siehe Schritt 2)*
+- ☑ **Permit password login** kurz angehakt lassen, bis der Key getestet
+  ist. **Nach erfolgreichem Test wieder ABHAKEN** — Public-Key-Auth ist
+  sicherer als Passwort-Auth.
+- **Listen Interfaces**: am besten ein MGMT-Interface, nicht WAN.
+- **Save** unten.
+
+Der SSH-User braucht Schreibrechte auf `/conf/config.xml` und darf
+`configctl` ausführen. **`root` erfüllt beides out of the box** und ist
+die einfachste Wahl. Wer einen separaten User will, muss
+ihm in *System → Access → Users* die Gruppe `wheel` zuweisen — sonst
+scheitert der Rollback an Rechtemangel.
+
+#### Schritt 2: SSH-Key-Paar generieren
+
+Ein Key-Paar besteht aus zwei Dateien:
+
+- **Privater Key** (geht in den Cockpit-Tresor)
+- **Öffentlicher Key** (`.pub`, geht in die OPNsense)
+
+##### Windows (PowerShell)
+
+```powershell
+# Arbeitsverzeichnis (Beispiel)
+cd "$env:USERPROFILE\Documents"
+
+# Key erzeugen — Algorithmus Ed25519 (klein, schnell, modern)
+ssh-keygen -t ed25519 -f opn-cockpit-rollback -C "opn-cockpit-safety-net"
+```
+
+`ssh-keygen` fragt nach einer Passphrase — **leer lassen** (Enter
+drücken). Cockpit muss den Key headless im Hintergrund-Thread benutzen;
+mit Passphrase würde der Rollback scheitern.
+
+Danach liegen zwei Dateien:
+
+| Datei | Inhalt | Wo hin |
+|---|---|---|
+| `opn-cockpit-rollback` | Privater Key (`-----BEGIN OPENSSH PRIVATE KEY-----`) | In den Cockpit-Tresor (Schritt 4) |
+| `opn-cockpit-rollback.pub` | Public-Key (`ssh-ed25519 AAAA…`) | In die OPNsense (Schritt 3) |
+
+> Falls `ssh-keygen` nicht gefunden wird: Windows 10/11 hat seit Version
+> 1809 einen OpenSSH-Client. Aktivieren via
+> **Einstellungen → Apps → Optionale Features → "OpenSSH-Client" hinzufügen**,
+> oder per PowerShell als Admin:
+> ```powershell
+> Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+> ```
+
+##### Linux / macOS
+
+```bash
+ssh-keygen -t ed25519 -f ~/opn-cockpit-rollback -C "opn-cockpit-safety-net"
+```
+
+(Passphrase wieder leer lassen.)
+
+#### Schritt 3: Public-Key in die OPNsense legen
+
+1. **Inhalt der `.pub`-Datei in die Zwischenablage kopieren:**
+
+   PowerShell:
    ```powershell
-   ssh-keygen -t ed25519 -f opn-cockpit-rollback -C "opn-cockpit-safety-net"
+   Get-Content opn-cockpit-rollback.pub | Set-Clipboard
    ```
-   → Public-Key (`.pub`) in OPNsense unter User → **Authorized Keys**
-   einfügen.
-3. **In Cockpit:** Karte → **„Bearbeiten"** → scrollen zu
-   *Safety-Net via SSH aktivieren*:
+   Linux/macOS:
+   ```bash
+   cat ~/opn-cockpit-rollback.pub | xclip -selection clipboard   # X11
+   cat ~/opn-cockpit-rollback.pub | pbcopy                       # macOS
+   ```
+
+   Der String beginnt mit `ssh-ed25519 AAAA…` und ist eine Zeile.
+
+2. **OPNsense-Web-UI → System → Access → Users.**
+3. Den User aufmachen, mit dem der Rollback laufen soll (z. B. `root`).
+4. Scrollen zum Block **"authorized keys"** — Textbox. **Den
+   kompletten `.pub`-Inhalt** dort einfügen (an bestehende Keys
+   anhängen, nicht überschreiben — jede Zeile = ein Key).
+5. **Save** unten.
+
+#### Schritt 4: Key in Cockpit hinterlegen
+
+1. **Privaten Key in die Zwischenablage kopieren** — KOMPLETT, inklusive
+   `-----BEGIN OPENSSH PRIVATE KEY-----` und `-----END OPENSSH PRIVATE KEY-----`.
+
+   PowerShell:
+   ```powershell
+   Get-Content opn-cockpit-rollback | Set-Clipboard
+   ```
+   Linux/macOS:
+   ```bash
+   cat ~/opn-cockpit-rollback | xclip -selection clipboard   # X11
+   cat ~/opn-cockpit-rollback | pbcopy                       # macOS
+   ```
+
+2. In Cockpit: **Karte → "Bearbeiten"** → unten scrollen bis zum Block
+   *Safety-Net via SSH aktivieren*.
+
+3. Felder ausfüllen:
 
    | Feld | Wert |
    |---|---|
-   | Safety-Net aktivieren | Häkchen setzen |
-   | SSH-Host | leer = wie API-Host; sonst explizit (z. B. anderer FQDN) |
-   | SSH-Port | Default 22 |
-   | SSH-User | z. B. `root` |
-   | SSH-Private-Key (PEM) | Inhalt der `opn-cockpit-rollback`-Datei
-     einfügen |
+   | ☑ **Safety-Net via SSH aktivieren** | Häkchen setzen |
+   | **SSH-Host** | leer = wie API-Host (Default); explizit nur wenn die OPNsense SSH auf einer anderen Adresse/FQDN hört als die API |
+   | **SSH-Port** | Default `22` |
+   | **SSH-User** | z. B. `root` |
+   | **SSH-Private-Key (PEM)** | privaten Key aus der Zwischenablage einfügen — **mit** den `-----BEGIN ...-----` / `-----END ...-----` Zeilen |
 
-   Beim Edit wird der hinterlegte Key als „im Tresor hinterlegt"
-   markiert — leer lassen = unverändert.
-4. **Test:** Tresor speichern, Karte neu öffnen — im Info-Tab erscheint
-   ein „SSH konfiguriert"-Badge (über den `ssh_key_present`-Boolean
-   in der DeviceResponse).
+4. **Speichern** im Modal-Footer.
+
+5. Karte wieder öffnen → der Hint unter dem Key-Feld sagt **"Key ist im
+   Tresor hinterlegt — leer lassen = unverändert."** → Setup ist durch.
+
+#### Schritt 5: Vorab-Test (empfohlen)
+
+Bevor du den Key produktiv einsetzt, prüfe ihn von Hand:
+
+```powershell
+# Funktioniert der Login per Key?
+ssh -i opn-cockpit-rollback -p 22 root@<opnsense-host> "echo OK; uname -a"
+```
+
+Erwartete Ausgabe:
+```
+OK
+FreeBSD opnsense 14.2-RELEASE-p3 ...
+```
+
+- Wenn das funktioniert: Cockpit kann's auch. Public-Key-Auth in OPNsense
+  jetzt erzwingen (Schritt 1, "Permit password login" abhaken).
+- Wenn nicht: ssh-Output gibt meist die Ursache (Permission denied →
+  Public-Key nicht oder falsch eingetragen; Connection refused →
+  SSH-Service aus oder falscher Port).
+
+#### Schritt 6: Privaten Key sichern + lokal löschen
+
+Der Key liegt ab jetzt verschlüsselt im **`.opnvault`**-Tresor. Die
+lokale Datei `opn-cockpit-rollback` brauchst du nicht mehr — bewahre
+sie nur in einem **Passwort-Safe** auf (KeePass, 1Password, …) und
+lösche die lokale Klartext-Kopie:
+
+```powershell
+Remove-Item opn-cockpit-rollback, opn-cockpit-rollback.pub
+```
+
+Wer den Tresor weitergibt, gibt damit auch den SSH-Zugang auf die OPNsense
+weiter — der Tresor-Master-Passwort-Schutz ist der einzige Gate.
 
 ### Akzeptierte Key-Formate
 
