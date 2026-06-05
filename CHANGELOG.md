@@ -4,6 +4,22 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### Auto-Retry-Persistenz + Orphan-Adoption
+
+- ``RetryWatcher``-Queue ueberlebt jetzt Server-Restart UND Session-
+  Sperre. State liegt in ``<app_data>/state/retry-queue.json`` und wird
+  nach jeder Mutation atomar geschrieben (write-to-tmp + os.replace).
+- Jobs tragen jetzt einen ``vault_path`` neben dem ``session_token``.
+  Beim Lock wird der Token nicht mehr geloescht, sondern auf ``""``
+  gesetzt (Orphan). Beim naechsten Vault-Unlock adoptiert der Watcher
+  den Job ueber den vault_path und uebernimmt den neuen Token.
+- Restart-Pfad: nach Watcher-Init werden persistierte Jobs als Orphan
+  geladen; Daemon-Thread startet automatisch, wenn die Queue nicht
+  leer ist. Sobald wieder jemand den entsprechenden Tresor entsperrt,
+  laufen die Retries weiter (bis max_duration ablaeuft).
+- Folge fuer LXC-Updates: ``apt update``, ``opn-cockpit``-Restart -
+  arme Retries gehen nicht mehr verloren.
+
 ### Config-Compare fuer Routes + Rules
 
 - Compare-Modal kann jetzt zwischen drei Subsystemen wechseln:

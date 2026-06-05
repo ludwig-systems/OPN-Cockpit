@@ -720,9 +720,11 @@ def _auto_arm_retry_for_failures(
         return
     interval_s = max(60, settings.auto_retry_interval_minutes * 60)
     max_duration_s = max(3600, settings.auto_retry_max_hours * 3600)
+    vault_path = session.vault_path
     watcher.schedule(
         plan_id=plan_id,
         session_token=token,
+        vault_path=str(vault_path) if vault_path is not None else "",
         device_ids=failed_ids,
         interval_s=interval_s,
         max_duration_s=max_duration_s,

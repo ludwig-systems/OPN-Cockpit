@@ -66,9 +66,11 @@ def schedule_retry(
         payload.device_ids, session.opened.data.devices, session,
     )
     watcher = _watcher(request)
+    vault_path = session.vault_path
     job = watcher.schedule(
         plan_id=payload.plan_id,
         session_token=token,
+        vault_path=str(vault_path) if vault_path is not None else "",
         device_ids=payload.device_ids,
         interval_s=payload.interval_s,
         max_duration_s=payload.max_duration_s,

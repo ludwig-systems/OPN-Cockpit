@@ -234,8 +234,11 @@ def lock(
 ) -> None:
     """Sperrt die aktuelle Session und revoked das Token.
 
-    Beendet auch alle laufenden Retry-Watcher-Jobs dieses Tokens — sonst
-    haetten die nach Auto-Lock noch eine Weile (unsinnig) weiterprobiert.
+    Retry-Watcher-Jobs werden NICHT geloescht, sondern auf Orphan-Status
+    gesetzt (session_token=""). Sobald jemand denselben Tresor wieder
+    entsperrt, adoptiert der Watcher die Jobs automatisch ueber den
+    vault_path. Beim Auto-Lock haengen also keine Retries verloren -
+    sie ueberleben den Lock-Cycle bis ``max_duration_s`` abgelaufen ist.
     """
     session, token = pair
     vault_path = session.vault_path

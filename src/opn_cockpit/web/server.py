@@ -17,12 +17,13 @@ from fastapi.templating import Jinja2Templates
 from starlette.types import Message, Receive, Scope, Send
 
 from opn_cockpit import __version__
+from opn_cockpit.config import get_app_data_dir
 from opn_cockpit.runtime_version import get_runtime_version
 from opn_cockpit.web.api import register_api_routes
 from opn_cockpit.web.auth.manager import SessionManager
 from opn_cockpit.web.backup_scheduler import BackupScheduler
 from opn_cockpit.web.rate_limit import RateLimiter
-from opn_cockpit.web.retry_watcher import RetryWatcher
+from opn_cockpit.web.retry_watcher import QUEUE_FILE_NAME, RetryWatcher
 from opn_cockpit.web.server_state import ServerState
 
 WEB_DIR = Path(__file__).parent
@@ -76,7 +77,14 @@ def create_app() -> FastAPI:
     app.state.templates = templates
     session_manager = SessionManager()
     app.state.session_manager = session_manager
-    app.state.retry_watcher = RetryWatcher(session_manager)
+    # Retry-Queue persistiert in <app_data>/state/retry-queue.json damit
+    # Jobs Container-Restarts ueberleben (Orphan-Adoption beim naechsten
+    # Vault-Unlock). Pfad-Resolution via OPNCOCKPIT_DATA_DIR-Override
+    # damit Tests einen tmp_path injizieren koennen.
+    retry_queue_path = get_app_data_dir() / "state" / QUEUE_FILE_NAME
+    app.state.retry_watcher = RetryWatcher(
+        session_manager, queue_path=retry_queue_path,
+    )
     app.state.server_state = ServerState.from_settings()
     # Scheduler kennt jetzt sowohl SessionManager (Single-User) als auch
     # ServerState (Multi-User-Server-Mode mit zentralem Vault). Bug aus
