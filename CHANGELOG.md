@@ -4,6 +4,28 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### Config-Compare fuer Routes + Rules
+
+- Compare-Modal kann jetzt zwischen drei Subsystemen wechseln:
+  **Aliase**, **Routen**, **Regeln** (Tab-Strip oben). Backend-Endpoint
+  ``POST /api/inventory/compare`` akzeptiert ``subsystem=routes|rules``
+  zusaetzlich zu ``aliases``.
+- ``config_compare.py`` erweitert um ``extract_routes`` /
+  ``compare_routes`` (Identitaet = ``network|gateway``,
+  Fingerprint ueber descr + disabled) und ``extract_rules`` /
+  ``compare_rules`` (Identitaet = Description-Key oder Fingerprint
+  bei fehlender Description, Fingerprint ueber Action/Interface/
+  Direction/Protocol/Src/Dst/Gateway/Log/Enabled).
+- Rules werden aus dem core-XML gelesen, nicht ueber die
+  os-firewall-API - der Vergleich funktioniert auch wenn das Plugin
+  auf einzelnen Boxen fehlt.
+- UI: Cell-Label adaptiert sich pro Subsystem (Aliases: "N type",
+  Routes: "via gw", Rules: "action"). Drift-Markierung weiterhin
+  master-relativ via Fingerprint-Vergleich.
+- **Sync-Button** bleibt vorerst Alias-only. Routes/Rules-Sync
+  folgt - der OPNsense-Inhaltstransfer pro Subsystem ist mehr Arbeit
+  als nur das UI-Feld umzustellen.
+
 ### Firewall-Rules CRUD (Erst-Iteration)
 
 - Neues Subsystem ``firewall_rules`` mit ``RuleAdapter`` +

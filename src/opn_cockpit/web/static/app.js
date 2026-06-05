@@ -1437,12 +1437,23 @@
 
   // -------------------- Config-Compare-Modal --------------------
 
+  let currentCompareSubsystem = 'aliases';
+
   async function openCompareModal(subsystem = 'aliases') {
     const ids = Array.from(state.selectedDeviceIds);
     if (ids.length < 2) {
       showToast('Mindestens 2 Geräte für den Vergleich auswählen.');
       return;
     }
+    currentCompareSubsystem = subsystem;
+    // Aufklapp + Spalten-Reihenfolge sind subsystem-spezifisch (Row-Keys
+    // unterscheiden sich) - bei jedem Wechsel resetten.
+    compareExpandedRows.clear();
+    compareColumnOrder = [];
+    // Tab-Highlight + Modal-Titel anpassen
+    document.querySelectorAll('.compare-tab').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.subsystem === subsystem);
+    });
     $('#compare-modal').hidden = false;
     $('#cmp-status').textContent = 'Lade Vergleich…';
     $('#cmp-head').innerHTML = '';
@@ -1698,10 +1709,18 @@
           if (!matchesMaster && hasDrift) {
             // markiere als drift
           }
-          label = `${cell.content_count} ${cell.type}`;
+          // Subsystem-spezifischer Cell-Label: bei Aliases "N type", bei
+          // Routes "via gw", bei Rules nur die Action.
+          if (data.subsystem === 'routes') {
+            label = `via ${cell.type}`;
+          } else if (data.subsystem === 'rules') {
+            label = cell.type || '?';
+          } else {
+            label = `${cell.content_count} ${cell.type}`;
+          }
           title = (
-            `Typ: ${cell.type}\n` +
-            `Eintraege: ${cell.content_count}\n` +
+            `${data.subsystem === 'aliases' ? 'Typ' : (data.subsystem === 'routes' ? 'Gateway' : 'Action')}: ${cell.type}\n` +
+            (data.subsystem === 'aliases' ? `Eintraege: ${cell.content_count}\n` : '') +
             `Fingerprint: ${cell.content_fingerprint}\n` +
             (cell.description ? `Beschreibung: ${cell.description}` : '')
           );
@@ -5775,6 +5794,13 @@
     const cmpModal = $('#compare-modal');
     if (cmpModal) cmpModal.addEventListener('click', (e) => {
       if (e.target.id === 'compare-modal') closeCompareModal();
+    });
+    document.querySelectorAll('.compare-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const subsystem = btn.dataset.subsystem;
+        if (!subsystem || subsystem === currentCompareSubsystem) return;
+        openCompareModal(subsystem).catch(() => {});
+      });
     });
 
     // Sidebar actions

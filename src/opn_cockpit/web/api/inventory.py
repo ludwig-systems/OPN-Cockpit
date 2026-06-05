@@ -33,8 +33,14 @@ from opn_cockpit.backups.storage import (
 )
 from opn_cockpit.core.config_compare import (
     AliasItem,
+    RouteItem,
+    RuleItem,
     compare_aliases,
+    compare_routes,
+    compare_rules,
     extract_aliases,
+    extract_routes,
+    extract_rules,
 )
 from opn_cockpit.core.config_drift import compute_drift_hash
 from opn_cockpit.core.device_info import (
@@ -722,8 +728,8 @@ def compare_configs(
         probe_results = list(pool.map(probe, targets))
 
     columns_info: list[CompareColumnInfo] = []
-    per_device_aliases: dict[str, list[AliasItem] | None] = {}
     column_order: list[str] = []
+    xml_by_device: dict[str, bytes | None] = {}
     for vd, xml_bytes, summary in probe_results:
         column_order.append(vd.id)
         columns_info.append(CompareColumnInfo(
@@ -732,38 +738,53 @@ def compare_configs(
             reachable=xml_bytes is not None,
             summary=summary,
         ))
-        per_device_aliases[vd.id] = (
-            extract_aliases(xml_bytes) if xml_bytes is not None else None
-        )
+        xml_by_device[vd.id] = xml_bytes
 
     if payload.subsystem == "aliases":
+        per_device_aliases: dict[str, list[AliasItem] | None] = {
+            did: extract_aliases(x) if x is not None else None
+            for did, x in xml_by_device.items()
+        }
         comparison = compare_aliases(per_device_aliases, column_order)
-        rows = [
-            CompareRowResponse(
-                name=row.name,
-                uniform=row.uniform,
-                cells=[
-                    CompareCellResponse(
-                        device_id=did,
-                        status=cell.status,
-                        type=cell.type,
-                        content_fingerprint=cell.content_fingerprint,
-                        content_count=cell.content_count,
-                        description=cell.description,
-                        content=list(cell.content),
-                    )
-                    for did, cell in row.cells
-                ],
-            )
-            for row in comparison.rows
-        ]
-        summary = comparison.summary
+    elif payload.subsystem == "routes":
+        per_device_routes: dict[str, list[RouteItem] | None] = {
+            did: extract_routes(x) if x is not None else None
+            for did, x in xml_by_device.items()
+        }
+        comparison = compare_routes(per_device_routes, column_order)
+    elif payload.subsystem == "rules":
+        per_device_rules: dict[str, list[RuleItem] | None] = {
+            did: extract_rules(x) if x is not None else None
+            for did, x in xml_by_device.items()
+        }
+        comparison = compare_rules(per_device_rules, column_order)
     else:
         # Schema-Validator stellt das eigentlich sicher, defensiver Fallback
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Subsystem '{payload.subsystem}' nicht unterstuetzt.",
         )
+
+    rows = [
+        CompareRowResponse(
+            name=row.name,
+            uniform=row.uniform,
+            cells=[
+                CompareCellResponse(
+                    device_id=did,
+                    status=cell.status,
+                    type=cell.type,
+                    content_fingerprint=cell.content_fingerprint,
+                    content_count=cell.content_count,
+                    description=cell.description,
+                    content=list(cell.content),
+                )
+                for did, cell in row.cells
+            ],
+        )
+        for row in comparison.rows
+    ]
+    summary = comparison.summary
 
     session.touch()
     return CompareResponse(

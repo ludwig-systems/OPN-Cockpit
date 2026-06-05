@@ -479,8 +479,9 @@ class CompareRequest(BaseModel):
     """N Geraete + Subsystem zum Vergleichen."""
 
     device_ids: list[str] = Field(..., min_length=2)
-    subsystem: str = Field(..., pattern=r"^(aliases)$")
-    """Aktuell nur 'aliases'. Routes / Firewall-Rules folgen spaeter."""
+    subsystem: str = Field(..., pattern=r"^(aliases|routes|rules)$")
+    """Unterstuetzte Subsysteme: aliases, routes, rules. Unbound-DNS
+    folgt mit der Unbound-CRUD-Iteration."""
 
 
 class CompareCellResponse(BaseModel):
