@@ -2080,6 +2080,15 @@
     $('#ad-apikey').placeholder = '';
     $('#ad-apisecret').placeholder = '';
     $('#ad-credentials-hint').hidden = true;
+    // SSH-Felder zuruecksetzen
+    $('#ad-ssh-enabled').checked = !!data.ssh_enabled;
+    $('#ad-ssh-host').value = data.ssh_host || '';
+    $('#ad-ssh-port').value = String(data.ssh_port || 22);
+    $('#ad-ssh-user').value = data.ssh_user || '';
+    $('#ad-ssh-key').value = '';
+    const sshHint = $('#ad-ssh-key-hint');
+    if (sshHint) sshHint.textContent =
+      'Akzeptierte Formate: Ed25519, ECDSA, RSA, DSA. Bei Anlage Pflichtfeld wenn Safety-Net an.';
     $('#add-modal-title').textContent = data.duplicateOf
       ? `„${data.duplicateOf}" duplizieren`
       : 'Gerät hinzufügen';
@@ -2110,6 +2119,16 @@
     $('#ad-apikey').placeholder = 'Lade…';
     $('#ad-apisecret').placeholder = '(unverändert)';
     $('#ad-credentials-hint').hidden = false;
+    // SSH-Felder aus dem Device-Response vorbefuellen
+    $('#ad-ssh-enabled').checked = !!device.ssh_enabled;
+    $('#ad-ssh-host').value = device.ssh_host || '';
+    $('#ad-ssh-port').value = String(device.ssh_port || 22);
+    $('#ad-ssh-user').value = device.ssh_user || '';
+    $('#ad-ssh-key').value = '';
+    const sshHint = $('#ad-ssh-key-hint');
+    if (sshHint) sshHint.textContent = device.ssh_key_present
+      ? 'Key ist im Tresor hinterlegt — leer lassen = unveraendert.'
+      : 'Akzeptierte Formate: Ed25519, ECDSA, RSA, DSA.';
     $('#add-modal-title').textContent = `„${device.name}" bearbeiten`;
     $('#add-modal-confirm').textContent = 'Speichern';
     $('#add-modal-error').hidden = true;
@@ -2163,6 +2182,13 @@
     // trailing-Whitespace/Newline; OPNsense's Auth-Vergleich ist
     // bytewise und kippt dann mit "Authentication failed".
     const apiSecret = $('#ad-apisecret').value.trim();
+    // SSH-Felder einsammeln
+    const sshEnabled = $('#ad-ssh-enabled').checked;
+    const sshHost = $('#ad-ssh-host').value.trim();
+    const sshPortRaw = $('#ad-ssh-port').value;
+    const sshPort = parseInt(sshPortRaw, 10) || 22;
+    const sshUser = $('#ad-ssh-user').value.trim();
+    const sshKey = $('#ad-ssh-key').value;  // KEIN trim - PEM-Format pinpoint-sensitiv
 
     if (modalMode === 'add') {
       if (!name || !host || !apiKey || !apiSecret) {
@@ -2195,13 +2221,23 @@
           tags, descr,
           api_key: apiKey,
           api_secret: apiSecret,
+          ssh_enabled: sshEnabled,
+          ssh_host: sshHost,
+          ssh_port: sshPort,
+          ssh_user: sshUser,
+          ssh_private_key_pem: sshKey,
         });
       } else {
         const body = {
           name, host, port,
           tls_verify: tlsVerify,
           tags, descr,
+          ssh_enabled: sshEnabled,
+          ssh_host: sshHost,
+          ssh_port: sshPort,
+          ssh_user: sshUser,
         };
+        if (sshKey.trim()) body.ssh_private_key_pem = sshKey;
         // Key nur senden wenn der User ihn wirklich geaendert hat - der
         // Edit-Dialog laedt den aktuellen Key vor, sodass die meisten
         // Saves den Key unveraendert lassen wuerden.
@@ -3860,6 +3896,7 @@
     }
     $('#pl-confirm').checked = false;
     $('#plan-preview-error').hidden = true;
+    showSafetyNetIfAvailable();
   }
 
   async function submitApply() {
@@ -3876,7 +3913,14 @@
     back.disabled = true;
     next.textContent = 'Rolle aus…';
     try {
-      const body = retryDeviceIds ? { device_ids: retryDeviceIds } : null;
+      const safetyNetCheckbox = $('#pl-safety-net');
+      const safetyNetArmed = safetyNetCheckbox && !safetyNetCheckbox.checked
+        ? false
+        : (safetyNetCheckbox && safetyNetCheckbox.checked);
+      const body = {
+        device_ids: retryDeviceIds || null,
+        safety_net: !!safetyNetArmed,
+      };
       const response = await apiPost(
         `/api/plans/${encodeURIComponent(currentPlan.plan_id)}/apply`,
         body,
@@ -3895,6 +3939,9 @@
       pollHeartbeat();
       // Outstanding-Indikator hat sich vermutlich geaendert.
       loadOutstanding().catch(() => {});
+      if (safetyNetArmed) {
+        startSafetyNetPolling(currentPlan.plan_id).catch(() => {});
+      }
     } catch (err) {
       const errBox = $('#plan-preview-error');
       errBox.textContent = err.message;
@@ -3902,6 +3949,155 @@
     } finally {
       next.disabled = false;
       back.disabled = false;
+    }
+  }
+
+  // -------------------- Safety-Net (Cisco-Style commit-confirmed) --------------------
+
+  let safetyNetPollTimer = null;
+  let safetyNetCountdownTimer = null;
+  let safetyNetCurrentPlanId = null;
+
+  function showSafetyNetIfAvailable() {
+    // Wird bei Plan-Preview gerufen: blendet die Checkbox ein wenn mind.
+    // ein Ziel-Geraet SSH konfiguriert hat. window-Wert kommt aus den
+    // VaultSettings (settingsCache.safety_net_window_s) wenn vorhanden.
+    const row = $('#pl-safety-net-row');
+    const cb = $('#pl-safety-net');
+    if (!row || !cb) return;
+    cb.checked = false;
+    const ids = Array.from(state.selectedDeviceIds);
+    const sshCount = state.devices
+      .filter((d) => ids.includes(d.id))
+      .filter((d) => d.ssh_enabled && d.ssh_key_present)
+      .length;
+    if (sshCount === 0) {
+      row.hidden = true;
+      return;
+    }
+    row.hidden = false;
+    const wnd = (state.settings && state.settings.safety_net_window_s) || 120;
+    const wndEl = $('#pl-safety-net-window');
+    if (wndEl) wndEl.textContent = String(wnd);
+  }
+
+  async function startSafetyNetPolling(planId) {
+    safetyNetCurrentPlanId = planId;
+    const banner = $('#pl-safety-net-banner');
+    if (banner) banner.hidden = false;
+    await pollSafetyNetOnce();
+    if (safetyNetPollTimer) clearInterval(safetyNetPollTimer);
+    safetyNetPollTimer = setInterval(() => {
+      pollSafetyNetOnce().catch(() => {});
+    }, 3000);
+    if (safetyNetCountdownTimer) clearInterval(safetyNetCountdownTimer);
+    safetyNetCountdownTimer = setInterval(updateSafetyNetCountdown, 250);
+  }
+
+  function stopSafetyNetPolling() {
+    if (safetyNetPollTimer) { clearInterval(safetyNetPollTimer); safetyNetPollTimer = null; }
+    if (safetyNetCountdownTimer) { clearInterval(safetyNetCountdownTimer); safetyNetCountdownTimer = null; }
+    safetyNetCurrentPlanId = null;
+    const banner = $('#pl-safety-net-banner');
+    if (banner) banner.hidden = true;
+  }
+
+  let safetyNetLatestEntries = [];
+
+  async function pollSafetyNetOnce() {
+    if (!safetyNetCurrentPlanId) return;
+    try {
+      const r = await apiGet(
+        `/api/plans/${encodeURIComponent(safetyNetCurrentPlanId)}/safety-net`,
+      );
+      if (!r.ok) return;
+      const data = await r.json();
+      safetyNetLatestEntries = data.entries || [];
+      renderSafetyNetEntries();
+      const stillArmed = safetyNetLatestEntries.some((e) => !e.resolved);
+      if (!stillArmed) {
+        // Banner kurz stehen lassen damit User die Resolution sieht,
+        // dann ausblenden.
+        setTimeout(stopSafetyNetPolling, 4000);
+      }
+    } catch (_) { /* ignoriert */ }
+  }
+
+  function renderSafetyNetEntries() {
+    const box = $('#pl-safety-net-entries');
+    if (!box) return;
+    box.innerHTML = '';
+    for (const e of safetyNetLatestEntries) {
+      const row = document.createElement('div');
+      row.className = 'sn-entry';
+      const label = e.device_name || e.device_id;
+      if (e.resolved) {
+        const resColor = e.resolution === 'confirmed' ? 'var(--ok, #2e8b57)' : 'var(--danger, #c0392b)';
+        row.innerHTML = `<span style="color:${resColor};font-weight:600;">${e.resolution}</span> · ${label} — ${e.resolution_summary || ''}`;
+      } else {
+        row.textContent = `armed · ${label}`;
+      }
+      box.appendChild(row);
+    }
+  }
+
+  function updateSafetyNetCountdown() {
+    const el = $('#pl-safety-net-countdown');
+    if (!el) return;
+    const armed = safetyNetLatestEntries.filter((e) => !e.resolved);
+    if (armed.length === 0) {
+      el.textContent = '—';
+      return;
+    }
+    const now = Date.now();
+    const minRemaining = Math.min(...armed.map((e) => e.deadline_ms - now));
+    if (minRemaining < 0) {
+      el.textContent = 'Rollback laeuft…';
+    } else {
+      el.textContent = `${Math.ceil(minRemaining / 1000)} s`;
+    }
+  }
+
+  async function safetyNetConfirmAll() {
+    if (!safetyNetCurrentPlanId) return;
+    try {
+      const r = await apiPost(
+        `/api/plans/${encodeURIComponent(safetyNetCurrentPlanId)}/safety-net/confirm`,
+      );
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok && r.status !== 204) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Bestaetigung fehlgeschlagen (${r.status})`, true);
+        return;
+      }
+      showToast('Safety-Net bestaetigt.');
+      await pollSafetyNetOnce();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  async function safetyNetAbortAll() {
+    if (!safetyNetCurrentPlanId) return;
+    const ok = window.confirm(
+      'Sofortigen SSH-Rollback fuer alle armed Geraete ausloesen?\n\n'
+      + 'Damit wird der Apply rueckgaengig gemacht und die Pre-Apply-Konfig wiederhergestellt.',
+    );
+    if (!ok) return;
+    try {
+      const r = await apiPost(
+        `/api/plans/${encodeURIComponent(safetyNetCurrentPlanId)}/safety-net/abort`,
+      );
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok && r.status !== 204) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Abort fehlgeschlagen (${r.status})`, true);
+        return;
+      }
+      showToast('Rollback ausgeloest.');
+      await pollSafetyNetOnce();
+    } catch (err) {
+      showToast(err.message, true);
     }
   }
 
@@ -6255,6 +6451,15 @@
     const unbConfirm = $('#unbound-modal-confirm');
     if (unbConfirm) unbConfirm.addEventListener('click', () => {
       submitUnboundModal().catch((err) => showUnboundModalError(err.message));
+    });
+    // Safety-Net Banner-Buttons
+    const snConfirm = $('#pl-safety-net-confirm-btn');
+    if (snConfirm) snConfirm.addEventListener('click', () => {
+      safetyNetConfirmAll().catch((err) => showToast(err.message, true));
+    });
+    const snAbort = $('#pl-safety-net-abort-btn');
+    if (snAbort) snAbort.addEventListener('click', () => {
+      safetyNetAbortAll().catch((err) => showToast(err.message, true));
     });
     // Rule-Modal-Buttons
     const ruleCancel = $('#rule-modal-cancel');

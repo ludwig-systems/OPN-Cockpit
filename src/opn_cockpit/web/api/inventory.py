@@ -193,6 +193,11 @@ def add_device(
             api_key=payload.api_key,
             api_secret=payload.api_secret,
             descr=payload.descr,
+            ssh_enabled=payload.ssh_enabled,
+            ssh_host=payload.ssh_host,
+            ssh_port=payload.ssh_port,
+            ssh_user=payload.ssh_user,
+            ssh_private_key_pem=payload.ssh_private_key_pem,
         )
         devices = session.opened.data.devices
         devices.append(new_device)
@@ -1890,6 +1895,19 @@ def _apply_device_update(current: VaultDevice, payload: DeviceUpdateRequest) -> 
         current.api_key = payload.api_key
     if payload.api_secret:
         current.api_secret = payload.api_secret
+    # SSH-Felder analog: nur was uebergeben wird, wird gesetzt.
+    if payload.ssh_enabled is not None:
+        current.ssh_enabled = payload.ssh_enabled
+    if payload.ssh_host is not None:
+        current.ssh_host = payload.ssh_host
+    if payload.ssh_port is not None:
+        current.ssh_port = payload.ssh_port
+    if payload.ssh_user is not None:
+        current.ssh_user = payload.ssh_user
+    if payload.ssh_private_key_pem:
+        # Key nur ueberschreiben wenn explizit gesetzt - leerer String
+        # bedeutet "lass den vorhandenen Key in Ruhe" (analog api_secret).
+        current.ssh_private_key_pem = payload.ssh_private_key_pem
 
 
 def _require_vault_path(session: Session) -> Path:
@@ -1905,6 +1923,16 @@ def _require_vault_path(session: Session) -> Path:
 
 
 def _to_device_response(device: Device) -> DeviceResponse:
+    # Falls die Device-Quelle eine VaultDevice ist, ziehen wir die SSH-
+    # Felder mit; bei reinen Inventory-Devices (Audit-Sicht) defaulten
+    # die Felder auf 0/leer.
+    ssh_enabled = bool(getattr(device, "ssh_enabled", False))
+    ssh_host = str(getattr(device, "ssh_host", ""))
+    ssh_port = int(getattr(device, "ssh_port", 22))
+    ssh_user = str(getattr(device, "ssh_user", ""))
+    ssh_key_present = bool(
+        str(getattr(device, "ssh_private_key_pem", "")).strip(),
+    )
     return DeviceResponse(
         id=device.id,
         name=device.name,
@@ -1913,6 +1941,11 @@ def _to_device_response(device: Device) -> DeviceResponse:
         tls_verify=device.tls_verify,
         tags=list(device.tags),
         descr=device.descr,
+        ssh_enabled=ssh_enabled,
+        ssh_host=ssh_host,
+        ssh_port=ssh_port,
+        ssh_user=ssh_user,
+        ssh_key_present=ssh_key_present,
     )
 
 

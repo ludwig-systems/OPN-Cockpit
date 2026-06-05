@@ -24,6 +24,7 @@ from opn_cockpit.web.auth.manager import SessionManager
 from opn_cockpit.web.backup_scheduler import BackupScheduler
 from opn_cockpit.web.rate_limit import RateLimiter
 from opn_cockpit.web.retry_watcher import QUEUE_FILE_NAME, RetryWatcher
+from opn_cockpit.web.safety_net_watcher import SafetyNetWatcher
 from opn_cockpit.web.server_state import ServerState
 
 WEB_DIR = Path(__file__).parent
@@ -95,6 +96,13 @@ def create_app() -> FastAPI:
         session_manager, server_state=app.state.server_state,
     )
     app.state.backup_scheduler.start()
+    # SafetyNetWatcher: bewusst in-memory (kein Persistenz), weil ein
+    # armed Apply nur waehrend der User-Session sinnvoll laeuft.
+    # AuditBackend wird im Watcher gebraucht damit Auto-Rollback im
+    # Hintergrund-Thread auditbar bleibt.
+    from opn_cockpit.audit.backend import get_audit_backend  # noqa: PLC0415
+    app.state.safety_net_watcher = SafetyNetWatcher(get_audit_backend())
+    app.state.safety_net_watcher.start()
     app.state.login_rate_limiter = RateLimiter()
     app.state.bootstrap_rate_limiter = RateLimiter(
         # Bootstrap ist seltener als Login — strenger limitieren.

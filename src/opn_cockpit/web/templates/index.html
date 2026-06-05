@@ -596,6 +596,45 @@
             </div>
           </div>
 
+          <div class="form-divider"></div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-checkbox">
+                <input id="ad-ssh-enabled" type="checkbox" />
+                <span>Safety-Net via SSH aktivieren</span>
+              </label>
+              <div class="form-hint">
+                Cisco-Style "commit-confirmed": nach Apply hat man X Sekunden zum
+                Bestaetigen, sonst rollt Cockpit per SSH zum Pre-Apply-Backup zurueck.
+                Voraussetzung: SSH-Zugang per Private-Key.
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col flex-grow">
+              <label class="form-label" for="ad-ssh-host">SSH-Host (leer = wie API)</label>
+              <input id="ad-ssh-host" class="form-input" type="text" placeholder="" />
+            </div>
+            <div class="form-col form-col-port">
+              <label class="form-label" for="ad-ssh-port">SSH-Port</label>
+              <input id="ad-ssh-port" class="form-input" type="number" min="1" max="65535" value="22" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="ad-ssh-user">SSH-User</label>
+              <input id="ad-ssh-user" class="form-input" type="text" placeholder="root" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ad-ssh-key">SSH-Private-Key (PEM)</label>
+              <textarea id="ad-ssh-key" class="form-input" rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..." style="font-family:monospace;font-size:11px;" autocomplete="off"></textarea>
+              <div class="form-hint" id="ad-ssh-key-hint">
+                Akzeptierte Formate: Ed25519, ECDSA, RSA, DSA. Leer lassen beim
+                Bearbeiten = bestehenden Key nicht aendern.
+              </div>
+            </div>
+          </div>
+
           <div class="form-error" id="add-modal-error" hidden></div>
         </div>
 
@@ -1812,6 +1851,15 @@
               <input id="pl-confirm" type="checkbox" />
               <span>Ich habe die Vorschau geprüft und möchte diese Aktionen ausrollen.</span>
             </label>
+            <label class="form-checkbox preview-confirm" id="pl-safety-net-row" hidden>
+              <input id="pl-safety-net" type="checkbox" />
+              <span>
+                <strong>Mit Sicherheitsnetz ausrollen</strong> — nach Apply hat man
+                <span id="pl-safety-net-window">120</span> s zum Bestaetigen; sonst
+                SSH-Rollback auf Pre-Apply-Backup. Nur sichtbar wenn die Ziel-
+                Geraete SSH konfiguriert haben.
+              </span>
+            </label>
             <div class="form-error" id="plan-preview-error" hidden></div>
           </div>
 
@@ -1819,6 +1867,17 @@
           <div class="plan-phase" data-phase="result" hidden>
             <div class="result-summary" id="pl-result-summary"></div>
             <div class="result-list" id="pl-result-list"></div>
+            <div id="pl-safety-net-banner" class="safety-net-banner" hidden>
+              <div class="safety-net-header">
+                <strong>Safety-Net aktiv — auf Bestaetigung warten</strong>
+                <span id="pl-safety-net-countdown" class="safety-net-countdown">--</span>
+              </div>
+              <div class="safety-net-entries" id="pl-safety-net-entries"></div>
+              <div class="safety-net-actions">
+                <button class="btn-primary" id="pl-safety-net-confirm-btn">Bestaetigen (alle)</button>
+                <button class="btn-danger" id="pl-safety-net-abort-btn">Sofort verwerfen (Rollback jetzt)</button>
+              </div>
+            </div>
           </div>
 
         </div>

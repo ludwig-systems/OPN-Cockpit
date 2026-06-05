@@ -38,6 +38,17 @@ class VaultDevice:
     api_secret: str = ""
     descr: str = ""
 
+    # v0.8 #8 Safety-Net via SSH. Default AUS - User muss SSH-Zugang
+    # explizit aktivieren und einen Private-Key hinterlegen. Der Key
+    # liegt verschluesselt im Tresor (gleicher Schutz wie api_secret).
+    # ssh_host=leer -> faellt auf api-host zurueck, gleicher Pattern wie
+    # ein Backup-Switch.
+    ssh_enabled: bool = False
+    ssh_host: str = ""
+    ssh_port: int = 22
+    ssh_user: str = ""
+    ssh_private_key_pem: str = ""
+
     @staticmethod
     def new_id() -> str:
         return str(uuid.uuid4())
@@ -92,6 +103,15 @@ class VaultSettings:
     auto_retry_enabled: bool = True
     auto_retry_max_hours: int = 168     # 7 Tage - mobile Racks koennen lang offline sein
     auto_retry_interval_minutes: int = 5
+
+    # v0.8 #8 Safety-Net via SSH. Default AUS - braucht SSH-Zugang
+    # auf den Boxen. Wenn aktiv: User kann "Apply mit Sicherheitsnetz"
+    # waehlen; nach erfolgreichem Apply hat er die hier konfigurierten
+    # Sekunden Zeit zu bestaetigen. Tut er das nicht (z. B. weil die
+    # Box nach dem Apply unerreichbar ist), rollt der SafetyNetWatcher
+    # via SSH auf das Pre-Apply-Backup zurueck.
+    safety_net_enabled: bool = False
+    safety_net_window_s: int = 120
 
 
 @dataclass(slots=True)
@@ -150,6 +170,11 @@ def _device_from_dict(raw: dict[str, Any]) -> VaultDevice:
         api_key=str(raw.get("api_key", "")),
         api_secret=str(raw.get("api_secret", "")),
         descr=str(raw.get("descr", "")),
+        ssh_enabled=bool(raw.get("ssh_enabled", False)),
+        ssh_host=str(raw.get("ssh_host", "")),
+        ssh_port=int(raw.get("ssh_port", 22)),
+        ssh_user=str(raw.get("ssh_user", "")),
+        ssh_private_key_pem=str(raw.get("ssh_private_key_pem", "")),
     )
 
 
@@ -190,5 +215,11 @@ def _settings_from_dict(raw: dict[str, Any]) -> VaultSettings:
         ),
         auto_retry_interval_minutes=int(
             raw.get("auto_retry_interval_minutes", defaults.auto_retry_interval_minutes),
+        ),
+        safety_net_enabled=bool(
+            raw.get("safety_net_enabled", defaults.safety_net_enabled),
+        ),
+        safety_net_window_s=int(
+            raw.get("safety_net_window_s", defaults.safety_net_window_s),
         ),
     )

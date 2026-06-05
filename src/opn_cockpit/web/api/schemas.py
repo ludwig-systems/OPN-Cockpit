@@ -219,8 +219,8 @@ class ChangeVaultPasswordRequest(BaseModel):
 class DeviceResponse(BaseModel):
     """Read-only Geraete-Sicht fuer das Frontend.
 
-    NIEMALS API-Key/Secret durchreichen. Der Frontend-Client soll keine
-    Klartext-Credentials sehen.
+    NIEMALS API-Key/Secret/SSH-Key durchreichen. Der Frontend-Client soll
+    keine Klartext-Credentials sehen.
     """
 
     id: str
@@ -230,6 +230,13 @@ class DeviceResponse(BaseModel):
     tls_verify: bool
     tags: list[str]
     descr: str
+    ssh_enabled: bool = False
+    ssh_host: str = ""
+    ssh_port: int = 22
+    ssh_user: str = ""
+    ssh_key_present: bool = False
+    """True wenn ein Private-Key im Tresor hinterlegt ist. Wert NICHT
+    durchreichen - nur die Anwesenheit fuer das UI-Badge."""
 
 
 class TagSummary(BaseModel):
@@ -302,6 +309,11 @@ class DeviceCreateRequest(BaseModel):
     descr: str = Field("", max_length=500)
     api_key: str = Field(..., min_length=1, max_length=255)
     api_secret: str = Field(..., min_length=1, max_length=500)
+    ssh_enabled: bool = False
+    ssh_host: str = Field("", max_length=255)
+    ssh_port: int = Field(22, ge=1, le=65535)
+    ssh_user: str = Field("", max_length=80)
+    ssh_private_key_pem: str = Field("", max_length=20000)
 
     @field_validator("api_key", "api_secret", mode="before")
     @classmethod
@@ -326,6 +338,11 @@ class DeviceUpdateRequest(BaseModel):
     descr: str | None = Field(None, max_length=500)
     api_key: str | None = Field(None, max_length=255)
     api_secret: str | None = Field(None, max_length=500)
+    ssh_enabled: bool | None = None
+    ssh_host: str | None = Field(None, max_length=255)
+    ssh_port: int | None = Field(None, ge=1, le=65535)
+    ssh_user: str | None = Field(None, max_length=80)
+    ssh_private_key_pem: str | None = Field(None, max_length=20000)
 
     @field_validator("api_key", "api_secret", mode="before")
     @classmethod
@@ -843,9 +860,30 @@ class ApplyRequest(BaseModel):
 
     Wird beim Retry-Pfad genutzt - User schickt die fehlgeschlagenen
     device_ids und der Server wiederholt den Plan nur fuer die.
+
+    ``safety_net`` aktiviert den Cisco-Style-Commit-Confirmed-Pfad:
+    nach erfolgreichem Apply hat der User ``window_s`` Zeit zu
+    bestaetigen, sonst SSH-Rollback auf Pre-Apply-Backup.
     """
 
     device_ids: list[str] | None = None
+    safety_net: bool = False
+    safety_net_window_s: int | None = Field(None, ge=10, le=3600)
+
+
+class SafetyNetEntryResponse(BaseModel):
+    plan_id: str
+    device_id: str
+    device_name: str
+    armed_at_ms: int
+    deadline_ms: int
+    resolved: bool
+    resolution: str
+    resolution_summary: str
+
+
+class SafetyNetStatusResponse(BaseModel):
+    entries: list[SafetyNetEntryResponse]
 
 
 class OutstandingDeviceEntry(BaseModel):

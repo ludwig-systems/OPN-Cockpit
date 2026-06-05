@@ -343,6 +343,43 @@ body {
 
 .form-input::placeholder { color: var(--text-subtle); }
 
+/* Safety-Net Banner (Phase 3 im Plan-Modal) */
+.safety-net-banner {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--danger, #c0392b);
+  background: var(--danger-bg, rgba(229, 113, 100, 0.10));
+}
+.safety-net-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.safety-net-countdown {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--danger, #c0392b);
+}
+.safety-net-entries {
+  font-size: 12px;
+  margin-bottom: 10px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.safety-net-entries .sn-entry {
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border-soft, #ccc);
+}
+.safety-net-entries .sn-entry:last-child { border-bottom: none; }
+.safety-net-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 /* Inline-Validierung: rote Border + Mini-Hint unter dem Input.
  * is-invalid wird vom JS gesetzt sobald das Feld ein Validierungs-
  * pattern verletzt; sobald wieder valide, ist die Klasse weg. */

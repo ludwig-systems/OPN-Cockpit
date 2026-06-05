@@ -17,7 +17,13 @@ from opn_cockpit.vault.model import VaultDevice
 
 @dataclass(frozen=True, slots=True)
 class Device:
-    """Read-only Sicht eines Geräts für UI/Orchestrierung."""
+    """Read-only Sicht eines Geräts für UI/Orchestrierung.
+
+    SSH-Felder hier sind die nicht-geheimen Anteile - nur
+    ``ssh_key_present`` als Boolean, NIE der Key selbst. Der gehoert
+    weiter zu VaultDevice und wird nur fuer Safety-Net-SSH-Rollback
+    dort gelesen.
+    """
 
     id: str
     name: str
@@ -26,6 +32,11 @@ class Device:
     tls_verify: bool
     tags: tuple[str, ...]
     descr: str
+    ssh_enabled: bool = False
+    ssh_host: str = ""
+    ssh_port: int = 22
+    ssh_user: str = ""
+    ssh_key_present: bool = False
 
     @classmethod
     def from_vault_device(cls, vd: VaultDevice) -> Device:
@@ -37,6 +48,11 @@ class Device:
             tls_verify=vd.tls_verify,
             tags=tuple(vd.tags),
             descr=vd.descr,
+            ssh_enabled=bool(vd.ssh_enabled),
+            ssh_host=str(vd.ssh_host),
+            ssh_port=int(vd.ssh_port),
+            ssh_user=str(vd.ssh_user),
+            ssh_key_present=bool(str(vd.ssh_private_key_pem).strip()),
         )
 
     @property

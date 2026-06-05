@@ -4,6 +4,49 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### Safety-Net via SSH (Cisco-Style commit-confirmed)
+
+- Neues Apply-Mode "Mit Sicherheitsnetz": nach erfolgreichem Verify
+  hat der User ``safety_net_window_s`` Zeit zu **Bestaetigen**, sonst
+  rollt Cockpit ueber SSH automatisch auf das Pre-Apply-Backup zurueck.
+  Use-Case: ein Filter-Regel-Apply nimmt versehentlich Cockpit's
+  eigene IP aus - Box ist ueber API unerreichbar, aber SSH bleibt
+  meistens drin.
+- Pro VaultDevice neue Felder: ``ssh_enabled``, ``ssh_host``,
+  ``ssh_port`` (Default 22), ``ssh_user``, ``ssh_private_key_pem``.
+  Key liegt verschluesselt im Tresor (gleicher Schutz wie API-Secret);
+  ``DeviceResponse`` zeigt nur ``ssh_key_present`` als Boolean an.
+- Pro VaultSettings neue Felder ``safety_net_enabled`` (Default AUS,
+  global aktivieren) und ``safety_net_window_s`` (Default 120).
+- Neuer in-memory ``SafetyNetWatcher`` (Daemon-Thread, 1 s Tick):
+  pro armed Apply ein Eintrag mit Deadline + device_lookup-Closure
+  fuer den Rollback. Beim Deadline-Hit holt der Watcher die
+  Pre-Apply-XML aus dem Backup-Store, schreibt sie via SFTP nach
+  ``/conf/config.xml`` und triggert ``configctl webgui restart;
+  configctl filter reload; configctl interface reconfigure;
+  configctl service reload all``.
+- SSH-Rollback ist multi-Format-Key-faehig (Ed25519, ECDSA, RSA, DSA).
+  Klartext-Key wird sofort nach Connect wieder freigegeben (``del``
+  im finally-Block) damit er nicht in Tracebacks landet.
+- Neue Endpoints: ``GET /api/plans/{id}/safety-net``,
+  ``POST .../safety-net/confirm``, ``POST .../safety-net/abort``.
+  Apply-Endpoint nimmt ``safety_net: true`` + optional
+  ``safety_net_window_s`` im Body.
+- UI: Checkbox "Mit Sicherheitsnetz ausrollen" in der Plan-Vorschau
+  (nur sichtbar wenn mindestens ein Ziel-Geraet SSH konfiguriert hat);
+  nach Apply Banner mit Countdown + Bestaetigen-/Abort-Buttons +
+  Live-Status pro Geraet (Polling alle 3 s).
+- Device-Form um vollstaendige SSH-Felder erweitert (Host, Port,
+  User, Private-Key im Textarea). Bestehender Key wird beim Edit
+  als "im Tresor hinterlegt" angezeigt und nur ueberschrieben wenn
+  der User wirklich was tippt.
+- Neue Runtime-Dep: ``paramiko>=3.4``. Audit-Trail komplett: arm,
+  confirm, rollback, rollback_failed - alle vier Events sind im
+  PRE_APPLY_BACKUP-Bucket einsortiert (kein neues Event-Kind noetig).
+- Hinweis: SafetyNetWatcher ist **nicht** persistent. Server-Restart
+  laesst aktive Entries fallen - der Watcher ist auf wenige Minuten
+  Lifetime ausgelegt, deshalb akzeptabel.
+
 ### Signierter PDF-Audit-Report
 
 - Neuer Download ``GET /api/audit/export.pdf`` parallel zu
