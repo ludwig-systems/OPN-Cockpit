@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from opn_cockpit.audit.backend import get_audit_backend
 from opn_cockpit.audit.chain import load_or_generate_secret, verify_chain
 from opn_cockpit.audit.log import AuditEventKind
+from opn_cockpit.audit.pdf_report import render_pdf
 from opn_cockpit.audit.sqlite_backend import SqliteAuditBackend
 from opn_cockpit.security.session import Session
 from opn_cockpit.web.api.schemas import (
@@ -153,6 +154,75 @@ def export_audit_csv(
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": 'attachment; filename="opn-cockpit-audit.csv"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get("/export.pdf")
+def export_audit_pdf(
+    session: Session = Depends(require_session),
+    event: Annotated[str | None, Query()] = None,
+    action: Annotated[str | None, Query()] = None,
+    target_device_id: Annotated[str | None, Query()] = None,
+    actor: Annotated[str | None, Query()] = None,
+    since_iso: Annotated[str | None, Query(alias="since")] = None,
+    until_iso: Annotated[str | None, Query(alias="until")] = None,
+) -> StreamingResponse:
+    """Liefert das Audit-Log als signierten PDF-Download.
+
+    Signatur (HMAC-SHA256 ueber alle Records mit dem Cockpit-Audit-Secret)
+    landet sowohl im sichtbaren Footer als auch in den PDF-Metadaten
+    (Keywords-Feld, ``OPN-COCKPIT-AUDIT-SIG-v1:<hex>``). Verifizierer mit
+    Zugriff auf das Secret koennen das via ``audit/pdf_report.verify_pdf
+    _signature`` reproduzieren.
+    """
+    session.touch()
+    audit = get_audit_backend()
+    event_enum: AuditEventKind | None = None
+    if event:
+        try:
+            event_enum = AuditEventKind(event)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unbekannter event-Wert: {event}",
+            ) from exc
+    records = audit.filter(
+        event=event_enum,
+        action=action,
+        target_device_id=target_device_id,
+        actor=actor,
+        since_iso=since_iso,
+        until_iso=until_iso,
+    )
+    filter_bits: list[str] = []
+    if event:
+        filter_bits.append(f"event={event}")
+    if action:
+        filter_bits.append(f"action={action}")
+    if target_device_id:
+        filter_bits.append(f"device={target_device_id}")
+    if actor:
+        filter_bits.append(f"actor={actor}")
+    if since_iso:
+        filter_bits.append(f"since={since_iso}")
+    if until_iso:
+        filter_bits.append(f"until={until_iso}")
+    filter_summary = ", ".join(filter_bits) if filter_bits else "ohne Filter"
+
+    secret = load_or_generate_secret()
+    pdf_bytes = render_pdf(
+        records,
+        secret=secret,
+        filter_summary=filter_summary,
+        issued_by=session.user.username if getattr(session, "user", None) else "",
+    )
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="opn-cockpit-audit.pdf"',
             "Cache-Control": "no-store",
         },
     )

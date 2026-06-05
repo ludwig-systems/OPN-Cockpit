@@ -5815,6 +5815,14 @@
   }
 
   async function exportAuditCsv() {
+    return exportAuditFile('csv');
+  }
+
+  async function exportAuditPdf() {
+    return exportAuditFile('pdf');
+  }
+
+  async function exportAuditFile(format) {
     const params = new URLSearchParams();
     const event = $('#au-filter-event').value;
     const action = $('#au-filter-action').value.trim();
@@ -5822,7 +5830,7 @@
     if (event) params.set('event', event);
     if (action) params.set('action', action);
     if (device) params.set('target_device_id', device);
-    const url = `/api/audit/export.csv?${params.toString()}`;
+    const url = `/api/audit/export.${format}?${params.toString()}`;
     try {
       const token = getToken();
       const response = await fetch(url, {
@@ -5834,8 +5842,11 @@
         return;
       }
       const blob = await response.blob();
-      triggerDownload(blob, 'opn-cockpit-audit.csv');
-      showToast('Audit-CSV heruntergeladen.');
+      const filename = format === 'pdf'
+        ? 'opn-cockpit-audit.pdf'
+        : 'opn-cockpit-audit.csv';
+      triggerDownload(blob, filename);
+      showToast(`Audit-${format.toUpperCase()} heruntergeladen.`);
     } catch (err) {
       showToast(err.message, true);
     }
@@ -6113,6 +6124,8 @@
     if (verifyBtn) verifyBtn.addEventListener('click', verifyAuditChain);
     const auExportBtn = $('#au-export-btn');
     if (auExportBtn) auExportBtn.addEventListener('click', exportAuditCsv);
+    const auExportPdfBtn = $('#au-export-pdf-btn');
+    if (auExportPdfBtn) auExportPdfBtn.addEventListener('click', exportAuditPdf);
     $('#audit-modal').addEventListener('click', (e) => {
       if (e.target.id === 'audit-modal') closeAuditModal();
     });

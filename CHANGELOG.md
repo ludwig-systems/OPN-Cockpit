@@ -4,6 +4,26 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### Signierter PDF-Audit-Report
+
+- Neuer Download ``GET /api/audit/export.pdf`` parallel zu
+  ``export.csv``. Liefert einen Querformat-A4-Report mit Header
+  (Erstellt-Zeit, Filter, Eintragszahl), Tabelle der Records
+  (Zeit, Akteur, Event, Zusammenfassung) und Signatur-Footer.
+- Signatur = HMAC-SHA256 ueber alle Records mit dem bereits
+  vorhandenen Audit-Chain-Secret. HMAC + SHA256(Inhalt) landen
+  sichtbar im Footer + maschinell auslesbar in den PDF-Metadaten
+  (``Keywords: OPN-COCKPIT-AUDIT-SIG-v1:<hex>``).
+- Verifikation via ``audit.pdf_report.verify_pdf_signature``:
+  Records + erwartete Signatur + Secret -> konstantzeit-Bool.
+  Render-Pfad ist deterministisch (Realtime-Daten nur in den
+  Metadaten, nicht in den signierten Bytes) damit Reproduktion
+  funktioniert.
+- Neue Runtime-Dep: ``fpdf2>=2.7``. Leichter als reportlab,
+  baut sauber auf Windows + Linux.
+- UI: Neuer Button "Als PDF (signiert)" im Audit-Modal-Footer
+  neben dem CSV-Export.
+
 ### Unbound-DNS-CRUD + Compare
 
 - Viertes Subsystem in der Plan-Pipeline: ``unbound_hosts``. Adapter
