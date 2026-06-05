@@ -67,8 +67,9 @@ scripts/demo_setup.py
 scripts/setup-venv.ps1
 
 # Docs: standardmaessig privat (Arbeitsmaterial, Roadmap, Audit,
-# Design-Guide, Test-Plaene, Session-Notes, ...). Nur die zwei
+# Design-Guide, Test-Plaene, Session-Notes, ...). Nur die wenigen
 # Endnutzer-Dokumente werden im Public Repo ausgeliefert.
 docs/*
 !docs/INSTALLATION-WINDOWS.md
 !docs/QUICKSTART.md
+!docs/FEATURES.md

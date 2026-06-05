@@ -77,11 +77,15 @@ Der Plan/Apply-Flow:
 2. **Aktion definieren** — Sidebar „Route hinzufügen" oder „Alias
    hinzufügen". Felder ausfüllen, optional „Vorschläge laden" für die
    Gateway/Alias-Namen.
-3. **Vorschau prüfen** — Liste pro Gerät: NEW / UPDATE / SKIP mit
-   Diff-Summary. Hier ist noch nichts ausgerollt.
-4. **Bestätigen + Aktivieren** — Confirm-Checkbox, dann „Aktivieren".
+3. **Vorschau prüfen** — Liste pro Gerät: NEW / UPDATE / SKIP / DELETE
+   mit Diff-Summary. Hier ist noch nichts ausgerollt.
+4. **Optional: „Mit Sicherheitsnetz ausrollen"** — wird angeboten wenn
+   mindestens ein Ziel-Gerät SSH konfiguriert hat. Nach Verify hat man
+   X Sekunden zu bestätigen, sonst SSH-Rollback auf Pre-Apply-Backup.
+   Siehe [FEATURES.md → Safety-Net](FEATURES.md#safety-net-via-ssh).
+5. **Bestätigen + Aktivieren** — Confirm-Checkbox, dann „Aktivieren".
    Parallel-Rollout über alle Geräte mit Write → Reconfigure → Read-back.
-5. **Result-Matrix** — pro Gerät Status (Verifiziert/Fehlgeschlagen/
+6. **Result-Matrix** — pro Gerät Status (Verifiziert/Fehlgeschlagen/
    Übersprungen) + Dauer.
 
 ## 7. Fehlgeschlagene Geräte nachziehen
@@ -108,6 +112,65 @@ Speicherort: `%APPDATA%\OPN-Cockpit\audit.jsonl` (append-only JSON Lines).
 Im Plan-Modal kannst du „Als Vorlage speichern" — Aktionsparameter werden
 in `%APPDATA%\OPN-Cockpit\profiles.json` abgelegt (ohne Credentials,
 Whitelist-sanitisiert). Spätere Plans starten mit „Aus Vorlage laden".
+
+## 10. Inventar pro Gerät: Live-Listen + Edit/Delete
+
+Klick auf eine Karte → Device-Modal mit sechs Tabs:
+
+- **Info** — Test-Connection, Update-Check, Bearbeiten, Duplizieren,
+  Backup herunterladen
+- **Updates** — installierte/verfügbare OPNsense-Version
+- **Backups** — alle lokal gespeicherten Backups dieses Gerätes
+  (Pre-Apply / Post-Apply / Manuell / Scheduled) zum Download,
+  plus „Backup erzeugen" (server-only ohne Browser-Download-Dialog)
+- **Aliase** — Live-Liste mit Filter + Bearbeiten/Löschen pro Eintrag
+- **Routen** — Live-Liste der statischen Routen + Bearbeiten/Löschen
+- **Regeln** — Live-Liste der Firewall-Filter-Regeln, plus
+  „Neue Regel" / Bearbeiten / Löschen. Benötigt das `os-firewall`-Plugin
+  auf der OPNsense (ab 24+ Standard)
+- **DNS** — Live-Liste der Unbound-Host-Overrides, plus
+  „Neuer Host-Override" / Bearbeiten / Löschen
+
+Bearbeiten/Löschen läuft immer durch den Plan/Apply-Flow:
+Vorschau → Bestätigen → Apply mit Pre-Apply-Backup + Audit-Eintrag.
+Identitäts-Felder (Alias-Name, Netz+Gateway, host+domain) sind beim
+Edit gesperrt, um aus einer Aktion zwei zu machen.
+
+## 11. Config-Compare zwischen Geräten
+
+Mindestens zwei Karten markieren → in der Selektions-Toolbar
+**„Vergleichen"** klicken.
+
+Tab-Strip oben: *Aliase | Routen | Regeln | DNS*. Tab-Klick lädt die
+jeweilige Matrix. Die linkeste Spalte ist der Master (per ◀ / ▶ / ★
+verschiebbar); andere Spalten werden master-relativ farbig markiert:
+grün = identisch, gelb = Drift, leer = fehlt, ? = unerreichbar. Jede
+Zeile ist per ▶-Icon aufklappbar und zeigt den vollen Inhalt pro Gerät.
+
+Beim Alias-Tab erscheint zusätzlich ein **„Sync ←"**-Button in Drift-
+Zeilen: Klick erzeugt einen `add_alias`-Plan vom Master zu allen anderen
+Spalten und springt direkt in die Preview.
+
+## 12. Audit-Log einsehen + exportieren
+
+Topbar-Icon (drei Linien) öffnet das Audit-Modal:
+- Filter nach Event-Kind / Action / Geräte-ID
+- **Integrität prüfen** — verifiziert die HMAC-Hash-Chain (nur sinnvoll
+  bei SQLite-Backend, das Default im Server-Mode)
+- **Als CSV exportieren** — alle gefilterten Records als CSV
+- **Als PDF (signiert)** — gefilterte Records als A4-Querformat-Report
+  mit HMAC-SHA256-Signatur im Footer + in den PDF-Metadaten
+
+## 13. Safety-Net via SSH
+
+Optional pro Gerät: SSH-Zugang mit Private-Key in den Tresor legen
+(Gerät → Bearbeiten → unten „Safety-Net via SSH aktivieren" + Felder
+ausfüllen). Beim Apply erscheint dann die Checkbox **„Mit
+Sicherheitsnetz ausrollen"** — nach Verify hat man X Sekunden zum
+Bestätigen, sonst SSH-Rollback auf das Pre-Apply-Backup.
+
+Schritt-für-Schritt + Troubleshooting:
+[FEATURES.md → Safety-Net via SSH](FEATURES.md#safety-net-via-ssh).
 
 ## CLI als Alternative
 

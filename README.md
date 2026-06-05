@@ -1,13 +1,32 @@
 # OPN-Cockpit
 
 Multi-Site-Management für OPNsense-Firewalls. Zentrale, ferngesteuerte
-Konfiguration mehrerer Standorte über die OPNsense-
-REST-API: Routen, Aliase, Bulk-Import, Audit-Log, Read-back-Verifikation
-und Plan/Apply-Vorschau vor jedem Rollout.
+Konfiguration mehrerer Standorte über die OPNsense-REST-API:
+
+- **Vier CRUD-Subsysteme** mit voller Edit/Delete-Unterstützung:
+  Aliase, statische Routen, Filter-Regeln (`os-firewall`-Plugin), Unbound
+  DNS Host-Overrides
+- **Plan/Apply-Vorschau** vor jedem Rollout, Read-back-Verifikation, parallel
+  über N Geräte
+- **Config-Compare-Matrix** zeigt Drift zwischen 2–N Geräten pro Subsystem
+- **Safety-Net via SSH** (Cisco-Style commit-confirmed) — Apply mit
+  Countdown; ohne Bestätigung Auto-Rollback zum Pre-Apply-Backup via SSH
+- **Auto-Backup** vor jedem Apply + Post-Apply-Snapshot als Drift-Baseline,
+  Scheduled Backups, Config-Drift-Erkennung
+- **Auto-Retry-Queue** für Mobile-Racks — persistiert über Server-Restart,
+  Orphan-Adoption beim nächsten Vault-Unlock
+- **Audit-Log** mit HMAC-Hash-Chain, CSV- + signierter PDF-Export, Filter,
+  Integrity-Check
+- **Bulk-Import** von Firewall-Stammdaten, Sicht-Vorlagen für wiederkehrende
+  Aktionen
+- **Frontend-Inline-Validierung** beim Tippen (CIDR, Host, Aliase, Ports)
 
 Web-Frontend (Vanilla HTML/CSS/JS) auf einem FastAPI-Backend. Läuft als
 **Single-User-Desktop** unter Windows, als **Multi-User-Server** unter
 Windows oder Linux, oder als **Proxmox-LXC** mit Helper-Wizard.
+
+Lizenz: **Apache License 2.0** (siehe [LICENSE](LICENSE) und
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
 
 ## Deployment-Varianten
 
@@ -42,12 +61,17 @@ minimalen Rechten.
    - Username: z. B. `opn-cockpit`
    - Passwort: nicht relevant für API-Nutzung (langes Zufallspasswort genügt,
      Login wird nicht gebraucht)
-   - **Privileges** je nach geplantem Einsatz (Beispiel-Set für Routen,
-     Aliase, Backup, Firmware-Status):
+   - **Privileges** je nach geplantem Einsatz (Beispiel-Set für alle
+     v0.8-Features — Routen, Aliase, Filter-Regeln, Unbound-DNS, Backup,
+     Firmware-Status):
      - `Diagnostics: Configuration History` *(Backup-Download)*
      - `Firewall: Aliases: Edit`
+     - `Firewall: Rules: Edit` *(Filter-Regeln, benötigt `os-firewall`-Plugin)*
+     - `Services: Unbound DNS: Edit Host Override`
+     - `Services: Unbound DNS: Restart Service`
      - `System: Firmware`
      - `System: Static Routes: Edit`
+     - `System: Trust: Certificate Management` *(Cert-Ablauf-Badge)*
 2. User speichern → ihn nochmal öffnen → unten bei **API keys** auf **+** klicken.
 3. OPNsense lädt eine Datei `apikey.txt` mit zwei Zeilen herunter:
    ```
@@ -69,23 +93,66 @@ minimalen Rechten.
 
 ## Was du im Browser hast
 
-- **Inventar** als Kachel-Grid mit Status-Dot (Heartbeat), TLS-Badge,
-  OPNsense-Firmware-Version, Tags, „Offen"-Indikator für unverifizierte
-  Aktionen, Direkt-Link zur OPNsense-Weboberfläche.
-- **Plan/Apply** für Routen und Aliase mit drei Phasen (Eingabe →
-  Vorschau → Result-Matrix) und expliziter Confirm-Gate vor jedem
-  Rollout.
-- **Auto-Suggest** für Gateway- und Alias-Namen aus der laufenden
-  OPNsense (case-sensitive Tippfehler wie `V2_WANBwIn` vs `v2_wanbwin`
-  vermeiden).
+### Inventar
+- Kachel-Grid mit Status-Dot (Heartbeat), TLS-Badge,
+  OPNsense-Firmware-Version, Cert-Ablauf-Indikator (gelb < 30 Tage,
+  rot < 7 Tage), Drift-Indikator, Tags, „Offen"-Indikator für
+  unverifizierte Aktionen, Direkt-Link zur OPNsense-Weboberfläche.
+- **Hover-Quick-Actions** auf der Karte: OPNsense öffnen,
+  Updates suchen, Duplizieren.
+
+### Device-Modal (Karten-Klick) — sechs Tabs
+- **Info** — Test-Connection, Bearbeiten, Duplizieren, Update-Check,
+  Backup herunterladen
+- **Updates** — installierte/verfügbare OPNsense-Version, „Erneut prüfen"
+- **Backups** — Liste aller lokal gespeicherten Backups
+  (Pre-Apply / Post-Apply / Manuell / Scheduled), Download +
+  „Backup erzeugen" (server-only)
+- **Aliase** — Live-Liste mit Filter, Edit/Delete pro Eintrag
+- **Routen** — Live-Liste aller statischen Routen, Edit/Delete pro Eintrag
+- **Regeln** — Live-Liste der Firewall-Filter-Regeln, Add/Edit/Delete
+  (benötigt `os-firewall`-Plugin)
+- **DNS** — Live-Liste der Unbound-Host-Overrides, Add/Edit/Delete
+
+### Plan/Apply-Flow
+- Drei-Phasen-Modal: Eingabe → Vorschau → Result-Matrix
+- Diff pro Gerät (NEW/UPDATE/SKIP/DELETE) inklusive Inline-Hinweis
+- Confirm-Gate vor jedem Rollout
+- Optional: **„Mit Sicherheitsnetz ausrollen"** (sichtbar wenn Targets
+  SSH konfiguriert haben) — Cisco-Style commit-confirmed mit Countdown
+- **Auto-Suggest** für Gateway- und Alias-Namen aus der laufenden OPNsense
+
+### Multi-Site-Tools
+- **Config-Compare-Matrix** über 2..N Geräte mit Tab-Strip
+  *Aliase | Routen | Regeln | DNS*. Master-Spalte links, Drift
+  master-relativ farbig markiert, Detail-Aufklapp pro Zeile.
+- **Alias-Sync (Master → Targets)** direkt aus der Compare-Matrix.
+
+### Safety-Nets
+- **Auto-Backup vor Apply** + **Post-Apply-Snapshot** als neue
+  Drift-Baseline (gegen False-Positive-Drift-Warnungen).
+- **Scheduled Backups** (Hintergrund-Thread mit eigener Retention).
+- **Config-Drift-Erkennung** gegen das letzte lokale Backup
+  (volatile `<revision>`-Felder gestripped).
+- **Auto-Retry für Mobile-Racks** — fehlgeschlagene Geräte landen in
+  einer persistenten Queue (`state/retry-queue.json`), Orphan-Adoption
+  beim nächsten Vault-Unlock, läuft bis konfigurierbare Max-Dauer.
+- **Safety-Net via SSH** — siehe [docs/FEATURES.md](docs/FEATURES.md#safety-net-via-ssh).
+
+### Audit-Log
+- HMAC-Hash-Chain für Tamper-Evidence, append-only.
+- Filter nach Event-Kind, Action, Geräte-ID, Zeitfenster.
+- Export als **CSV** oder **signiertes PDF** (HMAC-SHA256 sichtbar im
+  Footer + in PDF-Metadata).
+
+### Sonstiges
 - **Bulk-Import** von Firewall-Stammdaten als CSV oder JSON.
 - **Profile / Vorlagen** für wiederkehrende Aktionen, sanitisiert ohne
   Credentials.
-- **Audit-Log** mit Filter nach Event-Kind, Action, Geräte-ID.
-- **Retry-Pfad** für fehlgeschlagene Geräte — direkt nach dem Apply
-  oder später via „Offen"-Badge auf der Karte.
-- **Backup-Download** pro Karte (zieht ein aktuelles OPNsense-Config-
-  Backup über die API).
+- **Retry-Pfad** direkt nach dem Apply oder später via „Offen"-Badge
+  auf der Karte.
+- **Frontend-Inline-Validierung** beim Tippen: CIDR mit Host-Bits-Check,
+  IPv4, Host/FQDN, Alias-Name, Gateway-Name, Port (Zahl/Range/Alias).
 
 ## Designprinzipien
 
@@ -125,8 +192,9 @@ minimalen Rechten.
 
 ## Sicherheit
 
-- Geräte-Inventar und API-Credentials liegen ausschließlich verschlüsselt
-  in der `.opnvault`-Tresor-Datei. Niemals im Klartext auf Platte.
+- Geräte-Inventar, API-Credentials und SSH-Private-Keys liegen
+  ausschließlich verschlüsselt in der `.opnvault`-Tresor-Datei. Niemals
+  im Klartext auf Platte.
 - Tresor-Dateien sind **portabel**: per CLI `export-template` entsteht eine
   zweite Datei mit identischem Inventar aber geleerten Secret-Feldern,
   die sicher an andere Admins weitergegeben werden kann.
@@ -148,6 +216,13 @@ minimalen Rechten.
   User `opncockpit`.
 - Audit-Log ist HMAC-Chain-protected (Tamper-Evidence) und enthält nur
   maskierte Antwort-Kurzfassungen, keine vollständigen HTTP-Bodies.
+- **Signierte PDF-Audit-Reports**: HMAC-SHA256 über alle Records mit dem
+  Audit-Chain-Secret. Signatur sichtbar im Footer + maschinell in
+  PDF-Metadata (`OPN-COCKPIT-AUDIT-SIG-v1:<hex>`). Reproduzierbar via
+  `audit.pdf_report.verify_pdf_signature`.
+- **Safety-Net SSH-Rollback** nutzt `paramiko` mit Private-Key-Auth
+  (Password-Auth bewusst nicht implementiert). Klartext-Key wird sofort
+  nach `connect()` freigegeben und nicht in Tracebacks geleakt.
 
 ## Entwicklung
 
@@ -199,7 +274,13 @@ src/opn_cockpit/
 
 ## Referenz
 
-- [docs/INSTALLATION-WINDOWS.md](docs/INSTALLATION-WINDOWS.md) — Windows-Installation (SmartScreen, Updates, Service-Mode)
-- [installer/linux/README.md](installer/linux/README.md) — Linux-Server, Proxmox-LXC, Docker
-- [docs/QUICKSTART.md](docs/QUICKSTART.md) — Dev-Walkthrough
-- [CHANGELOG.md](CHANGELOG.md)
+- [docs/QUICKSTART.md](docs/QUICKSTART.md) — Dev-Walkthrough + erster Apply
+- [docs/FEATURES.md](docs/FEATURES.md) — Feature-Anleitungen pro Subsystem
+  (Aliase, Routen, Filter-Regeln, Unbound-DNS, Safety-Net, Backups, Audit)
+- [docs/INSTALLATION-WINDOWS.md](docs/INSTALLATION-WINDOWS.md) —
+  Windows-Installation (SmartScreen, Updates, Service-Mode)
+- [installer/linux/README.md](installer/linux/README.md) — Linux-Server,
+  Proxmox-LXC, Docker
+- [CHANGELOG.md](CHANGELOG.md) — Pro Release was sich geändert hat
+- [LICENSE](LICENSE) — Apache License 2.0
+- [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) — Drittanbieter-Attribution
