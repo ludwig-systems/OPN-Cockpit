@@ -15,6 +15,10 @@ from opn_cockpit.core.objects.aliases import AliasAdapter, AliasesController
 from opn_cockpit.core.objects.base import ObjectAdapter, SubsystemController
 from opn_cockpit.core.objects.firewall_rules import RuleAdapter, RulesController
 from opn_cockpit.core.objects.routes import RouteAdapter, RoutesController
+from opn_cockpit.core.objects.unbound import (
+    UnboundController,
+    UnboundHostAdapter,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,10 +52,17 @@ FIREWALL_RULES = SubsystemBinding(
     controller=RulesController(),
 )
 
+UNBOUND_HOSTS = SubsystemBinding(
+    name="unbound_hosts",
+    adapter=UnboundHostAdapter(),
+    controller=UnboundController(),
+)
+
 _REGISTRY: dict[str, SubsystemBinding] = {
     ROUTES.name: ROUTES,
     FIREWALL_ALIAS.name: FIREWALL_ALIAS,
     FIREWALL_RULES.name: FIREWALL_RULES,
+    UNBOUND_HOSTS.name: UNBOUND_HOSTS,
 }
 
 

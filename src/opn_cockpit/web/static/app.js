@@ -2312,6 +2312,8 @@
       loadRoutesTab().catch(() => {});
     } else if (tabName === 'rules') {
       loadRulesTab().catch(() => {});
+    } else if (tabName === 'unbound') {
+      loadUnboundTab().catch(() => {});
     } else if (tabName === 'updates') {
       renderUpdatesTab();
     } else if (tabName === 'backups') {
@@ -2671,6 +2673,236 @@
     $('#plan-preview-error').hidden = true;
     $('#plan-modal').hidden = false;
     setTimeout(() => $('#pl-route-descr').focus(), 0);
+  }
+
+  // -------------------- DNS-Tab im Device-Modal (Unbound Host-Overrides) --------------------
+
+  let unbRawHosts = [];
+  let unbLoadedForDeviceId = null;
+  let unbEditMode = 'add';
+  let unbEditOriginalHost = '';
+  let unbEditOriginalDomain = '';
+  let unbTargetDeviceId = '';
+
+  async function loadUnboundTab(force = false) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    if (!device) return;
+    if (!force && unbLoadedForDeviceId === currentDeviceId && unbRawHosts.length) {
+      renderUnboundList();
+      return;
+    }
+    unbRawHosts = [];
+    unbLoadedForDeviceId = currentDeviceId;
+    $('#unb-status').textContent = 'Lade…';
+    $('#unb-filter').value = '';
+    $('#unb-list').innerHTML = '';
+    try {
+      const r = await apiGet(`/api/inventory/devices/${currentDeviceId}/unbound-hosts`);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        $('#unb-status').textContent = body.detail || `Fehler ${r.status}`;
+        return;
+      }
+      const data = await r.json();
+      unbRawHosts = data.hosts || [];
+      $('#unb-status').textContent = data.summary;
+      renderUnboundList();
+    } catch (err) {
+      $('#unb-status').textContent = err.message;
+    }
+  }
+
+  function renderUnboundList() {
+    const list = $('#unb-list');
+    list.innerHTML = '';
+    const filter = ($('#unb-filter').value || '').trim().toLowerCase();
+    const matching = filter
+      ? unbRawHosts.filter((h) =>
+          h.host.toLowerCase().includes(filter)
+          || h.domain.toLowerCase().includes(filter)
+          || (h.server || '').toLowerCase().includes(filter)
+          || (h.description || '').toLowerCase().includes(filter))
+      : unbRawHosts;
+    if (matching.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.padding = '24px';
+      empty.style.textAlign = 'center';
+      empty.style.color = 'var(--text-subtle)';
+      empty.textContent = filter
+        ? 'Kein Treffer fuer den Filter.'
+        : 'Keine Unbound-Host-Overrides auf diesem Geraet.';
+      list.appendChild(empty);
+      return;
+    }
+    for (const h of matching) {
+      const row = document.createElement('div');
+      row.className = 'alm-row';
+      const head = document.createElement('div');
+      head.className = 'alm-row-head';
+      const name = document.createElement('span');
+      name.className = 'alm-name';
+      const enabledMarker = h.enabled ? '' : ' (deaktiviert)';
+      name.textContent = `${h.host}.${h.domain}${enabledMarker}`;
+      const meta = document.createElement('span');
+      meta.className = 'alm-meta';
+      meta.textContent = `→ ${h.server}`;
+      head.appendChild(name);
+      head.appendChild(meta);
+      row.appendChild(head);
+      if (h.description) {
+        const descr = document.createElement('div');
+        descr.className = 'alm-descr';
+        descr.textContent = h.description;
+        row.appendChild(descr);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'alm-actions';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn-secondary';
+      editBtn.textContent = 'Bearbeiten';
+      editBtn.addEventListener('click', () => openUnboundEditModal(h));
+      actions.appendChild(editBtn);
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn-danger';
+      delBtn.textContent = 'Loeschen';
+      delBtn.addEventListener('click', () => deleteUnboundFromManager(h));
+      actions.appendChild(delBtn);
+      row.appendChild(actions);
+      list.appendChild(row);
+    }
+  }
+
+  function openUnboundAddModal() {
+    if (!currentDeviceId) return;
+    unbEditMode = 'add';
+    unbEditOriginalHost = '';
+    unbEditOriginalDomain = '';
+    unbTargetDeviceId = currentDeviceId;
+    $('#unbound-modal-title').textContent = 'Neuer Host-Override';
+    $('#ub-host').value = '';
+    $('#ub-host').readOnly = false;
+    $('#ub-domain').value = '';
+    $('#ub-domain').readOnly = false;
+    $('#ub-server').value = '';
+    $('#ub-enabled').checked = true;
+    $('#ub-descr').value = '';
+    $('#unbound-modal-error').hidden = true;
+    $('#unbound-modal').hidden = false;
+    setTimeout(() => $('#ub-host').focus(), 0);
+  }
+
+  function openUnboundEditModal(host) {
+    if (!currentDeviceId) return;
+    unbEditMode = 'update';
+    unbEditOriginalHost = host.host;
+    unbEditOriginalDomain = host.domain;
+    unbTargetDeviceId = currentDeviceId;
+    $('#unbound-modal-title').textContent =
+      `Host-Override bearbeiten (${host.host}.${host.domain})`;
+    $('#ub-host').value = host.host;
+    $('#ub-host').readOnly = true;
+    $('#ub-domain').value = host.domain;
+    $('#ub-domain').readOnly = true;
+    $('#ub-server').value = host.server || '';
+    $('#ub-enabled').checked = !!host.enabled;
+    $('#ub-descr').value = host.description || '';
+    $('#unbound-modal-error').hidden = true;
+    $('#unbound-modal').hidden = false;
+    setTimeout(() => $('#ub-server').focus(), 0);
+  }
+
+  function closeUnboundModal() {
+    $('#unbound-modal').hidden = true;
+    $('#ub-host').readOnly = false;
+    $('#ub-domain').readOnly = false;
+    unbEditMode = 'add';
+    unbEditOriginalHost = '';
+    unbEditOriginalDomain = '';
+    unbTargetDeviceId = '';
+  }
+
+  async function submitUnboundModal() {
+    if (!unbTargetDeviceId) {
+      showUnboundModalError('Kein Ziel-Geraet bekannt - Modal neu oeffnen.');
+      return;
+    }
+    const host = $('#ub-host').value.trim();
+    const domain = $('#ub-domain').value.trim();
+    const server = $('#ub-server').value.trim();
+    if (!host || !domain || !server) {
+      showUnboundModalError('Host, Domain und Ziel-IP sind Pflichtfelder.');
+      return;
+    }
+    const payload = {
+      host, domain, server,
+      enabled: $('#ub-enabled').checked,
+      description: $('#ub-descr').value.trim(),
+      target_device_ids: [unbTargetDeviceId],
+    };
+    const url = unbEditMode === 'update'
+      ? '/api/plans/unbound-host-update'
+      : '/api/plans/unbound-host';
+    const confirm = $('#unbound-modal-confirm');
+    confirm.disabled = true;
+    confirm.textContent = 'Erzeuge Plan…';
+    try {
+      const r = await apiPost(url, payload);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showUnboundModalError(body.detail || `Fehler ${r.status}`);
+        return;
+      }
+      const plan = await r.json();
+      closeUnboundModal();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showUnboundModalError(err.message);
+    } finally {
+      confirm.disabled = false;
+      confirm.textContent = 'Plan erzeugen';
+    }
+  }
+
+  function showUnboundModalError(msg) {
+    const box = $('#unbound-modal-error');
+    box.textContent = msg;
+    box.hidden = false;
+  }
+
+  async function deleteUnboundFromManager(hostOverride) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    const devName = device ? device.name : currentDeviceId;
+    const label = `${hostOverride.host}.${hostOverride.domain}`;
+    const ok = window.confirm(
+      `Host-Override "${label}" wirklich auf ${devName} loeschen?\n\n`
+      + `Pre-Apply-Backup wird gezogen; ein Rollback ist via Backup-Tab moeglich.`,
+    );
+    if (!ok) return;
+    try {
+      const r = await apiPost('/api/plans/unbound-host-delete', {
+        host: hostOverride.host,
+        domain: hostOverride.domain,
+        target_device_ids: [currentDeviceId],
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${r.status}`, true);
+        return;
+      }
+      const plan = await r.json();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showToast(err.message, true);
+    }
   }
 
   // -------------------- Regeln-Tab im Device-Modal (Firewall-Filter) --------------------
@@ -5998,6 +6230,19 @@
     if (frmFilter) frmFilter.addEventListener('input', renderRulesList);
     const frmAdd = $('#frm-add-btn');
     if (frmAdd) frmAdd.addEventListener('click', openRuleAddModal);
+    // Unbound-Tab + Modal
+    const unbFilter = $('#unb-filter');
+    if (unbFilter) unbFilter.addEventListener('input', renderUnboundList);
+    const unbAdd = $('#unb-add-btn');
+    if (unbAdd) unbAdd.addEventListener('click', openUnboundAddModal);
+    const unbCancel = $('#unbound-modal-cancel');
+    if (unbCancel) unbCancel.addEventListener('click', closeUnboundModal);
+    const unbClose = $('#unbound-modal-close');
+    if (unbClose) unbClose.addEventListener('click', closeUnboundModal);
+    const unbConfirm = $('#unbound-modal-confirm');
+    if (unbConfirm) unbConfirm.addEventListener('click', () => {
+      submitUnboundModal().catch((err) => showUnboundModalError(err.message));
+    });
     // Rule-Modal-Buttons
     const ruleCancel = $('#rule-modal-cancel');
     if (ruleCancel) ruleCancel.addEventListener('click', closeRuleModal);

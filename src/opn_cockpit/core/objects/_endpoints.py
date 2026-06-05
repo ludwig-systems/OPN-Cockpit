@@ -44,6 +44,17 @@ RULE_DEL = "/api/firewall/filter/delRule/{uuid}"
 RULE_APPLY = "/api/firewall/filter/apply"
 
 # ---------------------------------------------------------------------------
+# Unbound-DNS Host-Overrides (core OPNsense, kein Plugin noetig)
+# ---------------------------------------------------------------------------
+
+UNBOUND_HOST_ADD = "/api/unbound/settings/addHostOverride"
+UNBOUND_HOST_SEARCH = "/api/unbound/settings/searchHostOverride"
+UNBOUND_HOST_GET = "/api/unbound/settings/getHostOverride/{uuid}"
+UNBOUND_HOST_SET = "/api/unbound/settings/setHostOverride/{uuid}"
+UNBOUND_HOST_DEL = "/api/unbound/settings/delHostOverride/{uuid}"
+UNBOUND_RECONFIGURE = "/api/unbound/service/reconfigure"
+
+# ---------------------------------------------------------------------------
 # Discovery (v1.1)
 # ---------------------------------------------------------------------------
 

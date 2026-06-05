@@ -557,6 +557,149 @@ def compare_rules(
     )
 
 
+# ---------------------------------------------------------------------------
+# Unbound-Host-Overrides
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class UnboundHostItem:
+    """Vergleichbare Repraesentation eines Host-Overrides."""
+
+    host: str
+    domain: str
+    server: str
+    description: str
+    enabled: bool
+
+    @property
+    def identity_key(self) -> str:
+        """Row-Key: host|domain (case-insensitive)."""
+        return f"{self.host.lower()}|{self.domain.lower()}"
+
+    @property
+    def display_name(self) -> str:
+        if self.domain:
+            return f"{self.host}.{self.domain}"
+        return self.host
+
+    @property
+    def content_fingerprint(self) -> str:
+        raw = f"{self.server}\0{self.description}\0{'1' if self.enabled else '0'}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _iter_unbound_host_nodes(root: ET.Element) -> list[ET.Element]:
+    for path in (
+        "./unbound/hosts/host",
+        "./opnsense/unbound/hosts/host",
+        "./OPNsense/unboundplus/hosts/host",
+    ):
+        found = root.findall(path)
+        if found:
+            return found
+    return []
+
+
+def extract_unbound_hosts(xml_bytes: bytes) -> list[UnboundHostItem]:
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return []
+    items: list[UnboundHostItem] = []
+    for node in _iter_unbound_host_nodes(root):
+        host = (node.findtext("host") or node.findtext("hostname") or "").strip()
+        domain = (node.findtext("domain") or "").strip()
+        if not host and not domain:
+            continue
+        server = (node.findtext("ip") or node.findtext("server") or "").strip()
+        descr = (node.findtext("descr")
+                 or node.findtext("description") or "").strip()
+        enabled_raw = (node.findtext("enabled") or "1").strip()
+        items.append(UnboundHostItem(
+            host=host,
+            domain=domain,
+            server=server,
+            description=descr,
+            enabled=enabled_raw not in ("0", "false", "no"),
+        ))
+    return items
+
+
+def compare_unbound_hosts(
+    per_device: dict[str, list[UnboundHostItem] | None],
+    columns: list[str],
+) -> AliasComparison:
+    """Vergleichs-Matrix fuer Unbound-Host-Overrides, reused AliasComparison.
+
+    * ``row.name`` = "host.domain"
+    * ``cell.type`` = Ziel-Server-IP
+    * ``cell.content`` = ["server: <ip>", "deaktiviert", "descr: ..."]
+    """
+    all_keys: set[str] = set()
+    items_by_device: dict[str, dict[str, UnboundHostItem]] = {}
+    for device_id in columns:
+        items = per_device.get(device_id)
+        if items is None:
+            items_by_device[device_id] = {}
+            continue
+        items_by_device[device_id] = {h.identity_key: h for h in items}
+        all_keys.update(h.identity_key for h in items)
+
+    rows: list[AliasRow] = []
+    drift_count = 0
+    for key in sorted(all_keys, key=str.lower):
+        display_name = ""
+        cells: list[tuple[str, AliasCell]] = []
+        fingerprints_seen: set[str] = set()
+        any_absent = False
+        for device_id in columns:
+            if per_device.get(device_id) is None:
+                cells.append((device_id, AliasCell(status="unreachable")))
+                continue
+            entry = items_by_device[device_id].get(key)
+            if entry is None:
+                cells.append((device_id, AliasCell(status="absent")))
+                any_absent = True
+                continue
+            if not display_name:
+                display_name = entry.display_name
+            detail = [f"server: {entry.server or '-'}"]
+            if not entry.enabled:
+                detail.append("deaktiviert")
+            if entry.description:
+                detail.append(f"descr: {entry.description}")
+            cells.append((device_id, AliasCell(
+                status="present",
+                type=entry.server,
+                content_fingerprint=entry.content_fingerprint,
+                content_count=0,
+                description=entry.description,
+                content=tuple(detail),
+            )))
+            fingerprints_seen.add(entry.content_fingerprint)
+        uniform = not any_absent and len(fingerprints_seen) == 1
+        if not uniform:
+            drift_count += 1
+        rows.append(AliasRow(name=display_name or key, cells=tuple(cells), uniform=uniform))
+
+    if not rows:
+        summary = "Keine Unbound-Host-Overrides auf den gewaehlten Geraeten."
+    elif drift_count == 0:
+        summary = f"{len(rows)} Host-Overrides, alle auf allen Geraeten identisch."
+    else:
+        summary = (
+            f"{len(rows)} Host-Overrides insgesamt, davon {drift_count} mit "
+            "Unterschieden zwischen den Geraeten."
+        )
+
+    return AliasComparison(
+        columns=tuple(columns),
+        rows=tuple(rows),
+        summary=summary,
+    )
+
+
 __all__ = [
     "AliasCell",
     "AliasComparison",
@@ -564,10 +707,13 @@ __all__ = [
     "AliasRow",
     "RouteItem",
     "RuleItem",
+    "UnboundHostItem",
     "compare_aliases",
     "compare_routes",
     "compare_rules",
+    "compare_unbound_hosts",
     "extract_aliases",
     "extract_routes",
     "extract_rules",
+    "extract_unbound_hosts",
 ]

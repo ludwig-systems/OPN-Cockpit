@@ -16,6 +16,7 @@ from opn_cockpit.core.objects.aliases import AliasSpec
 from opn_cockpit.core.objects.base import ActionKind
 from opn_cockpit.core.objects.firewall_rules import RuleSpec
 from opn_cockpit.core.objects.routes import RouteSpec
+from opn_cockpit.core.objects.unbound import UnboundHostSpec
 from opn_cockpit.core.result import RolloutReport, Status
 from opn_cockpit.core.validation import (
     parse_cidr,
@@ -55,6 +56,9 @@ from opn_cockpit.web.api.schemas import (
     RuleDeletePlanRequest,
     RulePlanRequest,
     RuleUpdatePlanRequest,
+    UnboundHostDeletePlanRequest,
+    UnboundHostPlanRequest,
+    UnboundHostUpdatePlanRequest,
 )
 from opn_cockpit.web.auth.dependencies import (
     require_session,
@@ -321,6 +325,102 @@ def plan_rule_delete(
         session=session,
         action="delete_rule",
         subsystem="firewall_rules",
+        spec=spec,
+        devices=devices,
+        action_kind=ActionKind.DELETE,
+    )
+    return _plan_to_response(plan)
+
+
+# ---------------------------------------------------------------------------
+# Unbound-DNS Host-Overrides
+# ---------------------------------------------------------------------------
+
+
+def _unbound_spec(payload: object) -> UnboundHostSpec:
+    return UnboundHostSpec(
+        host=payload.host,            # type: ignore[attr-defined]
+        domain=payload.domain,        # type: ignore[attr-defined]
+        server=getattr(payload, "server", ""),
+        description=getattr(payload, "description", ""),
+        enabled=getattr(payload, "enabled", True),
+    )
+
+
+@router.post(
+    "/unbound-host",
+    response_model=PlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def plan_unbound_host(
+    payload: UnboundHostPlanRequest,
+    session: Session = Depends(require_session),
+) -> PlanResponse:
+    """Plan: neuer Unbound-Host-Override auf den gewaehlten Geraeten."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
+    devices = _devices_or_404(session, payload.target_device_ids)
+    plan = _generate_and_save_plan(
+        session=session,
+        action="add_unbound_host",
+        subsystem="unbound_hosts",
+        spec=_unbound_spec(payload),
+        devices=devices,
+        action_kind=ActionKind.ADD,
+    )
+    return _plan_to_response(plan)
+
+
+@router.post(
+    "/unbound-host-update",
+    response_model=PlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def plan_unbound_host_update(
+    payload: UnboundHostUpdatePlanRequest,
+    session: Session = Depends(require_session),
+) -> PlanResponse:
+    """Plan: Unbound-Host-Override-Edit. Identitaet = (host, domain)."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
+    devices = _devices_or_404(session, payload.target_device_ids)
+    plan = _generate_and_save_plan(
+        session=session,
+        action="update_unbound_host",
+        subsystem="unbound_hosts",
+        spec=_unbound_spec(payload),
+        devices=devices,
+        action_kind=ActionKind.UPDATE,
+    )
+    return _plan_to_response(plan)
+
+
+@router.post(
+    "/unbound-host-delete",
+    response_model=PlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def plan_unbound_host_delete(
+    payload: UnboundHostDeletePlanRequest,
+    session: Session = Depends(require_session),
+) -> PlanResponse:
+    """Plan: Unbound-Host-Override-Delete. Identitaet = (host, domain)."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
+    devices = _devices_or_404(session, payload.target_device_ids)
+    spec = UnboundHostSpec(
+        host=payload.host, domain=payload.domain, server="placeholder",
+    )
+    plan = _generate_and_save_plan(
+        session=session,
+        action="delete_unbound_host",
+        subsystem="unbound_hosts",
         spec=spec,
         devices=devices,
         action_kind=ActionKind.DELETE,

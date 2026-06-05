@@ -484,6 +484,7 @@
                     <button class="compare-tab is-active" data-subsystem="aliases">Aliase</button>
                     <button class="compare-tab" data-subsystem="routes">Routen</button>
                     <button class="compare-tab" data-subsystem="rules">Regeln</button>
+                    <button class="compare-tab" data-subsystem="unbound">DNS</button>
                   </div>
                   <div class="compare-status" id="cmp-status">Lade Vergleich…</div>
                 </div>
@@ -627,6 +628,7 @@
           <button class="modal-tab" data-tab="aliases" role="tab">Aliase</button>
           <button class="modal-tab" data-tab="routes" role="tab">Routen</button>
           <button class="modal-tab" data-tab="rules" role="tab">Regeln</button>
+          <button class="modal-tab" data-tab="unbound" role="tab">DNS</button>
         </div>
 
         <div class="modal-body">
@@ -760,6 +762,25 @@
             <div class="alm-list" id="rtm-list"></div>
           </div>
 
+          <!-- Tab: DNS (Unbound Host-Overrides) -->
+          <div class="modal-tab-pane" data-tab-pane="unbound" role="tabpanel" hidden>
+            <div class="alm-toolbar">
+              <input id="unb-filter" class="form-input" type="search"
+                     placeholder="Filter (Hostname, Domain, IP)..." autocomplete="off" />
+              <div class="alm-status" id="unb-status">—</div>
+            </div>
+            <div class="form-row" style="margin-bottom:12px;">
+              <button class="btn-secondary action-row-btn" id="unb-add-btn">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="6.5" y1="2" x2="6.5" y2="11"/>
+                  <line x1="2" y1="6.5" x2="11" y2="6.5"/>
+                </svg>
+                <span>Neuer Host-Override</span>
+              </button>
+            </div>
+            <div class="alm-list" id="unb-list"></div>
+          </div>
+
           <!-- Tab: Regeln (Firewall-Filter) -->
           <div class="modal-tab-pane" data-tab-pane="rules" role="tabpanel" hidden>
             <div class="alm-toolbar">
@@ -785,6 +806,60 @@
         <div class="modal-footer">
           <button class="btn-link" id="device-modal-cancel">Schließen</button>
           <button class="btn-danger" id="device-modal-delete">Gerät löschen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Unbound Host-Override (Add / Edit) ================ -->
+    <div class="modal-backdrop" id="unbound-modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="unbound-modal-title">
+        <div class="modal-header">
+          <h2 id="unbound-modal-title">Host-Override</h2>
+          <button class="icon-btn modal-close" id="unbound-modal-close" aria-label="Schließen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-hint" style="margin-bottom:12px;">
+            Unbound-DNS-Host-Override fuer Recursive-Resolution. Wird ueber
+            den Plan/Apply-Flow ausgerollt (Pre-Apply-Backup automatisch).
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ub-host">Hostname</label>
+              <input id="ub-host" class="form-input" type="text" placeholder="opnsense" data-validate="aliasName" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="ub-domain">Domain</label>
+              <input id="ub-domain" class="form-input" type="text" placeholder="lab.local" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ub-server">Ziel-IP</label>
+              <input id="ub-server" class="form-input" type="text" placeholder="10.0.0.1" data-validate="ipv4" />
+            </div>
+            <div class="form-col">
+              <label class="form-checkbox" style="margin-top:24px;">
+                <input type="checkbox" id="ub-enabled" checked />
+                <span>Aktiv</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ub-descr">Beschreibung</label>
+              <input id="ub-descr" class="form-input" type="text" placeholder="" />
+            </div>
+          </div>
+          <div class="form-error" id="unbound-modal-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="unbound-modal-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="unbound-modal-confirm">Plan erzeugen</button>
         </div>
       </div>
     </div>

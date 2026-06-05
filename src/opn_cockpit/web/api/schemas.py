@@ -479,9 +479,8 @@ class CompareRequest(BaseModel):
     """N Geraete + Subsystem zum Vergleichen."""
 
     device_ids: list[str] = Field(..., min_length=2)
-    subsystem: str = Field(..., pattern=r"^(aliases|routes|rules)$")
-    """Unterstuetzte Subsysteme: aliases, routes, rules. Unbound-DNS
-    folgt mit der Unbound-CRUD-Iteration."""
+    subsystem: str = Field(..., pattern=r"^(aliases|routes|rules|unbound)$")
+    """Unterstuetzte Subsysteme: aliases, routes, rules, unbound."""
 
 
 class CompareCellResponse(BaseModel):
@@ -565,6 +564,26 @@ class DeviceRoutesResponse(BaseModel):
     reachable: bool
     summary: str
     routes: list[RouteEntryResponse]
+    checked_at_iso: str
+
+
+class UnboundHostEntryResponse(BaseModel):
+    """Ein Unbound-Host-Override mit Live-UUID aus searchHostOverride."""
+
+    uuid: str
+    enabled: bool
+    host: str
+    domain: str
+    server: str
+    description: str
+
+
+class DeviceUnboundHostsResponse(BaseModel):
+    device_id: str
+    device_name: str
+    reachable: bool
+    summary: str
+    hosts: list[UnboundHostEntryResponse]
     checked_at_iso: str
 
 
@@ -731,6 +750,38 @@ class RuleDeletePlanRequest(BaseModel):
     """Plan-Erzeugung fuer einen Filter-Regel-Delete."""
 
     uuid: str = Field(..., min_length=1, max_length=64)
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class _UnboundHostPayloadBase(BaseModel):
+    enabled: bool = True
+    host: str = Field(..., min_length=1, max_length=120)
+    domain: str = Field(..., min_length=1, max_length=180)
+    server: str = Field(..., min_length=1, max_length=80)
+    description: str = Field("", max_length=200)
+
+
+class UnboundHostPlanRequest(_UnboundHostPayloadBase):
+    """Plan-Erzeugung fuer einen neuen Unbound-Host-Override."""
+
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class UnboundHostUpdatePlanRequest(_UnboundHostPayloadBase):
+    """Plan-Erzeugung fuer einen Unbound-Host-Override-Edit.
+
+    Identitaet = (host, domain). Server + Beschreibung + Enabled-Flag
+    sind editierbar; host/domain bleiben.
+    """
+
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class UnboundHostDeletePlanRequest(BaseModel):
+    """Plan-Erzeugung fuer Unbound-Host-Override-Delete."""
+
+    host: str = Field(..., min_length=1, max_length=120)
+    domain: str = Field(..., min_length=1, max_length=180)
     target_device_ids: list[str] = Field(..., min_length=1)
 
 

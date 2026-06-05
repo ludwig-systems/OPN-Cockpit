@@ -4,6 +4,24 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### Unbound-DNS-CRUD + Compare
+
+- Viertes Subsystem in der Plan-Pipeline: ``unbound_hosts``. Adapter
+  fuer Host-Overrides via ``/api/unbound/settings/{add,set,del}HostOverride``
+  + ``/api/unbound/service/reconfigure``. Identitaet = ``(host, domain)``.
+- **DNS-Tab im Device-Modal**: Live-Liste der Host-Overrides via
+  ``GET /api/inventory/devices/{id}/unbound-hosts``, mit
+  **Neuer Host-Override** / **Bearbeiten** / **Loeschen**. Edit-Modal
+  hat 5 Felder (host, domain, server-IP, enabled, description); die
+  Identitaet (host + domain) ist beim Edit gesperrt.
+- Neue Plan-Endpoints ``/api/plans/unbound-host``,
+  ``/api/plans/unbound-host-update``, ``/api/plans/unbound-host-delete``.
+- **Config-Compare-Tab "DNS"**: ``compare_unbound_hosts`` mit
+  Identity-Key ``host|domain``, Fingerprint ueber Server + Description
+  + Enabled-Flag. Cell-Label im Compare-Matrix zeigt die Ziel-IP.
+- Damit haben jetzt alle vier produktiven Subsysteme den vollen
+  CRUD-Kreis: Aliase, Routen, Filter-Regeln, Unbound-Hosts.
+
 ### Frontend-Inline-Validierung
 
 - Inputs mit ``data-validate="<key>"`` bekommen jetzt eine

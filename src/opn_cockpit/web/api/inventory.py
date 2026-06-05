@@ -35,12 +35,15 @@ from opn_cockpit.core.config_compare import (
     AliasItem,
     RouteItem,
     RuleItem,
+    UnboundHostItem,
     compare_aliases,
     compare_routes,
     compare_rules,
+    compare_unbound_hosts,
     extract_aliases,
     extract_routes,
     extract_rules,
+    extract_unbound_hosts,
 )
 from opn_cockpit.core.config_drift import compute_drift_hash
 from opn_cockpit.core.device_info import (
@@ -102,11 +105,13 @@ from opn_cockpit.web.api.schemas import (
     HeartbeatResponse,
     InventoryResponse,
     DeviceRulesResponse,
+    DeviceUnboundHostsResponse,
     RouteEntryResponse,
     RuleEntryResponse,
     SyncAliasRequest,
     SyncAliasResponse,
     TagSummary,
+    UnboundHostEntryResponse,
 )
 from opn_cockpit.web.auth.dependencies import require_session
 from opn_cockpit.web.server_state import ServerState
@@ -758,6 +763,12 @@ def compare_configs(
             for did, x in xml_by_device.items()
         }
         comparison = compare_rules(per_device_rules, column_order)
+    elif payload.subsystem == "unbound":
+        per_device_unbound: dict[str, list[UnboundHostItem] | None] = {
+            did: extract_unbound_hosts(x) if x is not None else None
+            for did, x in xml_by_device.items()
+        }
+        comparison = compare_unbound_hosts(per_device_unbound, column_order)
     else:
         # Schema-Validator stellt das eigentlich sicher, defensiver Fallback
         raise HTTPException(
@@ -1166,6 +1177,94 @@ def get_device_firewall_rules(
         reachable=True,
         summary=f"{len(entries)} Regel(n) live geladen.",
         rules=entries,
+        checked_at_iso=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/unbound-hosts  - Live Host-Overrides
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/unbound-hosts",
+    response_model=DeviceUnboundHostsResponse,
+)
+def get_device_unbound_hosts(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> DeviceUnboundHostsResponse:
+    """Liefert die Live-Unbound-Host-Overrides eines Geraets."""
+    from opn_cockpit.core.objects._endpoints import UNBOUND_HOST_SEARCH  # noqa: PLC0415
+
+    devices_by_id = {d.id: d for d in session.opened.data.devices}
+    device = devices_by_id.get(device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(device, session)
+    timestamp = _iso_now()
+
+    settings = session.opened.data.settings
+    tuning = HttpTuning(
+        connect_timeout_s=settings.connect_timeout_s,
+        read_timeout_s=settings.read_timeout_s,
+        reconfigure_timeout_s=settings.reconfigure_timeout_s,
+        retry_count=settings.retry_count,
+    )
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    try:
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            response = client.call(
+                tgt, device.api_key, device.api_secret,
+                "POST", UNBOUND_HOST_SEARCH,
+                json={"current": 1, "rowCount": -1},
+            )
+    except OpnCockpitError as exc:
+        reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+        return DeviceUnboundHostsResponse(
+            device_id=device.id,
+            device_name=device.name,
+            reachable=False,
+            summary=f"Host-Overrides nicht ladbar: {reason}",
+            hosts=[],
+            checked_at_iso=timestamp,
+        )
+
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        rows = []
+
+    entries: list[UnboundHostEntryResponse] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        uuid = str(row.get("uuid", ""))
+        if not uuid:
+            continue
+        enabled_raw = str(row.get("enabled", "1"))
+        entries.append(UnboundHostEntryResponse(
+            uuid=uuid,
+            enabled=enabled_raw not in ("", "0", "false", "False"),
+            host=str(row.get("hostname", row.get("host", ""))).strip(),
+            domain=str(row.get("domain", "")).strip(),
+            server=str(row.get("server", row.get("rr", ""))).strip(),
+            description=str(row.get("description", row.get("descr", ""))).strip(),
+        ))
+
+    session.touch()
+    return DeviceUnboundHostsResponse(
+        device_id=device.id,
+        device_name=device.name,
+        reachable=True,
+        summary=f"{len(entries)} Host-Override(s) live geladen.",
+        hosts=entries,
         checked_at_iso=timestamp,
     )
 
