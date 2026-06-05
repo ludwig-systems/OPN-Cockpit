@@ -4,6 +4,20 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### Frontend-Inline-Validierung
+
+- Inputs mit ``data-validate="<key>"`` bekommen jetzt eine
+  Client-Validierung beim Tippen + Blur. Falsche Werte zeigen einen
+  roten Border + kleinen Inline-Hint unter dem Feld; Submit bleibt
+  weiterhin vom Server geprueft (Defense-in-Depth).
+- Validatoren: ``cidr`` (IPv4 + Host-Bits-Check), ``ipv4``,
+  ``host`` (FQDN oder IPv4), ``aliasName``,
+  ``gatewayName``, ``port`` (Zahl, Range, "any" oder Alias-Name).
+- Markiert: Route-Network + Gateway-Name, Alias-Name, Rule-Src/Dst-
+  Port + Gateway, Device-Host beim Anlegen. Andere Felder folgen
+  bei Bedarf, das System ist erweiterbar (1x ``data-validate``
+  setzen reicht).
+
 ### Auto-Retry-Persistenz + Orphan-Adoption
 
 - ``RetryWatcher``-Queue ueberlebt jetzt Server-Restart UND Session-

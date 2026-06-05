@@ -99,6 +99,115 @@
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
+  // -------------------- Inline-Validierung --------------------
+  // Wird vom DOMContentLoaded-Setup aktiviert: jedes Input mit
+  // data-validate="<key>" bekommt einen input-Listener, der den
+  // passenden Validator ruft. Validatoren liefern null bei OK oder
+  // einen Fehlertext (kurz, deutsch). Empty value gilt immer als OK
+  // damit Pflichtfelder nicht beim Tippen rot leuchten - der
+  // Submit-Pfad prueft "leer aber required".
+  const VALIDATORS = {
+    cidr(v) {
+      // IPv4-CIDR-Pruefung clientseitig - lehnt Host-Bits ab (strict).
+      // IPv6 ueberlassen wir dem Server (Frontend bleibt schmal).
+      const m = v.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/);
+      if (!m) return 'CIDR erwartet (z. B. 10.0.0.0/24).';
+      const octets = m.slice(1, 5).map(Number);
+      if (octets.some((o) => o < 0 || o > 255)) return 'Oktett ausserhalb 0-255.';
+      const prefix = Number(m[5]);
+      if (prefix < 0 || prefix > 32) return 'Prefix 0-32.';
+      // Host-Bits muessen 0 sein
+      const ip = (octets[0] << 24 >>> 0) + (octets[1] << 16) + (octets[2] << 8) + octets[3];
+      const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+      if ((ip & ~mask) >>> 0) return 'Host-Bits nicht 0 - Netz-Adresse erwartet.';
+      return null;
+    },
+    ipv4(v) {
+      const m = v.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+      if (!m) return 'IPv4-Adresse erwartet.';
+      const octets = m.slice(1).map(Number);
+      if (octets.some((o) => o < 0 || o > 255)) return 'Oktett ausserhalb 0-255.';
+      return null;
+    },
+    host(v) {
+      // FQDN ODER IPv4. Akzeptiert any-letter-Hostnamen ohne Punkt
+      // (z. B. "opn-1" intern). Lehnt offensichtlich falsche Zeichen ab.
+      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(v)) return VALIDATORS.ipv4(v);
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9-.]{0,253}$/.test(v)) {
+        return 'Nur Buchstaben, Ziffern, "-" und "." erlaubt.';
+      }
+      if (v.endsWith('.') || v.includes('..')) return 'Punkt-Fehler im Hostnamen.';
+      return null;
+    },
+    aliasName(v) {
+      // OPNsense: Buchstaben, Ziffern, Underscore, max 32 Zeichen,
+      // muss mit Buchstaben starten.
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(v)) {
+        return 'Buchstabe am Anfang, dann nur a-z A-Z 0-9 _ (max 32).';
+      }
+      return null;
+    },
+    gatewayName(v) {
+      // OPNsense Gateway-Identifier: Buchstabe + Buchstabe/Ziffer/_,
+      // typischerweise GROSSGESCHRIEBEN, aber wir tolerieren beides.
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(v)) {
+        return 'Gateway-Name: Buchstabe am Anfang, dann a-z A-Z 0-9 _ .';
+      }
+      return null;
+    },
+    port(v) {
+      // Erlaubt: leere Eingabe, "any", einzelner Port, Range, Alias-Name.
+      // Konservativ: nur Port-Zahl oder Range strikt pruefen, sonst OK
+      // durchwinken (Alias-Namen koennen alles sein).
+      if (v.toLowerCase() === 'any') return null;
+      if (/^\d+$/.test(v)) {
+        const n = Number(v);
+        if (n < 1 || n > 65535) return 'Port 1-65535.';
+        return null;
+      }
+      if (/^\d+[-:]\d+$/.test(v)) {
+        const [lo, hi] = v.split(/[-:]/).map(Number);
+        if (lo < 1 || hi > 65535 || lo > hi) return 'Ungueltige Port-Range.';
+        return null;
+      }
+      // Alias-Name oder Sonderform - nicht clientseitig blocken.
+      return null;
+    },
+  };
+
+  function attachInlineValidator(input) {
+    const key = input.dataset.validate;
+    const validator = VALIDATORS[key];
+    if (!validator) return;
+    const errEl = document.createElement('span');
+    errEl.className = 'form-inline-error';
+    errEl.hidden = true;
+    if (input.parentNode) input.parentNode.insertBefore(errEl, input.nextSibling);
+    const run = () => {
+      const v = (input.value || '').trim();
+      if (!v) {
+        input.classList.remove('is-invalid');
+        errEl.hidden = true;
+        return;
+      }
+      const error = validator(v);
+      if (error) {
+        input.classList.add('is-invalid');
+        errEl.textContent = error;
+        errEl.hidden = false;
+      } else {
+        input.classList.remove('is-invalid');
+        errEl.hidden = true;
+      }
+    };
+    input.addEventListener('input', run);
+    input.addEventListener('blur', run);
+  }
+
+  function setupInlineValidators() {
+    document.querySelectorAll('input[data-validate]').forEach(attachInlineValidator);
+  }
+
   // -------------------- App-State --------------------
 
   const state = {
@@ -5530,6 +5639,7 @@
   async function bootstrap() {
     initTheme();
     bindStaticEvents();
+    setupInlineValidators();
 
     const status = $('#boot-status');
 

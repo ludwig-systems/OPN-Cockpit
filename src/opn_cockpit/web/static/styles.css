@@ -343,6 +343,21 @@ body {
 
 .form-input::placeholder { color: var(--text-subtle); }
 
+/* Inline-Validierung: rote Border + Mini-Hint unter dem Input.
+ * is-invalid wird vom JS gesetzt sobald das Feld ein Validierungs-
+ * pattern verletzt; sobald wieder valide, ist die Klasse weg. */
+.form-input.is-invalid {
+  border-color: var(--danger, #c0392b);
+  box-shadow: 0 0 0 1px var(--danger, #c0392b) inset;
+}
+.form-inline-error {
+  display: block;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--danger, #c0392b);
+  letter-spacing: 0.01em;
+}
+
 .form-error {
   margin-top: 12px;
   padding: 9px 11px;
