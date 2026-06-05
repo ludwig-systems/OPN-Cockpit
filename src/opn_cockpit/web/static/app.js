@@ -5806,7 +5806,10 @@
             repo.textContent = data.github_url;
             repo.href = data.github_url;
           }
-          $('#about-license').textContent = data.license || '—';
+          // Nur das Lizenz-Label austauschen, nicht die Drittanbieter-
+          // Hinweise daneben. Der Notice-Link bleibt statisch im HTML.
+          const lbl = $('#about-license-label');
+          if (lbl) lbl.textContent = data.license || '—';
           aboutLoaded = true;
         }
       } catch (_err) {

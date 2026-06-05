@@ -4,6 +4,21 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### Lizenz: Apache 2.0
+
+- Projekt-Lizenz von "Proprietary" auf **Apache License 2.0** umgestellt.
+  Begruendung: permissiv (kommerzielle Adoption moeglich), expliziter
+  Patent-Grant (schuetzt User vor Patentklagen), kompatibel mit allen
+  Runtime-Deps (MIT/BSD/Apache/LGPL). Industriestandard fuer
+  Infrastruktur-Tools.
+- ``LICENSE``-Datei + ``THIRD-PARTY-NOTICES.md`` mit Attribution fuer
+  alle Runtime-Deps (FastAPI, httpx, paramiko, fpdf2, cryptography,
+  argon2-cffi, ...) und Bundle-Komponenten (Python Embedded, NSSM,
+  Inno Setup).
+- ``pyproject.toml`` ``license = "Apache-2.0"`` + ``license-files``;
+  ``__license_label__`` analog; About-Modal zeigt das Label + Link
+  zur Drittanbieter-Datei.
+
 ### Safety-Net via SSH (Cisco-Style commit-confirmed)
 
 - Neues Apply-Mode "Mit Sicherheitsnetz": nach erfolgreichem Verify

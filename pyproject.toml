@@ -4,7 +4,8 @@ version = "0.7.0.dev0"
 description = "Multi-Site OPNsense-Management — Windows-Single-User, Windows-Multi-User-Server, Linux/Proxmox-Server. REST-API-basiert."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "OPN-Cockpit Maintainers" }]
 
 dependencies = [
