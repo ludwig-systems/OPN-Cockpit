@@ -47,7 +47,12 @@ from opn_cockpit.core.discovery import (
     list_gateways,
 )
 from opn_cockpit.core.health import check_device
-from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
+from opn_cockpit.core.http_client import (
+    HttpClient,
+    HttpTarget,
+    HttpTuning,
+    tuning_from_settings,
+)
 from opn_cockpit.core.objects.aliases import AliasSpec, MergeMode
 from opn_cockpit.core.objects.routes import RouteSpec
 from opn_cockpit.importers.csv_routes import parse_routes_csv
@@ -1168,13 +1173,7 @@ def _audit_login_failed(vault_path: Path, command: str) -> None:
 
 
 def _tuning_from_session(session: Session) -> HttpTuning:
-    settings = session.opened.data.settings
-    return HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    return tuning_from_settings(session.opened.data.settings)
 
 
 if __name__ == "__main__":

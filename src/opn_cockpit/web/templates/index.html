@@ -849,6 +849,103 @@
       </div>
     </div>
 
+    <!-- ================ MODAL: Server-TLS-Zertifikat hochladen ================ -->
+    <div class="modal-backdrop" id="srv-tls-modal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="srv-tls-title">
+        <div class="modal-header">
+          <h2 id="srv-tls-title">Cockpit-HTTPS-Zertifikat</h2>
+          <button class="icon-btn modal-close" id="srv-tls-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-hint" style="margin-bottom:12px;">
+            Hier landet das Zertifikat fuer den Cockpit-eigenen HTTPS-Port.
+            Das ist NICHT dasselbe wie die OPNsense-API-CAs (Sektion oben);
+            das ist das Cert, das dein Browser sieht wenn du
+            <code>https://cockpit.lab:9876</code> aufrufst.
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="srv-tls-cert">Server-Zertifikat (PEM)</label>
+              <textarea id="srv-tls-cert" class="form-input" rows="8"
+                placeholder="-----BEGIN CERTIFICATE-----..."
+                style="font-family:monospace;font-size:11px;" autocomplete="off"></textarea>
+              <div class="form-hint">
+                Bei Chain: Fullchain — zuerst dein Server-Cert, dann
+                Intermediate, ggf. Root. Alle Bloecke zusammen einfuegen.
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="srv-tls-key">Privater Schluessel (PEM)</label>
+              <textarea id="srv-tls-key" class="form-input" rows="6"
+                placeholder="-----BEGIN PRIVATE KEY-----..."
+                style="font-family:monospace;font-size:11px;" autocomplete="off"></textarea>
+              <div class="form-hint">
+                Wird mit 0600 auf der Cockpit-Maschine abgelegt (nur Service-User).
+                Cockpit ueberprueft nicht ob Key zum Cert passt — wenn die zwei
+                nicht zusammenpassen, scheitert uvicorn beim Boot mit SSL-Error
+                und schreibt das ins Log.
+              </div>
+            </div>
+          </div>
+          <div class="form-hint" style="color:var(--danger,#c0392b);">
+            ⚠ Nach Save: Cockpit-Service neu starten, sonst greift die Aenderung nicht.
+          </div>
+          <div class="form-error" id="srv-tls-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="srv-tls-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="srv-tls-confirm">Speichern</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Root-CA hinzufuegen ================ -->
+    <div class="modal-backdrop" id="ca-add-modal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="ca-add-title">
+        <div class="modal-header">
+          <h2 id="ca-add-title">Root-CA hinzufuegen</h2>
+          <button class="icon-btn modal-close" id="ca-add-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-hint" style="margin-bottom:12px;">
+            PEM-codierten <strong>Root-CA</strong>-Zertifikat einfuegen
+            (mit <code>-----BEGIN CERTIFICATE-----</code> / <code>END</code>-
+            Zeilen). Mehrere Zertifikate hintereinander sind erlaubt — z. B.
+            Root + Intermediate.
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="ca-pem">PEM-Inhalt</label>
+              <textarea id="ca-pem" class="form-input" rows="10"
+                        placeholder="-----BEGIN CERTIFICATE-----..."
+                        style="font-family:monospace;font-size:11px;" autocomplete="off"></textarea>
+            </div>
+          </div>
+          <div class="form-row" style="margin-bottom:8px;">
+            <button class="btn-secondary" id="ca-inspect-btn" type="button">Vorschau pruefen</button>
+          </div>
+          <div id="ca-preview" class="ca-preview" hidden></div>
+          <div class="form-error" id="ca-add-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="ca-add-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="ca-add-confirm">Hinzufuegen</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ================ MODAL: Unbound Host-Override (Add / Edit) ================ -->
     <div class="modal-backdrop" id="unbound-modal" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="unbound-modal-title">
@@ -1371,6 +1468,43 @@
           </div>
           <div class="form-error" id="vs-backup-error" hidden></div>
           <div class="form-success" id="vs-backup-ok" hidden>Gespeichert.</div>
+
+          <div class="form-divider"></div>
+
+          <!-- Sektion: Custom Root-CAs (v0.8 #12) -->
+          <h3 class="modal-section-title">Vertrauenswuerdige Root-CAs</h3>
+          <div class="form-hint" style="margin-bottom:12px;">
+            Zertifikate, die deine interne CA ausstellt, werden zusaetzlich
+            zum System-CA-Bundle als vertrauenswuerdig akzeptiert. Damit
+            kannst du Geraete mit selbst-signierten Zertifikaten aus deiner
+            internen CA mit aktiver <strong>TLS-Pruefung</strong> verwalten.
+            Default: leer = nur System-CA-Bundle.
+          </div>
+          <div class="ca-trust-list" id="vs-ca-list">
+            <div class="form-hint">Lade…</div>
+          </div>
+          <div class="form-row" style="margin-top:12px;">
+            <button class="btn-secondary" id="vs-ca-add-btn" type="button">Root-CA hinzufuegen…</button>
+          </div>
+          <div class="form-error" id="vs-ca-error" hidden></div>
+
+          <div class="form-divider"></div>
+
+          <!-- Sektion: Cockpit-eigenes HTTPS (App-weit, nicht im Tresor) -->
+          <h3 class="modal-section-title">Cockpit HTTPS-Zertifikat</h3>
+          <div class="form-hint" style="margin-bottom:12px;">
+            App-weite Einstellung (NICHT im Tresor — liegt in
+            <code>settings.json</code>). Damit User auf
+            <code>https://cockpit.lab:9876</code> ohne Browser-Warnung
+            zugreifen. Nach Save ist ein <strong>Cockpit-Neustart erforderlich</strong> —
+            uvicorn liest TLS nur beim Boot.
+          </div>
+          <div id="vs-srv-tls-status" class="form-hint" style="margin-bottom:8px;">Lade…</div>
+          <div class="form-row" style="margin-top:8px;">
+            <button class="btn-secondary" id="vs-srv-tls-upload-btn" type="button">Server-Zertifikat hinterlegen…</button>
+            <button class="btn-link btn-danger-text" id="vs-srv-tls-clear-btn" type="button" hidden>Entfernen (zu HTTP zurueck)</button>
+          </div>
+          <div class="form-error" id="vs-srv-tls-error" hidden></div>
 
           <div class="form-divider"></div>
 

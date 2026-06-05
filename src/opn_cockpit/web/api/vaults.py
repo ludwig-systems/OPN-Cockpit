@@ -39,6 +39,10 @@ from opn_cockpit.web.api.schemas import (
     CreateVaultResponse,
     PathSuggestion,
     TemplateExportRequest,
+    TrustedCaCreateRequest,
+    TrustedCaEntry,
+    TrustedCaInspectResponse,
+    TrustedCaListResponse,
     VaultEntry,
     VaultListResponse,
     VaultSettingsResponse,
@@ -399,19 +403,7 @@ def get_vault_settings(
     """Liefert die Tresor-eigenen Settings (Inaktivitaets-Timeout etc.) fuer
     das Settings-Modal."""
     s = session.opened.data.settings
-    return VaultSettingsResponse(
-        inactivity_minutes=int(s.inactivity_minutes),
-        max_workers=int(s.max_workers),
-        auto_backup_before_apply=bool(s.auto_backup_before_apply),
-        backup_retention_pre_apply=int(s.backup_retention_pre_apply),
-        backup_retention_scheduled=int(s.backup_retention_scheduled),
-        scheduled_backup_enabled=bool(s.scheduled_backup_enabled),
-        scheduled_backup_interval_hours=int(s.scheduled_backup_interval_hours),
-        drift_detection_enabled=bool(s.drift_detection_enabled),
-        auto_retry_enabled=bool(s.auto_retry_enabled),
-        auto_retry_max_hours=int(s.auto_retry_max_hours),
-        auto_retry_interval_minutes=int(s.auto_retry_interval_minutes),
-    )
+    return _settings_to_response(s)
 
 
 @router.post("/settings", response_model=VaultSettingsResponse)
@@ -485,6 +477,12 @@ def update_vault_settings(
             if payload.auto_retry_interval_minutes is not None
             else old_settings.auto_retry_interval_minutes
         ),
+        # Safety-Net + Custom-CAs durchreichen damit ein Settings-Save
+        # diese Felder NICHT verliert. Beide werden ueber eigene
+        # Endpoints/UI gepflegt, nicht ueber den globalen Settings-PATCH.
+        safety_net_enabled=old_settings.safety_net_enabled,
+        safety_net_window_s=old_settings.safety_net_window_s,
+        trusted_ca_pems=list(old_settings.trusted_ca_pems),
     )
     session.opened.data.settings = new_settings
 
@@ -503,18 +501,25 @@ def update_vault_settings(
             f"auto_backup={new_settings.auto_backup_before_apply}"
         ),
     )
+    return _settings_to_response(new_settings)
+
+
+def _settings_to_response(s: VaultSettings) -> VaultSettingsResponse:
     return VaultSettingsResponse(
-        inactivity_minutes=int(new_settings.inactivity_minutes),
-        max_workers=int(new_settings.max_workers),
-        auto_backup_before_apply=bool(new_settings.auto_backup_before_apply),
-        backup_retention_pre_apply=int(new_settings.backup_retention_pre_apply),
-        backup_retention_scheduled=int(new_settings.backup_retention_scheduled),
-        scheduled_backup_enabled=bool(new_settings.scheduled_backup_enabled),
-        scheduled_backup_interval_hours=int(new_settings.scheduled_backup_interval_hours),
-        drift_detection_enabled=bool(new_settings.drift_detection_enabled),
-        auto_retry_enabled=bool(new_settings.auto_retry_enabled),
-        auto_retry_max_hours=int(new_settings.auto_retry_max_hours),
-        auto_retry_interval_minutes=int(new_settings.auto_retry_interval_minutes),
+        inactivity_minutes=int(s.inactivity_minutes),
+        max_workers=int(s.max_workers),
+        auto_backup_before_apply=bool(s.auto_backup_before_apply),
+        backup_retention_pre_apply=int(s.backup_retention_pre_apply),
+        backup_retention_scheduled=int(s.backup_retention_scheduled),
+        scheduled_backup_enabled=bool(s.scheduled_backup_enabled),
+        scheduled_backup_interval_hours=int(s.scheduled_backup_interval_hours),
+        drift_detection_enabled=bool(s.drift_detection_enabled),
+        auto_retry_enabled=bool(s.auto_retry_enabled),
+        auto_retry_max_hours=int(s.auto_retry_max_hours),
+        auto_retry_interval_minutes=int(s.auto_retry_interval_minutes),
+        safety_net_enabled=bool(s.safety_net_enabled),
+        safety_net_window_s=int(s.safety_net_window_s),
+        trusted_ca_count=len(s.trusted_ca_pems or []),
     )
 
 
@@ -580,3 +585,218 @@ def change_vault_password(
         summary="Tresor-Master-Passwort geaendert.",
     )
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Custom Trust-Store fuer interne PKI
+# ---------------------------------------------------------------------------
+
+
+@router.get("/settings/trusted-cas", response_model=TrustedCaListResponse)
+def list_trusted_cas(
+    session: Session = Depends(require_session),
+) -> TrustedCaListResponse:
+    """Listet alle im Tresor hinterlegten Root-CAs mit Metadaten."""
+    from opn_cockpit.core.trust_store import parse_cert  # noqa: PLC0415
+
+    pems = session.opened.data.settings.trusted_ca_pems or []
+    entries: list[TrustedCaEntry] = []
+    for pem in pems:
+        try:
+            meta = parse_cert(pem)
+        except ValueError:
+            # Stale-PEM im Tresor: ueberspringen statt die ganze Liste
+            # zu kippen. Der DELETE-Pfad ueber den Fingerprint erlaubt es
+            # dem User trotzdem nicht, kaputte PEMs loszuwerden - dafuer
+            # gibt es den /sync-Endpoint unten.
+            continue
+        entries.append(TrustedCaEntry(
+            fingerprint_sha256=meta.fingerprint_sha256,
+            subject_cn=meta.subject_cn,
+            issuer_cn=meta.issuer_cn,
+            not_before_iso=meta.not_before_iso,
+            not_after_iso=meta.not_after_iso,
+            days_until_expiry=meta.days_until_expiry,
+            is_ca=meta.is_ca,
+            self_signed=meta.self_signed,
+        ))
+    session.touch()
+    return TrustedCaListResponse(entries=entries)
+
+
+@router.post(
+    "/settings/trusted-cas/inspect",
+    response_model=TrustedCaInspectResponse,
+)
+def inspect_trusted_ca(
+    payload: TrustedCaCreateRequest,
+    session: Session = Depends(require_session),
+) -> TrustedCaInspectResponse:
+    """Parst einen PEM-Block + liefert Metadaten OHNE zu speichern.
+
+    UI-seitige Preview vor dem Klick auf "Hinzufuegen". So sieht der
+    User wer er da gerade trustet, bevor es im Tresor landet.
+    """
+    from opn_cockpit.core.trust_store import parse_all  # noqa: PLC0415
+
+    parsed, errors = parse_all(payload.pem)
+    entries = [
+        TrustedCaEntry(
+            fingerprint_sha256=m.fingerprint_sha256,
+            subject_cn=m.subject_cn,
+            issuer_cn=m.issuer_cn,
+            not_before_iso=m.not_before_iso,
+            not_after_iso=m.not_after_iso,
+            days_until_expiry=m.days_until_expiry,
+            is_ca=m.is_ca,
+            self_signed=m.self_signed,
+        )
+        for m in parsed
+    ]
+    session.touch()
+    return TrustedCaInspectResponse(entries=entries, parse_errors=errors)
+
+
+@router.post(
+    "/settings/trusted-cas",
+    response_model=TrustedCaListResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_trusted_ca(
+    payload: TrustedCaCreateRequest,
+    request: Request,
+    session: Session = Depends(require_session),
+) -> TrustedCaListResponse:
+    """Fuegt einen oder mehrere PEM-Bloecke in den Trust-Store ein.
+
+    Idempotent ueber den Fingerprint - bereits vorhandene Certs werden
+    uebersprungen. Nach Save wird die aktuelle Liste zurueckgeliefert
+    damit das UI sofort den neuen Stand anzeigen kann.
+    """
+    if session.vault_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Aktiver Tresor-Pfad fehlt — bitte neu entsperren.",
+        )
+
+    from opn_cockpit.core.trust_store import parse_all, parse_cert  # noqa: PLC0415
+
+    parsed, errors = parse_all(payload.pem)
+    if not parsed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Kein gueltiges Zertifikat im Eingabewert. "
+                + (errors[0] if errors else "")
+            ),
+        )
+
+    old_settings = session.opened.data.settings
+    existing = list(old_settings.trusted_ca_pems or [])
+    existing_fps: set[str] = set()
+    for pem in existing:
+        try:
+            existing_fps.add(parse_cert(pem).fingerprint_sha256)
+        except ValueError:
+            continue
+
+    added = 0
+    for meta in parsed:
+        if meta.fingerprint_sha256 in existing_fps:
+            continue
+        existing.append(meta.pem)
+        existing_fps.add(meta.fingerprint_sha256)
+        added += 1
+
+    new_settings = replace(old_settings, trusted_ca_pems=existing)
+    session.opened.data.settings = new_settings
+
+    def _rollback() -> None:
+        session.opened.data.settings = old_settings
+
+    persist_session_vault(
+        request, session, session.vault_path, rollback=_rollback,
+    )
+    get_audit_backend().append(
+        AuditEventKind.VAULT_OPENED,
+        actor=audit_actor(session),
+        vault_path=str(session.vault_path),
+        summary=(
+            f"Custom Root-CA(s) hinzugefuegt: {added} neu, "
+            f"Trust-Store enthaelt jetzt {len(existing)} Eintraege."
+        ),
+    )
+    return list_trusted_cas(session)
+
+
+@router.delete(
+    "/settings/trusted-cas/{fingerprint}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_trusted_ca(
+    fingerprint: str,
+    request: Request,
+    session: Session = Depends(require_session),
+) -> None:
+    """Entfernt einen Trust-Eintrag anhand seines SHA256-Fingerprints.
+
+    Akzeptiert den Fingerprint mit oder ohne ``:``-Trennzeichen,
+    case-insensitive. 404 wenn der Eintrag nicht im Tresor liegt.
+    """
+    if session.vault_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Aktiver Tresor-Pfad fehlt — bitte neu entsperren.",
+        )
+
+    from opn_cockpit.core.trust_store import parse_cert  # noqa: PLC0415
+
+    target = _normalize_fingerprint(fingerprint)
+    old_settings = session.opened.data.settings
+    existing = list(old_settings.trusted_ca_pems or [])
+    kept: list[str] = []
+    removed = False
+    for pem in existing:
+        try:
+            fp = parse_cert(pem).fingerprint_sha256
+        except ValueError:
+            # Stale PEM - wenn der User es loswerden will, akzeptieren
+            # wir auch den Sonderkey "stale"; sonst behalten.
+            if target == "STALE":
+                removed = True
+                continue
+            kept.append(pem)
+            continue
+        if _normalize_fingerprint(fp) == target:
+            removed = True
+            continue
+        kept.append(pem)
+
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Kein Trust-Eintrag mit Fingerprint {fingerprint}.",
+        )
+
+    new_settings = replace(old_settings, trusted_ca_pems=kept)
+    session.opened.data.settings = new_settings
+
+    def _rollback() -> None:
+        session.opened.data.settings = old_settings
+
+    persist_session_vault(
+        request, session, session.vault_path, rollback=_rollback,
+    )
+    get_audit_backend().append(
+        AuditEventKind.VAULT_OPENED,
+        actor=audit_actor(session),
+        vault_path=str(session.vault_path),
+        summary=(
+            f"Custom Root-CA entfernt (fingerprint={fingerprint}); "
+            f"Trust-Store hat jetzt {len(kept)} Eintraege."
+        ),
+    )
+
+
+def _normalize_fingerprint(value: str) -> str:
+    return (value or "").replace(":", "").replace("-", "").strip().upper()

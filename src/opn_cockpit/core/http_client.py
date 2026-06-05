@@ -67,10 +67,77 @@ class HttpTuning:
     retryable_status_codes: frozenset[int] = field(
         default_factory=lambda: frozenset({502, 503, 504})
     )
+    # v0.8 #12 Custom-Trust-Store fuer interne PKI. Tuple weil
+    # HttpTuning frozen+slots ist und Tuples hashable bleiben. Der
+    # HttpClient baut beim Init daraus einen SSLContext, der zusaetzlich
+    # zu den System-CAs greift. Wenn die Liste leer ist, bleibt das
+    # heutige Verhalten (verify=True == System-CA-Bundle).
+    trusted_ca_pems: tuple[str, ...] = ()
 
     def backoff_delay_s(self, attempt: int) -> float:
         """Verzögerung vor dem nächsten Retry (0-indizierter Attempt)."""
         return self.retry_backoff_base_s * (self.retry_backoff_factor**attempt)
+
+
+def tuning_from_settings(settings: Any) -> HttpTuning:
+    """Baut HttpTuning aus einem VaultSettings-Objekt.
+
+    Bewusst duck-typed (``Any``) damit wir die ``vault.model``-Klasse
+    nicht in der HTTP-Schicht importieren muessen. Aufrufer (CLI, Web,
+    Hintergrund-Scheduler) ersetzen damit ihre alten Inline-Konstruktoren
+    und kriegen die Custom-CA-Liste automatisch durchgereicht.
+    """
+    return HttpTuning(
+        connect_timeout_s=float(settings.connect_timeout_s),
+        read_timeout_s=float(settings.read_timeout_s),
+        reconfigure_timeout_s=float(settings.reconfigure_timeout_s),
+        retry_count=int(settings.retry_count),
+        trusted_ca_pems=tuple(getattr(settings, "trusted_ca_pems", ()) or ()),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Custom Trust-Store fuer interne PKI
+# ---------------------------------------------------------------------------
+
+
+class TrustedCaPemInvalid(ValueError):
+    """Eine PEM-Eintragung im Tresor laesst sich nicht als Zertifikat laden.
+
+    Wir loggen das nicht laut und werfen es nicht aus der HttpClient-
+    Initialisierung — sonst koennte ein einzelnes kaputtes PEM jeden
+    weiteren API-Call sperren. Stattdessen ueberspringt der Builder
+    fehlerhafte PEMs; die UI hat bei der Eingabe ihre eigene Pruefung.
+    """
+
+
+def _build_combined_ssl_context(pems: list[str]) -> ssl.SSLContext | None:
+    """Erzeugt einen SSLContext mit System-CAs + den uebergebenen PEMs.
+
+    Wenn die Liste leer ist oder alle Eintraege ungueltig sind, liefert
+    die Funktion ``None``; der Aufrufer faellt dann auf das httpx-Default
+    (``verify=True`` = nur System-CAs) zurueck.
+
+    Robust: jeder PEM-Eintrag wird einzeln versucht; wenn einer
+    unparsable ist, wird er still uebersprungen und der Rest weiter
+    verarbeitet. Damit kippt ein einzelnes kaputtes Cert nicht die
+    ganze Cockpit-Verbindung.
+    """
+    ctx = ssl.create_default_context()
+    loaded_any = False
+    for pem in pems:
+        if not pem or not pem.strip():
+            continue
+        try:
+            ctx.load_verify_locations(cadata=pem)
+        except (ssl.SSLError, ValueError):
+            # Defensiv: kaputte PEMs nicht das Setup sprengen lassen.
+            # UI-Validierung verhindert das normalerweise vorher.
+            continue
+        loaded_any = True
+    if not loaded_any:
+        return None
+    return ctx
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +236,15 @@ class HttpClient:
         self._transport = transport
         self._sleep = sleep
         self._clients: dict[tuple[str, int], httpx.Client] = {}
+        # Custom-Trust-Store: PEMs liegen im Tuning damit alle
+        # Aufrufer (CLI, Web, Hintergrund-Scheduler) das automatisch
+        # ueber ihren existierenden Tuning-Helper bekommen. Wenn die
+        # Liste leer ist, bleibt das Default-Verhalten (System-CAs).
+        self._custom_ssl_context: ssl.SSLContext | None = (
+            _build_combined_ssl_context(list(self._tuning.trusted_ca_pems))
+            if self._tuning.trusted_ca_pems
+            else None
+        )
 
     # ----- Public API -----
 
@@ -249,15 +325,39 @@ class HttpClient:
             return cached
         # Für Tests: ein injizierter Transport überschreibt das verify-Setting,
         # weil httpx den Transport bevorzugt nutzt.
+        verify_param = self._resolve_verify_for(target)
         client = httpx.Client(
             base_url=target.base_url,
-            verify=target.verify,
+            verify=verify_param,
             timeout=httpx.Timeout(self._tuning.read_timeout_s),
             transport=self._transport,
             trust_env=False,  # ignoriert HTTP_PROXY etc. auf der PAW
         )
         self._clients[target.key] = client
         return client
+
+    def _resolve_verify_for(self, target: HttpTarget) -> Any:
+        """Bestimmt den verify-Wert pro Client unter Beruecksichtigung
+        eines optional gesetzten Custom-Trust-Stores.
+
+        Logik:
+
+        * ``target.verify is False`` -> ``False`` (TLS-Check explizit aus).
+        * ``target.verify`` ist Pfad/String -> unveraendert durchreichen.
+        * ``target.verify is True`` und Custom-CA-Liste vorhanden -> der
+          combined SSL-Context, der System-CAs plus die Custom-PEMs
+          enthaelt. Damit greift die eingespielte interne CA OHNE dass
+          der User pro Geraet "TLS aus" setzen muss.
+        * ``target.verify is True`` und keine Custom-CAs -> ``True``
+          (heutiges Verhalten, System-CA-Bundle).
+        """
+        if target.verify is False:
+            return False
+        if isinstance(target.verify, str):
+            return target.verify
+        if self._custom_ssl_context is not None:
+            return self._custom_ssl_context
+        return True
 
     def _compose_timeout(self, override_s: float | None) -> httpx.Timeout:
         connect = self._tuning.connect_timeout_s

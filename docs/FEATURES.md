@@ -15,6 +15,8 @@ Inhalt:
 - [Safety-Net via SSH](#safety-net-via-ssh)
 - [Audit-Log + signierter PDF-Export](#audit-log--signierter-pdf-export)
 - [Inline-Validierung](#inline-validierung)
+- [Interne CAs vertrauen (für OPNsense-Verbindungen)](#interne-cas-vertrauen)
+- [HTTPS für Cockpit selbst](#https-fuer-cockpit-selbst)
 
 ---
 
@@ -495,3 +497,198 @@ Validatoren:
 System ist erweiterbar: neue Felder brauchen nur das `data-validate`-
 Attribut und werden vom `setupInlineValidators()`-Bootstrap automatisch
 eingebunden. Server-Validierung bleibt Defense-in-Depth.
+
+---
+
+## Interne CAs vertrauen
+
+Wer eine **interne CA** betreibt (z. B. step-ca, smallstep, einfach
+selbst-signed Root mit `openssl`, internal PKI) und damit die OPNsense-
+Web-Zertifikate ausstellt, kann diese CA zentral im Tresor hinterlegen.
+Cockpit akzeptiert sie dann **zusätzlich** zum System-CA-Bundle —
+keine Notwendigkeit mehr, pro Gerät `tls_verify` abzuschalten.
+
+### Was läuft im Hintergrund
+
+- `VaultSettings.trusted_ca_pems` — Liste der PEM-Roots, verschlüsselt
+  im Tresor mit AES-256-GCM.
+- `HttpClient` baut beim Init einen `ssl.SSLContext`, der System-CAs +
+  Custom-PEMs kombiniert; alle Verbindungen zu OPNsense laufen darüber.
+- `HttpTuning.trusted_ca_pems` reicht die Liste durch alle Aufrufer
+  (CLI, Web, Hintergrund-Scheduler).
+
+### Schritt 1: PEM bereitstellen
+
+Den Root-CA als PEM-Datei holen — je nach CA-Lösung:
+
+| CA-Tool | Pfad |
+|---|---|
+| step-ca | `/etc/step-ca/certs/root_ca.crt` |
+| smallstep CLI | `step ca root` |
+| OpenSSL self-signed | die Datei die du beim `req -x509`-Schritt erzeugt hast |
+| Microsoft AD-CS | Web-Enrollment → *Download a CA certificate, certificate chain, or CRL* → *Base 64* |
+
+Inhalt:
+```
+-----BEGIN CERTIFICATE-----
+MIID...
+-----END CERTIFICATE-----
+```
+
+Mehrere PEM-Blöcke hintereinander gehen auch (Root + Intermediate).
+
+### Schritt 2: In Cockpit hinterlegen
+
+1. Topbar → **Tresor-Einstellungen** → scrollen zu
+   *Vertrauenswürdige Root-CAs*.
+2. **„Root-CA hinzufügen…"** klicken.
+3. PEM-Inhalt in das Textfeld einfügen.
+4. **„Vorschau prüfen"** — Cockpit zeigt Subject CN, Gültigkeit,
+   Fingerprint, self-signed-Status, CA-Bit. Ungültige Eingaben
+   markiert es als Parse-Fehler.
+5. **„Hinzufügen"** — der PEM landet verschlüsselt im Tresor.
+6. **In der Liste oben** erscheint der neue Eintrag mit Metadaten +
+   Entfernen-Button.
+
+Idempotent: zweimaliges Hinzufügen desselben Certs erzeugt keinen
+Duplikat (Fingerprint-Match).
+
+### Schritt 3: Geräte mit TLS-verify=true betreiben
+
+Pro Gerät bleibt die Checkbox **„TLS-Zertifikat verifizieren"** **AN**.
+Da Cockpit jetzt deine interne CA als Trust-Anchor kennt, akzeptiert
+es die OPNsense-Zertifikate ohne Warnung. Pro-Gerät-`tls_verify=false`
+brauchst du nur noch für Boxen mit komplett ungültigen Certs.
+
+### Entfernen
+
+Auf der Liste → **Entfernen** pro Eintrag, Confirm → Cert ist sofort
+aus dem Trust-Store raus. Geräte die ihre Certs aus dieser CA hatten,
+sind danach wieder als „nicht vertrauenswürdig" markiert (es sei denn
+sie sind im System-CA-Bundle drin oder nutzen eine andere hinterlegte CA).
+
+### API für Automation
+
+| Verb | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/vaults/settings/trusted-cas` | Liste mit Metadaten |
+| POST | `/api/vaults/settings/trusted-cas/inspect` | PEM parsen, kein Save |
+| POST | `/api/vaults/settings/trusted-cas` | Hinzufügen (idempotent) |
+| DELETE | `/api/vaults/settings/trusted-cas/{fingerprint}` | Entfernen |
+
+---
+
+## HTTPS für Cockpit selbst
+
+Damit User auf `https://cockpit.lab:9876` ohne Browser-Warnung
+zugreifen, kann Cockpit ein **eigenes Server-Zertifikat** laden — z. B.
+ausgestellt von derselben internen CA, die auch deine OPNsense-Boxen
+zertifiziert.
+
+### Was läuft im Hintergrund
+
+- Pfade liegen in `AppSettings` (`%APPDATA%/OPN-Cockpit/settings.json`),
+  **nicht** im Tresor. Grund: der Server muss vor dem Vault-Unlock
+  hochkommen können.
+- Cert + Key landen unter `<app_data>/server_tls/` mit `0600` für den
+  Key.
+- `WebSettings.from_env()` zieht die Pfade automatisch, wenn nicht via
+  Env-Vars `OPNCOCKPIT_TLS_CERT` / `_KEY` überschrieben.
+- `uvicorn` liest die Pfade beim Boot — **eine Cockpit-Restart-Aktion
+  ist nach jeder Änderung Pflicht**.
+
+### Schritt 1: Server-Cert vorbereiten
+
+Auf deinem Cockpit-Host (Linux/Container) oder am PAW (Windows-Single-
+User-Install) brauchst du:
+
+- **Server-Zertifikat** auf den FQDN, unter dem User Cockpit aufrufen
+  (z. B. `cockpit.lab.example`). Subject Alternative Name (SAN) mit
+  dem FQDN ist Pflicht — moderne Browser ignorieren Common-Name-only.
+- **Privater Schlüssel** (`-----BEGIN PRIVATE KEY-----` oder
+  `RSA PRIVATE KEY` / `EC PRIVATE KEY`).
+- Optional: Fullchain (Server + Intermediate + Root), wenn deine CA
+  eine Chain hat.
+
+step-ca-Beispiel:
+```bash
+step ca certificate cockpit.lab.example cockpit.crt cockpit.key
+cat cockpit.crt $(step path)/certs/intermediate_ca.crt > cockpit.fullchain.crt
+```
+
+OpenSSL-Selfsigned-Beispiel:
+```bash
+openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
+  -keyout cockpit.key -out cockpit.crt \
+  -subj "/CN=cockpit.lab" \
+  -addext "subjectAltName=DNS:cockpit.lab"
+```
+
+### Schritt 2: In Cockpit hochladen
+
+1. Topbar → **Tresor-Einstellungen** → scrollen zu
+   *Cockpit HTTPS-Zertifikat*.
+2. **„Server-Zertifikat hinterlegen…"** klicken.
+3. **Fullchain-Cert** in das obere Textfeld einfügen, **privaten
+   Schlüssel** in das untere.
+4. **„Speichern"** → Cockpit validiert das Cert (X.509-parsbar),
+   schreibt beide Dateien nach `<app_data>/server_tls/`, aktualisiert
+   `settings.json`.
+5. Toast „Server-TLS gespeichert. Neustart erforderlich."
+
+### Schritt 3: Cockpit neu starten
+
+Service-Mode (Linux systemd / Windows NSSM):
+```bash
+sudo systemctl restart opn-cockpit     # Linux
+nssm restart "OPN-Cockpit Server"      # Windows-Service
+```
+
+Single-User-Windows-Install: Tray-Icon → Beenden → erneut starten
+(oder einfach Cockpit aus dem Startmenü neu öffnen).
+
+Nach dem Restart läuft Cockpit auf `https://<host>:9876` statt `http://`.
+Beim Aufruf prüft der Browser das Cert deiner internen CA — wenn er die
+Root-CA installiert hat, ohne Warnung; sonst „nicht vertrauenswürdig"
+wie gehabt.
+
+### Status + Entfernen
+
+Im Settings-Modal zeigt der Status-Block oberhalb des Upload-Buttons:
+
+- *HTTP aktiv (kein Server-Zertifikat hinterlegt)* — Default
+- *HTTPS AKTIV — Cert CN=cockpit.lab, gültig bis 2027-01-01 (180 Tage)* —
+  Cert geladen, alles ok
+- *Server-Zertifikat läuft in 7 Tagen ab.* — Warn-Hinweis bei kurzer
+  Restlaufzeit
+- *Server-Zertifikat ist ABGELAUFEN!* — Hochrot, sofort handeln
+
+Mit **„Entfernen (zu HTTP zurück)"** löschst du die Pfade aus
+`settings.json` (Cert/Key bleiben auf Disk für Forensik). Nach Restart
+ist Cockpit wieder auf HTTP.
+
+### API für Automation
+
+| Verb | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/server/tls` | Status + Cert-Metadaten + Warnings |
+| POST | `/api/server/tls` | Cert + Key hochladen (admin-only) |
+| DELETE | `/api/server/tls` | Pfade aus settings.json entfernen |
+
+Alle drei verlangen Admin-Rolle (Multi-User-Mode) bzw. eingeloggte
+Session (Single-User).
+
+### Klassischer Override per Environment
+
+Wer das Cert-Setup lieber via Datei und Service-Unit fährt (CI/CD,
+Docker-Compose), setzt:
+
+```ini
+[Service]
+Environment="OPNCOCKPIT_TLS_CERT=/etc/opn-cockpit/server.fullchain.pem"
+Environment="OPNCOCKPIT_TLS_KEY=/etc/opn-cockpit/server.key"
+```
+
+Env-Vars haben Vorrang vor `settings.json` — praktisch wenn du die UI
+nicht benutzen willst oder Cert-Rotation extern automatisierst (z. B.
+mit `step ca renew`).

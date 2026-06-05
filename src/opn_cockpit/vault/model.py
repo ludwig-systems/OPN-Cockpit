@@ -113,6 +113,14 @@ class VaultSettings:
     safety_net_enabled: bool = False
     safety_net_window_s: int = 120
 
+    # v0.8 #12 Custom Root-CAs fuer interne PKI.
+    # Liste von PEM-codierten Root-Zertifikaten. Werden zusaetzlich zum
+    # System-CA-Bundle als Trust-Anker akzeptiert; damit kann ein User
+    # mit interner CA seine Geraete sauber mit tls_verify=True betreiben
+    # statt pro Geraet auf "TLS aus" zu schalten. Wenn die Liste leer
+    # ist, gilt nur das System-CA-Bundle (heutiges Default-Verhalten).
+    trusted_ca_pems: list[str] = field(default_factory=list)
+
 
 @dataclass(slots=True)
 class VaultData:
@@ -222,4 +230,27 @@ def _settings_from_dict(raw: dict[str, Any]) -> VaultSettings:
         safety_net_window_s=int(
             raw.get("safety_net_window_s", defaults.safety_net_window_s),
         ),
+        trusted_ca_pems=_normalize_pem_list(
+            raw.get("trusted_ca_pems", defaults.trusted_ca_pems),
+        ),
     )
+
+
+def _normalize_pem_list(raw: Any) -> list[str]:
+    """Liest die persistierte CA-Liste defensiv ein.
+
+    Akzeptiert sowohl ``list[str]`` als auch fehlertolerantes Zeug
+    (None, leere Listen, Eintraege mit Whitespace). Leere Strings
+    werden gefiltert; der Rest wird so durchgereicht wie er reinkommt
+    (Validierung der PEM-Struktur passiert beim Schreiben in den Trust-
+    Store, nicht hier).
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str):
+            continue
+        if entry.strip():
+            out.append(entry)
+    return out

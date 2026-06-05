@@ -180,6 +180,87 @@ class VaultSettingsResponse(BaseModel):
     auto_retry_enabled: bool = True
     auto_retry_max_hours: int = 168
     auto_retry_interval_minutes: int = 5
+    # v0.8 #8: Safety-Net SSH (Window-Sekunden) + v0.8 #12: Custom CAs.
+    # safety_net_enabled wird im VaultDevice pro Geraet konfiguriert,
+    # window_s ist global.
+    safety_net_enabled: bool = False
+    safety_net_window_s: int = 120
+    # Custom-Root-CAs: nur Anzahl + Metadaten ausliefern (siehe
+    # /api/settings/trusted-cas fuer Details). Der PEM-Inhalt selber
+    # ist nicht "secret" - das sind oeffentliche Zertifikate - aber
+    # er ist sperrig und im Settings-GET-Roundtrip unnoetig.
+    trusted_ca_count: int = 0
+
+
+class TrustedCaEntry(BaseModel):
+    """Metadaten zu einem hinterlegten Root-CA-Eintrag.
+
+    Wird vom Trust-Store-Endpoint geliefert. Der PEM-Inhalt ist
+    nicht geheim (das sind public roots), wird aber bewusst NICHT in
+    der Liste mitgegeben — UI-Display + Loeschen brauchen nur die
+    Metadaten + den Fingerprint als Identifier.
+    """
+
+    fingerprint_sha256: str
+    """Hex-Fingerprint (uppercase, mit ':'-Trennzeichen), z. B.
+    ``AA:BB:CC:..``. Eindeutiger Schluessel beim Loeschen."""
+
+    subject_cn: str
+    issuer_cn: str
+    not_before_iso: str
+    not_after_iso: str
+    days_until_expiry: int | None
+    is_ca: bool
+    """True wenn das Cert CA-Bit gesetzt hat (BasicConstraints). False
+    bei End-Entity-Certs - die taugen technisch nicht als Trust-Anchor,
+    werden aber dennoch akzeptiert (manche selbstsigned-Setups setzen
+    das CA-Bit nicht; ssl.SSLContext akzeptiert sie trotzdem)."""
+
+    self_signed: bool
+
+
+class TrustedCaListResponse(BaseModel):
+    entries: list[TrustedCaEntry]
+
+
+class TrustedCaCreateRequest(BaseModel):
+    """Neuer Trust-Eintrag - User uebergibt einen oder mehrere PEM-Blocks."""
+
+    pem: str = Field(..., min_length=1, max_length=200000)
+    """PEM-Block(s). Mehrere ``-----BEGIN CERTIFICATE-----``-Bloecke
+    werden alle einzeln eingelesen und einzeln im Vault gespeichert."""
+
+
+class ServerTlsStatusResponse(BaseModel):
+    """Status des Server-eigenen HTTPS-Zertifikats (App-weit)."""
+
+    enabled: bool
+    cert_path: str
+    key_path: str
+    cert_subject_cn: str
+    cert_not_after_iso: str
+    cert_days_until_expiry: int | None
+    requires_restart: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ServerTlsUploadRequest(BaseModel):
+    """Hochgeladenes PEM-Material fuer das Cockpit-eigene HTTPS."""
+
+    cert_pem: str = Field(..., min_length=1, max_length=200000)
+    """Server-Zertifikat. Bei Chain: Fullchain hier reinpasten (Cert,
+    dann Intermediate, dann Root)."""
+
+    key_pem: str = Field(..., min_length=1, max_length=200000)
+    """Privater Server-Key. PKCS#1, PKCS#8, EC, beides PEM."""
+
+
+class TrustedCaInspectResponse(BaseModel):
+    """Antwort vom /inspect-Endpoint - reine Preview, schreibt nichts."""
+
+    entries: list[TrustedCaEntry]
+    parse_errors: list[str]
+    """Pro nicht parsbarem PEM-Block ein Hint-String (Format/Fehler)."""
 
 
 class VaultSettingsUpdateRequest(BaseModel):

@@ -63,7 +63,11 @@ from opn_cockpit.core.errors import (
     ValidationError,
 )
 from opn_cockpit.core.health import check_device, tcp_probe
-from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
+from opn_cockpit.core.http_client import (
+    HttpClient,
+    HttpTarget,
+    tuning_from_settings,
+)
 from opn_cockpit.core.validation import validate_host
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.security.session import Session
@@ -379,12 +383,7 @@ def test_connection(
         verify=vault_device.tls_verify,
     )
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
     with HttpClient(targets=[target], tuning=tuning) as client:
         result = check_device(client, target, vault_device.api_key, vault_device.api_secret)
     session.touch()
@@ -475,12 +474,7 @@ def firmware_status(
 
     timestamp = _iso_now()
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
 
     def probe(vd: VaultDevice) -> FirmwareStatusEntry:
         target = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
@@ -536,12 +530,7 @@ def cert_status(
 
     timestamp = _iso_now()
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
 
     def probe(vd: VaultDevice) -> CertStatusEntry:
         tgt = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
@@ -609,12 +598,7 @@ def drift_status(
 
     timestamp = _iso_now()
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
 
     def probe(vd: VaultDevice) -> DriftStatusEntry:
         baseline_records = list_backups(vd.id)
@@ -716,12 +700,7 @@ def compare_configs(
     targets = [targets_by_id[did] for did in payload.device_ids if did in targets_by_id]
 
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
 
     def probe(vd: VaultDevice) -> tuple[VaultDevice, bytes | None, str]:
         tgt = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
@@ -857,12 +836,7 @@ def sync_alias_from_master(
 
     # Master-Config holen + Alias extrahieren
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
     tgt = HttpTarget(host=master.host, port=master.port, verify=master.tls_verify)
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
@@ -944,12 +918,7 @@ def get_device_aliases(
     timestamp = _iso_now()
 
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
     tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
@@ -1020,12 +989,7 @@ def get_device_routes(
     timestamp = _iso_now()
 
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
     tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
@@ -1113,12 +1077,7 @@ def get_device_firewall_rules(
     timestamp = _iso_now()
 
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
     tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
@@ -1213,12 +1172,7 @@ def get_device_unbound_hosts(
     timestamp = _iso_now()
 
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
     tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
@@ -1323,12 +1277,7 @@ def trigger_device_firmware_check(
         verify=vault_device.tls_verify,
     )
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
     timestamp = _iso_now()
     with HttpClient(targets=[target], tuning=tuning) as client:
         ok, msg = trigger_firmware_check(
@@ -1445,12 +1394,7 @@ def _download_device_backup_impl(device_id: str, session: Session) -> Response:
         verify=vault_device.tls_verify,
     )
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
     try:
         with HttpClient(targets=[target], tuning=tuning) as client:
             content = download_backup(client, target, vault_device.api_key, vault_device.api_secret)
@@ -1610,12 +1554,7 @@ def create_device_backup(
         verify=vault_device.tls_verify,
     )
     settings = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=settings.connect_timeout_s,
-        read_timeout_s=settings.read_timeout_s,
-        reconfigure_timeout_s=settings.reconfigure_timeout_s,
-        retry_count=settings.retry_count,
-    )
+    tuning = tuning_from_settings(settings)
     try:
         with HttpClient(targets=[target], tuning=tuning) as client:
             content = download_backup(

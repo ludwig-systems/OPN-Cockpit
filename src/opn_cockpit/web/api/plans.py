@@ -11,7 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from opn_cockpit.audit.backend import get_audit_backend
 from opn_cockpit.core.errors import ValidationError
-from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
+from opn_cockpit.core.http_client import (
+    HttpClient,
+    HttpTarget,
+    HttpTuning,
+    tuning_from_settings,
+)
 from opn_cockpit.core.objects.aliases import AliasSpec
 from opn_cockpit.core.objects.base import ActionKind
 from opn_cockpit.core.objects.firewall_rules import RuleSpec
@@ -1107,13 +1112,7 @@ def _plan_store() -> PlanStoreBackend:
 
 
 def _tuning(session: Session) -> HttpTuning:
-    s = session.opened.data.settings
-    return HttpTuning(
-        connect_timeout_s=s.connect_timeout_s,
-        read_timeout_s=s.read_timeout_s,
-        reconfigure_timeout_s=s.reconfigure_timeout_s,
-        retry_count=s.retry_count,
-    )
+    return tuning_from_settings(session.opened.data.settings)
 
 
 def _devices_or_404(session: Session, target_ids: list[str]) -> list[Device]:

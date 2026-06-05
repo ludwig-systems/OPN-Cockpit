@@ -100,6 +100,16 @@ class AppSettings:
     update_check_enabled: bool = True
     update_check_interval_hours: int = 24
 
+    # v0.8 #12: Eigenes Server-Zertifikat fuer den Cockpit-eigenen HTTPS-
+    # Port. Pfade zu PEM-codiertem Cert (Fullchain) und Private-Key auf
+    # der Cockpit-Maschine. Wenn beide gesetzt sind UND beide existieren,
+    # startet uvicorn auf HTTPS statt HTTP. Andernfalls bleibt das alte
+    # HTTP-Verhalten (Loopback Single-User; Reverse-Proxy Multi-User).
+    # Schluesselsicherheit: die Dateien gehoeren mit 0600 dem Service-
+    # User; Cockpit liest sie nur lesend.
+    server_tls_cert_path: str | None = None
+    server_tls_key_path: str | None = None
+
     # ----- Persistenz -----
 
     @classmethod
@@ -162,6 +172,19 @@ class AppSettings:
         )
         os.replace(tmp, resolved)
 
+    def resolved_tls_paths(self) -> tuple[Path, Path] | None:
+        """Liefert ``(cert_path, key_path)`` wenn beide Dateien existieren,
+        sonst ``None``. Aufrufer (Server-Bootstrap) interpretiert das als
+        "HTTPS einschalten" / "HTTP weiter".
+        """
+        if not self.server_tls_cert_path or not self.server_tls_key_path:
+            return None
+        cert = Path(self.server_tls_cert_path).expanduser()
+        key = Path(self.server_tls_key_path).expanduser()
+        if not cert.is_file() or not key.is_file():
+            return None
+        return cert, key
+
     # ----- Recent-Vaults-Liste -----
 
     def remember_vault(self, vault_path: str | Path) -> None:
@@ -213,6 +236,10 @@ class AppSettings:
             interval = 24
         if interval <= 0:
             interval = 24
+        cert_raw = raw.get("server_tls_cert_path")
+        cert_path = str(cert_raw) if isinstance(cert_raw, str) and cert_raw.strip() else None
+        key_raw = raw.get("server_tls_key_path")
+        key_path = str(key_raw) if isinstance(key_raw, str) and key_raw.strip() else None
         return cls(
             recent_vaults=recent[:limit],
             default_vault=default_str,
@@ -222,4 +249,6 @@ class AppSettings:
             storage_backend=storage_backend,
             update_check_enabled=update_enabled,
             update_check_interval_hours=interval,
+            server_tls_cert_path=cert_path,
+            server_tls_key_path=key_path,
         )

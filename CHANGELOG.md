@@ -4,6 +4,51 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### TLS-Vertrauen + Cockpit-eigenes HTTPS
+
+Zwei verwandte aber separate TLS-Themen:
+
+**Custom Root-CAs fuer ausgehende Verbindungen.** Wer eine interne CA
+betreibt und mit ihr OPNsense-Zertifikate ausstellt, kann diese CA jetzt
+einmal im Tresor hinterlegen statt pro Geraet `tls_verify=false` zu setzen.
+
+- ``VaultSettings.trusted_ca_pems`` — Liste von PEM-Root-CAs, wird beim
+  Vault-Save als Teil des verschluesselten Inhalts persistiert.
+- ``HttpTuning.trusted_ca_pems`` (Tuple) reicht die Liste an alle
+  Aufrufer durch. Neuer ``tuning_from_settings(settings)``-Helper
+  ersetzt die 20+ inline HttpTuning-Konstruktoren in inventory.py /
+  plans.py / CLI / Scheduler / Discover — Custom-CAs greifen ueberall.
+- ``HttpClient`` baut beim Init einen ``ssl.SSLContext`` der System-CAs
+  + Custom-PEMs kombiniert. Wenn keine PEMs hinterlegt sind, bleibt das
+  Default (``verify=True`` = System-CAs).
+- ``core/trust_store.py`` parst PEM-Bloecke (Multi-PEM unterstuetzt) und
+  liefert Metadaten (Fingerprint, Subject, Issuer, Gueltigkeit, CA-Bit,
+  self-signed) - der Builder ueberspringt kaputte PEMs einzeln.
+- Endpoints: ``GET/POST/DELETE /api/vaults/settings/trusted-cas`` und
+  ``POST .../inspect`` (Preview vor Save). Idempotent ueber den
+  SHA256-Fingerprint.
+- UI: neuer Block "Vertrauenswuerdige Root-CAs" im Tresor-Settings-Modal
+  mit Liste (Subject + Gueltigkeit + Fingerprint), "Hinzufuegen"-Modal
+  mit Inspect-Preview + "Entfernen" pro Eintrag.
+
+**Cockpit-eigenes HTTPS-Server-Zertifikat.** Damit User auf
+``https://cockpit.lab:9876`` ohne Browser-Warnung zugreifen, kann das
+Cockpit jetzt sein eigenes TLS-Cert hinterlegt bekommen.
+
+- ``AppSettings.server_tls_cert_path`` + ``server_tls_key_path`` in
+  ``settings.json`` (NICHT im Tresor - der Server muss vor dem
+  Vault-Unlock hochkommen). ``resolved_tls_paths()``-Helper liefert
+  beide Pfade nur wenn beide Dateien existieren.
+- ``WebSettings.from_env()`` faellt jetzt auf AppSettings zurueck wenn
+  die ``OPNCOCKPIT_TLS_CERT/KEY``-Env-Vars nicht gesetzt sind. Cockpit
+  startet automatisch auf HTTPS sobald die Pfade da sind.
+- Neue Endpoints ``GET /api/server/tls``, ``POST .../tls``,
+  ``DELETE .../tls`` (admin-only). Upload schreibt Cert + Key nach
+  ``<app_data>/server_tls/`` mit 0600 fuer den Key.
+- UI: Block "Cockpit HTTPS-Zertifikat" im Tresor-Settings-Modal mit
+  Status (aktive Subject + Gueltigkeit), Upload-Modal fuer Fullchain +
+  Key, klarer Restart-Hinweis (uvicorn liest TLS nur beim Boot).
+
 ### Lizenz: Apache 2.0
 
 - Projekt-Lizenz von "Proprietary" auf **Apache License 2.0** umgestellt.

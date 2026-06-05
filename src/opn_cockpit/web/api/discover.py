@@ -14,7 +14,12 @@ from opn_cockpit.core.discovery import (
     list_aliases,
     list_gateways,
 )
-from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
+from opn_cockpit.core.http_client import (
+    HttpClient,
+    HttpTarget,
+    HttpTuning,
+    tuning_from_settings,
+)
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.model import VaultDevice
 from opn_cockpit.web.acl import require_device_access
@@ -109,13 +114,7 @@ def _target_and_tuning(
     target = HttpTarget(
         host=device.host, port=device.port, verify=device.tls_verify,
     )
-    s = session.opened.data.settings
-    tuning = HttpTuning(
-        connect_timeout_s=s.connect_timeout_s,
-        read_timeout_s=s.read_timeout_s,
-        reconfigure_timeout_s=s.reconfigure_timeout_s,
-        retry_count=s.retry_count,
-    )
+    tuning = tuning_from_settings(session.opened.data.settings)
     return target, tuning
 
 

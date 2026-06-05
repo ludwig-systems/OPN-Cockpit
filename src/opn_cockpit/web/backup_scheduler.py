@@ -45,7 +45,7 @@ from opn_cockpit.backups import append_backup, list_backups, prune_backups
 from opn_cockpit.backups.errors import BackupStoreError
 from opn_cockpit.core.device_info import download_backup
 from opn_cockpit.core.errors import OpnCockpitError
-from opn_cockpit.core.http_client import HttpClient, HttpTarget, HttpTuning
+from opn_cockpit.core.http_client import HttpClient, HttpTarget, tuning_from_settings
 from opn_cockpit.vault.model import VaultData, VaultDevice
 
 if TYPE_CHECKING:
@@ -187,12 +187,7 @@ class BackupScheduler:
             if not due_devices:
                 continue
 
-            tuning = HttpTuning(
-                connect_timeout_s=settings.connect_timeout_s,
-                read_timeout_s=settings.read_timeout_s,
-                reconfigure_timeout_s=settings.reconfigure_timeout_s,
-                retry_count=settings.retry_count,
-            )
+            tuning = tuning_from_settings(settings)
             workers = max(1, min(settings.max_workers, len(due_devices)))
             # functools.partial bindet die Schleifen-Locals an die Worker-
             # Aufrufe (ruff B023). Saubere Variante statt lambda mit

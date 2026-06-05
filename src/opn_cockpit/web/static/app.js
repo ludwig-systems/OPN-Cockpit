@@ -4897,6 +4897,10 @@
     $('#vs-pw-ok').hidden = true;
     $('#vault-settings-modal').hidden = false;
     setTimeout(() => $('#vs-timeout').focus(), 0);
+    // Trust-Store unabhaengig laden - das Modal soll auch ohne
+    // vollstaendige Vault-Settings-Antwort die CA-Liste rendern.
+    loadTrustStore().catch(() => {});
+    loadServerTlsStatus().catch(() => {});
     // Aktuelle Settings laden — kein blockierendes Warten
     try {
       const r = await apiGet('/api/vaults/settings');
@@ -5006,6 +5010,304 @@
 
   function closeVaultSettingsModal() {
     $('#vault-settings-modal').hidden = true;
+  }
+
+  // -------------------- Cockpit-eigenes Server-TLS (HTTPS) --------------------
+
+  async function loadServerTlsStatus() {
+    const statusEl = $('#vs-srv-tls-status');
+    const errEl = $('#vs-srv-tls-error');
+    const clearBtn = $('#vs-srv-tls-clear-btn');
+    if (errEl) errEl.hidden = true;
+    if (statusEl) statusEl.textContent = 'Lade…';
+    try {
+      const r = await apiGet('/api/server/tls');
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (r.status === 403) {
+        // Multi-User-Mode ohne Admin-Rolle
+        if (statusEl) statusEl.textContent = 'Nur Admins koennen das Cockpit-HTTPS aendern.';
+        return;
+      }
+      if (!r.ok) {
+        if (statusEl) statusEl.textContent = `Fehler ${r.status}`;
+        return;
+      }
+      const data = await r.json();
+      let summary;
+      if (data.enabled) {
+        const days = data.cert_days_until_expiry;
+        const daysLabel = days === null || days === undefined
+          ? ''
+          : (days < 0 ? ` (ABGELAUFEN!)` : ` (${days} Tage)`);
+        summary = `HTTPS AKTIV — Cert ${data.cert_subject_cn || '(unbekannt)'}, gueltig bis ${data.cert_not_after_iso.substring(0,10)}${daysLabel}`;
+        if (clearBtn) clearBtn.hidden = false;
+      } else {
+        summary = 'HTTP aktiv (kein Server-Zertifikat hinterlegt).';
+        if (clearBtn) clearBtn.hidden = true;
+      }
+      if (data.warnings && data.warnings.length) {
+        summary += '\n⚠ ' + data.warnings.join('\n⚠ ');
+      }
+      if (statusEl) {
+        statusEl.textContent = summary;
+        statusEl.style.whiteSpace = 'pre-line';
+      }
+    } catch (e) {
+      if (statusEl) statusEl.textContent = e.message;
+    }
+  }
+
+  function openServerTlsModal() {
+    $('#srv-tls-cert').value = '';
+    $('#srv-tls-key').value = '';
+    $('#srv-tls-error').hidden = true;
+    $('#srv-tls-modal').hidden = false;
+    setTimeout(() => $('#srv-tls-cert').focus(), 0);
+  }
+
+  function closeServerTlsModal() {
+    $('#srv-tls-modal').hidden = true;
+  }
+
+  async function submitServerTls() {
+    const certPem = $('#srv-tls-cert').value;
+    const keyPem = $('#srv-tls-key').value;
+    const err = $('#srv-tls-error');
+    err.hidden = true;
+    if (!certPem.trim() || !keyPem.trim()) {
+      err.textContent = 'Cert und Key sind Pflichtfelder.';
+      err.hidden = false;
+      return;
+    }
+    const btn = $('#srv-tls-confirm');
+    btn.disabled = true;
+    btn.textContent = 'Speichere…';
+    try {
+      const r = await apiPost('/api/server/tls', {
+        cert_pem: certPem, key_pem: keyPem,
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        err.textContent = body.detail || `Fehler ${r.status}`;
+        err.hidden = false;
+        return;
+      }
+      const data = await r.json();
+      showToast(`Server-TLS gespeichert (${data.cert_subject_cn}). Neustart erforderlich.`);
+      closeServerTlsModal();
+      await loadServerTlsStatus();
+    } catch (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Speichern';
+    }
+  }
+
+  async function clearServerTls() {
+    const ok = window.confirm(
+      'Cockpit-HTTPS deaktivieren?\n\n'
+      + 'Nach dem naechsten Service-Neustart laeuft Cockpit wieder auf HTTP. '
+      + 'Die Cert/Key-Dateien bleiben auf der Maschine liegen, nur die '
+      + 'Pfade aus settings.json werden geloescht.',
+    );
+    if (!ok) return;
+    try {
+      const r = await apiDelete('/api/server/tls');
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok && r.status !== 204) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${r.status}`, true);
+        return;
+      }
+      showToast('Server-TLS deaktiviert. Neustart noetig.');
+      await loadServerTlsStatus();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  // -------------------- Custom Root-CA Trust-Store --------------------
+
+  async function loadTrustStore() {
+    const list = $('#vs-ca-list');
+    const err = $('#vs-ca-error');
+    err.hidden = true;
+    list.innerHTML = '<div class="form-hint">Lade…</div>';
+    try {
+      const r = await apiGet('/api/vaults/settings/trusted-cas');
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        list.innerHTML = '';
+        err.textContent = `Fehler ${r.status}`;
+        err.hidden = false;
+        return;
+      }
+      const data = await r.json();
+      renderTrustStore(data.entries || []);
+    } catch (e) {
+      list.innerHTML = '';
+      err.textContent = e.message;
+      err.hidden = false;
+    }
+  }
+
+  function renderTrustStore(entries) {
+    const list = $('#vs-ca-list');
+    list.innerHTML = '';
+    if (entries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'form-hint';
+      empty.textContent = 'Keine eigenen Root-CAs hinterlegt — es gilt das System-CA-Bundle.';
+      list.appendChild(empty);
+      return;
+    }
+    for (const e of entries) {
+      const row = document.createElement('div');
+      row.className = 'ca-entry';
+      const expired = e.days_until_expiry !== null && e.days_until_expiry < 0;
+      if (expired) row.classList.add('ca-entry-expired');
+      const info = document.createElement('div');
+      info.innerHTML = `
+        <div><strong>${e.subject_cn || '(unbekannt)'}</strong>${e.self_signed ? ' · self-signed' : ''}${!e.is_ca ? ' · ⚠ kein CA-Bit' : ''}</div>
+        <div class="ca-entry-meta">
+          fp: ${e.fingerprint_sha256.substring(0, 32)}…<br/>
+          gueltig bis: ${e.not_after_iso.substring(0, 10)} (${expired ? 'abgelaufen!' : `noch ${e.days_until_expiry} Tage`})
+        </div>
+      `;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'btn-danger';
+      del.textContent = 'Entfernen';
+      del.addEventListener('click', () => removeTrustCa(e));
+      row.appendChild(info);
+      row.appendChild(del);
+      list.appendChild(row);
+    }
+  }
+
+  async function removeTrustCa(entry) {
+    const ok = window.confirm(
+      `Root-CA "${entry.subject_cn}" wirklich entfernen?\n\n`
+      + `Danach werden Geraete mit Zertifikaten aus dieser CA wieder als `
+      + `nicht-vertrauenswuerdig markiert.`,
+    );
+    if (!ok) return;
+    try {
+      const r = await apiDelete(
+        `/api/vaults/settings/trusted-cas/${encodeURIComponent(entry.fingerprint_sha256)}`,
+      );
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok && r.status !== 204) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Loeschen fehlgeschlagen (${r.status})`, true);
+        return;
+      }
+      showToast('Root-CA entfernt.');
+      await loadTrustStore();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  function openCaAddModal() {
+    $('#ca-pem').value = '';
+    $('#ca-preview').hidden = true;
+    $('#ca-preview').innerHTML = '';
+    $('#ca-add-error').hidden = true;
+    $('#ca-add-modal').hidden = false;
+    setTimeout(() => $('#ca-pem').focus(), 0);
+  }
+
+  function closeCaAddModal() {
+    $('#ca-add-modal').hidden = true;
+  }
+
+  async function inspectCaPem() {
+    const pem = $('#ca-pem').value.trim();
+    const preview = $('#ca-preview');
+    const err = $('#ca-add-error');
+    err.hidden = true;
+    if (!pem) {
+      err.textContent = 'Kein PEM eingegeben.';
+      err.hidden = false;
+      return;
+    }
+    try {
+      const r = await apiPost('/api/vaults/settings/trusted-cas/inspect', { pem });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        err.textContent = body.detail || `Fehler ${r.status}`;
+        err.hidden = false;
+        return;
+      }
+      const data = await r.json();
+      preview.innerHTML = '';
+      if (data.entries.length === 0) {
+        preview.innerHTML = `<div class="ca-preview-error">${data.parse_errors.join('<br/>')}</div>`;
+      } else {
+        for (const e of data.entries) {
+          const row = document.createElement('div');
+          row.className = 'ca-entry';
+          const expired = e.days_until_expiry !== null && e.days_until_expiry < 0;
+          row.innerHTML = `
+            <strong>${e.subject_cn || '(unbekannt)'}</strong>
+            ${e.is_ca ? '' : '<span style="color:var(--danger,#c0392b);"> · ⚠ kein CA-Bit</span>'}
+            ${expired ? '<span style="color:var(--danger,#c0392b);"> · ABGELAUFEN</span>' : ''}
+            <div class="ca-entry-meta">fp: ${e.fingerprint_sha256.substring(0, 32)}…</div>
+            <div class="ca-entry-meta">gueltig bis: ${e.not_after_iso.substring(0, 10)}</div>
+          `;
+          preview.appendChild(row);
+        }
+        if (data.parse_errors.length) {
+          const errDiv = document.createElement('div');
+          errDiv.className = 'ca-preview-error';
+          errDiv.innerHTML = data.parse_errors.join('<br/>');
+          preview.appendChild(errDiv);
+        }
+      }
+      preview.hidden = false;
+    } catch (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    }
+  }
+
+  async function submitCaAdd() {
+    const pem = $('#ca-pem').value.trim();
+    const err = $('#ca-add-error');
+    err.hidden = true;
+    if (!pem) {
+      err.textContent = 'Kein PEM eingegeben.';
+      err.hidden = false;
+      return;
+    }
+    const btn = $('#ca-add-confirm');
+    btn.disabled = true;
+    btn.textContent = 'Speichere…';
+    try {
+      const r = await apiPost('/api/vaults/settings/trusted-cas', { pem });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        err.textContent = body.detail || `Fehler ${r.status}`;
+        err.hidden = false;
+        return;
+      }
+      const data = await r.json();
+      showToast(`Trust-Store hat jetzt ${data.entries.length} Eintraege.`);
+      closeCaAddModal();
+      await loadTrustStore();
+    } catch (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Hinzufuegen';
+    }
   }
 
   // -------------------- Backup-History-Modal --------------------
@@ -6299,6 +6601,25 @@
       });
       $('#vs-timeout-save').addEventListener('click', saveInactivityTimeout);
       $('#vs-backup-save').addEventListener('click', saveBackupSettings);
+      $('#vs-ca-add-btn').addEventListener('click', openCaAddModal);
+      $('#ca-add-close').addEventListener('click', closeCaAddModal);
+      $('#ca-add-cancel').addEventListener('click', closeCaAddModal);
+      $('#ca-inspect-btn').addEventListener('click', () => {
+        inspectCaPem().catch((e) => showToast(e.message, true));
+      });
+      $('#ca-add-confirm').addEventListener('click', () => {
+        submitCaAdd().catch((e) => showToast(e.message, true));
+      });
+      // Server-TLS Buttons
+      $('#vs-srv-tls-upload-btn').addEventListener('click', openServerTlsModal);
+      $('#vs-srv-tls-clear-btn').addEventListener('click', () => {
+        clearServerTls().catch((e) => showToast(e.message, true));
+      });
+      $('#srv-tls-close').addEventListener('click', closeServerTlsModal);
+      $('#srv-tls-cancel').addEventListener('click', closeServerTlsModal);
+      $('#srv-tls-confirm').addEventListener('click', () => {
+        submitServerTls().catch((e) => showToast(e.message, true));
+      });
       $('#vs-pw-submit').addEventListener('click', changeVaultPassword);
       // Backdrop-Click bewusst nicht — Eingabe-Modal.
     }
