@@ -32,6 +32,7 @@ from opn_cockpit.vault.errors import (
 from opn_cockpit.vault.model import VaultData, VaultSettings
 from opn_cockpit.vault.store import change_password as vault_change_password
 from opn_cockpit.vault.store import create_vault, open_vault
+from opn_cockpit.web.acl import require_admin_role
 from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     ChangeVaultPasswordRequest,
@@ -591,6 +592,11 @@ def change_vault_password(
 # Custom Trust-Store fuer interne PKI
 # ---------------------------------------------------------------------------
 
+# Sanity-Cap fuer die Trust-CA-Liste. Mehr als 64 Root-CAs hat praktisch
+# kein Setup; das Limit schuetzt vor versehentlichen oder boesartigen
+# Massen-Uploads die den Tresor langsam zu lesen machen wuerden.
+MAX_TRUSTED_CAS = 64
+
 
 @router.get("/settings/trusted-cas", response_model=TrustedCaListResponse)
 def list_trusted_cas(
@@ -667,6 +673,9 @@ def add_trusted_ca(
     request: Request,
     session: Session = Depends(require_session),
 ) -> TrustedCaListResponse:
+    # Trust-Anker-Aenderungen sind security-impacting (MitM-Vektor).
+    # Im Single-Mode durchgewunken, im Multi-User-Mode admin-only.
+    require_admin_role(session)
     """Fuegt einen oder mehrere PEM-Bloecke in den Trust-Store ein.
 
     Idempotent ueber den Fingerprint - bereits vorhandene Certs werden
@@ -701,12 +710,26 @@ def add_trusted_ca(
             continue
 
     added = 0
+    added_meta: list[str] = []
     for meta in parsed:
         if meta.fingerprint_sha256 in existing_fps:
             continue
+        # Audit-Finding F3: Sanity-Cap. Wenn die Aufnahme den Cap
+        # ueberschreiten wuerde, abbrechen. Bereits-vorhandene Eintraege
+        # bleiben unangetastet.
+        if len(existing) >= MAX_TRUSTED_CAS:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Trust-Store-Limit erreicht ({MAX_TRUSTED_CAS} Eintraege). "
+                    "Entferne erst nicht mehr benoetigte CAs, bevor du neue "
+                    "hinzufuegst."
+                ),
+            )
         existing.append(meta.pem)
         existing_fps.add(meta.fingerprint_sha256)
         added += 1
+        added_meta.append(f"{meta.subject_cn} (fp={meta.fingerprint_sha256[:32]})")
 
     new_settings = replace(old_settings, trusted_ca_pems=existing)
     session.opened.data.settings = new_settings
@@ -717,12 +740,16 @@ def add_trusted_ca(
     persist_session_vault(
         request, session, session.vault_path, rollback=_rollback,
     )
+    # Audit-Finding F5: Fingerprint(s) im Summary mit ausgeben - sonst
+    # ist eine spaetere Forensik nicht eindeutig (zwei CAs koennen
+    # dieselbe Subject CN haben).
+    detail = "; ".join(added_meta) if added_meta else "0 (alle bereits vorhanden)"
     get_audit_backend().append(
         AuditEventKind.VAULT_OPENED,
         actor=audit_actor(session),
         vault_path=str(session.vault_path),
         summary=(
-            f"Custom Root-CA(s) hinzugefuegt: {added} neu, "
+            f"Custom Root-CA(s) hinzugefuegt: {added} neu [{detail}], "
             f"Trust-Store enthaelt jetzt {len(existing)} Eintraege."
         ),
     )
@@ -738,6 +765,7 @@ def delete_trusted_ca(
     request: Request,
     session: Session = Depends(require_session),
 ) -> None:
+    require_admin_role(session)
     """Entfernt einen Trust-Eintrag anhand seines SHA256-Fingerprints.
 
     Akzeptiert den Fingerprint mit oder ohne ``:``-Trennzeichen,
@@ -755,24 +783,23 @@ def delete_trusted_ca(
     old_settings = session.opened.data.settings
     existing = list(old_settings.trusted_ca_pems or [])
     kept: list[str] = []
-    removed = False
+    removed_subject = ""
     for pem in existing:
         try:
-            fp = parse_cert(pem).fingerprint_sha256
+            meta = parse_cert(pem)
         except ValueError:
-            # Stale PEM - wenn der User es loswerden will, akzeptieren
-            # wir auch den Sonderkey "stale"; sonst behalten.
-            if target == "STALE":
-                removed = True
-                continue
+            # Audit-Finding F4: Stale PEMs werden beibehalten - der
+            # User kann sie ueber Export-Template/Re-Import bereinigen.
+            # Frueher gab es hier den undokumentierten Magic-Value
+            # "STALE"; bewusst entfernt.
             kept.append(pem)
             continue
-        if _normalize_fingerprint(fp) == target:
-            removed = True
+        if _normalize_fingerprint(meta.fingerprint_sha256) == target:
+            removed_subject = meta.subject_cn
             continue
         kept.append(pem)
 
-    if not removed:
+    if not removed_subject:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Kein Trust-Eintrag mit Fingerprint {fingerprint}.",
@@ -787,12 +814,15 @@ def delete_trusted_ca(
     persist_session_vault(
         request, session, session.vault_path, rollback=_rollback,
     )
+    # Audit-Finding F5: Subject CN UND Fingerprint im Summary,
+    # damit Forensik eindeutig zuordnen kann.
     get_audit_backend().append(
         AuditEventKind.VAULT_OPENED,
         actor=audit_actor(session),
         vault_path=str(session.vault_path),
         summary=(
-            f"Custom Root-CA entfernt (fingerprint={fingerprint}); "
+            f"Custom Root-CA entfernt: '{removed_subject}' "
+            f"(fingerprint={fingerprint}); "
             f"Trust-Store hat jetzt {len(kept)} Eintraege."
         ),
     )

@@ -20,6 +20,10 @@ Konfiguration mehrerer Standorte über die OPNsense-REST-API:
 - **Bulk-Import** von Firewall-Stammdaten, Sicht-Vorlagen für wiederkehrende
   Aktionen
 - **Frontend-Inline-Validierung** beim Tippen (CIDR, Host, Aliase, Ports)
+- **Interne CAs unterstützen** — Custom-Root-Zertifikate im Tresor, damit
+  OPNsense-Boxen mit interner-CA-Cert mit aktiver TLS-Prüfung verwaltet werden
+- **Cockpit-eigenes HTTPS** — Server-Zertifikat hinterlegen, damit
+  `https://cockpit.lab:9876` ohne Browser-Warnung erreichbar ist
 
 Web-Frontend (Vanilla HTML/CSS/JS) auf einem FastAPI-Backend. Läuft als
 **Single-User-Desktop** unter Windows, als **Multi-User-Server** unter
@@ -90,6 +94,11 @@ minimalen Rechten.
 > Tool markiert diese Geräte dann **rot** im Inventar. Sauberer ist: das
 > OPNsense-Web-GUI auf ein vertrauenswürdiges Zertifikat (interne CA oder
 > ACME/Let's Encrypt) umstellen und TLS-Prüfung aktiv lassen.
+>
+> Wer eine **interne CA** betreibt und damit die OPNsense-Zertifikate
+> ausstellt, kann die CA einmal im Tresor hinterlegen — Cockpit akzeptiert
+> sie dann zusätzlich zum System-CA-Bundle, kein per-Gerät-`tls_verify=false`
+> mehr nötig. Siehe [docs/FEATURES.md → Interne CAs vertrauen](docs/FEATURES.md#interne-cas-vertrauen).
 
 ## Was du im Browser hast
 
@@ -192,9 +201,9 @@ minimalen Rechten.
 
 ## Sicherheit
 
-- Geräte-Inventar, API-Credentials und SSH-Private-Keys liegen
-  ausschließlich verschlüsselt in der `.opnvault`-Tresor-Datei. Niemals
-  im Klartext auf Platte.
+- Geräte-Inventar, API-Credentials, SSH-Private-Keys und Custom-CA-PEMs
+  liegen ausschließlich verschlüsselt in der `.opnvault`-Tresor-Datei.
+  Niemals im Klartext auf Platte.
 - Tresor-Dateien sind **portabel**: per CLI `export-template` entsteht eine
   zweite Datei mit identischem Inventar aber geleerten Secret-Feldern,
   die sicher an andere Admins weitergegeben werden kann.
@@ -208,8 +217,10 @@ minimalen Rechten.
 - TCP-Heartbeat zur Status-Anzeige erzeugt keine Auth-Versuche und
   damit keine Logs auf der OPNsense.
 - **Multi-User-Server**: bind auf `0.0.0.0` ist Default — produktiv
-  hinter Reverse-Proxy mit TLS und Client-Cert / mTLS. Rate-Limit auf
-  Login + Bootstrap (10 Versuche / 15 min pro IP).
+  hinter Reverse-Proxy mit TLS und Client-Cert / mTLS, oder direkt mit
+  einem eigenen Server-Zertifikat aus deiner internen CA
+  (siehe [docs/FEATURES.md → HTTPS für Cockpit selbst](docs/FEATURES.md#https-fuer-cockpit-selbst)).
+  Rate-Limit auf Login + Bootstrap (10 Versuche / 15 min pro IP).
 - **Linux/systemd**: Hardening-Flags `NoNewPrivileges`,
   `ProtectSystem=strict`, `PrivateTmp`, `ProtectHome`,
   `ProtectKernelTunables`/`Modules`. Service läuft als unprivilegierter

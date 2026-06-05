@@ -18,8 +18,9 @@ Antwort einen ``requires_restart``-Flag.
 from __future__ import annotations
 
 import os
+import ssl
 import stat
-from pathlib import Path
+import tempfile
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -32,7 +33,8 @@ from opn_cockpit.web.api.schemas import (
     ServerTlsStatusResponse,
     ServerTlsUploadRequest,
 )
-from opn_cockpit.web.auth.dependencies import require_admin
+from opn_cockpit.web.acl import require_admin_role
+from opn_cockpit.web.auth.dependencies import require_session
 
 router = APIRouter(prefix="/api/server", tags=["server-tls"])
 
@@ -43,7 +45,7 @@ _KEY_FILENAME = "key.pem"
 
 @router.get("/tls", response_model=ServerTlsStatusResponse)
 def get_server_tls(
-    session: Session = Depends(require_admin),
+    session: Session = Depends(require_session),
 ) -> ServerTlsStatusResponse:
     """Liefert den aktuellen Server-TLS-Status.
 
@@ -92,7 +94,7 @@ def get_server_tls(
 @router.post("/tls", response_model=ServerTlsStatusResponse)
 def upload_server_tls(
     payload: ServerTlsUploadRequest,
-    session: Session = Depends(require_admin),
+    session: Session = Depends(require_session),
 ) -> ServerTlsStatusResponse:
     """Schreibt Cert + Key in den App-Daten-Ordner und persistiert die
     Pfade in der ``settings.json``.
@@ -106,6 +108,7 @@ def upload_server_tls(
       0600 gesetzt.
     * Nach Save: ``requires_restart=True``.
     """
+    require_admin_role(session)
     session.touch()
     cert_pem = (payload.cert_pem or "").strip()
     key_pem = (payload.key_pem or "").strip()
@@ -128,6 +131,27 @@ def upload_server_tls(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"cert_pem nicht parsbar: {exc}",
+        ) from exc
+
+    # Audit-Finding F2: Cert + Key probeladen, bevor wir auf die echte
+    # Konfig schreiben. Schlaegt der Match fehl, scheitert uvicorn beim
+    # naechsten Boot mit SSL-Error - das machen wir lieber hier sichtbar
+    # statt den Service zu briken.
+    try:
+        _verify_cert_and_key(cert_pem, key_pem)
+    except ssl.SSLError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Cert und Key passen nicht zusammen oder Key ist nicht "
+                f"lesbar: {exc}"
+            ),
+        ) from exc
+    except OSError as exc:
+        # Sollte praktisch nicht passieren - temp-File-Probleme
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"TLS-Probelauf fehlgeschlagen: {exc}",
         ) from exc
 
     tls_dir = get_app_data_dir() / _TLS_SUBDIR
@@ -156,6 +180,7 @@ def upload_server_tls(
         actor=audit_actor(session),
         summary=(
             f"Server-TLS-Zertifikat gesetzt (Subject={meta.subject_cn}, "
+            f"fp={meta.fingerprint_sha256[:32]}, "
             f"gueltig bis {meta.not_after_iso[:10]}). "
             "Restart erforderlich."
         ),
@@ -175,8 +200,9 @@ def upload_server_tls(
 
 @router.delete("/tls", status_code=status.HTTP_204_NO_CONTENT)
 def disable_server_tls(
-    session: Session = Depends(require_admin),
+    session: Session = Depends(require_session),
 ) -> None:
+    require_admin_role(session)
     """Entfernt die Server-TLS-Konfiguration aus settings.json.
 
     Die Dateien unter ``<app_data>/server_tls/`` werden NICHT geloescht
@@ -200,8 +226,38 @@ def disable_server_tls(
         )
 
 
+def _verify_cert_and_key(cert_pem: str, key_pem: str) -> None:
+    """Probe-Lauf: laedt Cert + Key in einen SSLContext.
+
+    Wirft ``ssl.SSLError`` wenn Cert+Key nicht zueinander passen oder
+    der Key nicht parsbar ist. Die temp-Files werden mit 0600 angelegt
+    und sofort wieder geloescht.
+    """
+    cert_fd, cert_path = tempfile.mkstemp(
+        prefix="opncockpit-tls-probe-cert-", suffix=".pem",
+    )
+    key_fd, key_path = tempfile.mkstemp(
+        prefix="opncockpit-tls-probe-key-", suffix=".pem",
+    )
+    try:
+        with os.fdopen(cert_fd, "w", encoding="ascii") as f:
+            f.write(cert_pem if cert_pem.endswith("\n") else cert_pem + "\n")
+        with os.fdopen(key_fd, "w", encoding="ascii") as f:
+            f.write(key_pem if key_pem.endswith("\n") else key_pem + "\n")
+        try:
+            os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+        ctx = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
+        # load_cert_chain wirft SSLError wenn Key nicht zum Cert passt
+        # oder Key-Format unbekannt ist.
+        ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+    finally:
+        for path in (cert_path, key_path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
 __all__ = ["router"]
-
-
-def _silence_path_unused() -> Path:  # pragma: no cover
-    return Path()

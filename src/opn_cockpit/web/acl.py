@@ -144,9 +144,34 @@ def require_plan_role(session: Session) -> None:
         )
 
 
+def require_admin_role(session: Session) -> None:
+    """Strikter als ``require_plan_role``: nur Admin.
+
+    Im Single-User-Mode (``session.user is None``) durchgewunken — der
+    eingeloggte User ist implizit admin. Im Multi-User-Mode greift die
+    Rollen-Pruefung: alles ausser ``admin`` wird mit 403 abgewiesen.
+
+    Verwendet fuer Trust-Anker-Aenderungen (Custom-CAs, Cockpit-eigenes
+    HTTPS) - das sind security-impacting Setting, die nicht jeder
+    operator setzen darf.
+    """
+    user = session.user
+    if user is None:
+        return
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Rolle '{user.role}' darf Trust-Anker nicht aendern — "
+                "admin erforderlich."
+            ),
+        )
+
+
 __all__ = [
     "PLAN_ROLES",
     "WRITE_ROLES",
+    "require_admin_role",
     "device_visible_to",
     "filter_devices_for",
     "require_device_access",

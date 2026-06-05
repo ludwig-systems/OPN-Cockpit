@@ -161,7 +161,23 @@ Topbar-Icon (drei Linien) öffnet das Audit-Modal:
 - **Als PDF (signiert)** — gefilterte Records als A4-Querformat-Report
   mit HMAC-SHA256-Signatur im Footer + in den PDF-Metadaten
 
-## 13. Safety-Net via SSH
+## 13. Interne PKI integrieren (optional)
+
+Wer eine interne CA betreibt, hat zwei Hebel im **Tresor-Einstellungen**-Modal:
+
+- **Vertrauenswürdige Root-CAs** — die interne CA einmal als PEM
+  einfügen → Cockpit akzeptiert alle damit ausgestellten OPNsense-Certs
+  ohne pro-Gerät-`tls_verify=false`. Inspect-Preview vor Save.
+- **Cockpit HTTPS-Zertifikat** — eigenes Server-Cert + Key für Cockpit
+  selbst hinterlegen, damit `https://cockpit.lab:9876` ohne Warnung
+  funktioniert. App-weit (in `settings.json`, nicht im Tresor),
+  Restart erforderlich.
+
+Schritt-für-Schritt mit step-ca / OpenSSL / AD-CS-Beispielen in
+[FEATURES.md → Interne CAs vertrauen](FEATURES.md#interne-cas-vertrauen)
+und [FEATURES.md → HTTPS für Cockpit selbst](FEATURES.md#https-fuer-cockpit-selbst).
+
+## 14. Safety-Net via SSH
 
 Optional pro Gerät: SSH-Zugang mit Private-Key in den Tresor legen
 (Gerät → Bearbeiten → unten „Safety-Net via SSH aktivieren" + Felder

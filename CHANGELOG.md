@@ -6,6 +6,28 @@ Alle nennenswerten Änderungen pro Release.
 
 ### TLS-Vertrauen + Cockpit-eigenes HTTPS
 
+**Security-Härtung (Post-Audit, gleicher Release):**
+
+- ``require_admin_role``-Helper neu in ``web/acl.py`` — strikter als
+  ``require_admin``, lässt aber Single-User-Mode durchwinkend
+  (User ist implizit admin). Trust-CA POST/DELETE und Server-TLS
+  POST/DELETE auf diesen Helper umgestellt: im Multi-User-Mode
+  jetzt admin-only (Trust-Anker sind security-impacting).
+- Server-TLS-Upload validiert ``ssl.SSLContext.load_cert_chain``
+  vor dem Save - Cert+Key-Mismatch fliegt mit 422 zurück statt
+  Cockpit beim nächsten Boot zu briken (DoS-Schutz).
+- Soft-Cap ``MAX_TRUSTED_CAS = 64`` im POST-Pfad — Sanity-Check
+  gegen versehentliche Massen-Uploads.
+- Magic-Value ``"STALE"`` im Delete-Pfad entfernt — undokumentierte
+  Recovery-API, ersetzt durch Export/Reimport-Workflow.
+- Audit-Summary für Trust-CA-Add/Delete und Server-TLS-Set enthält
+  jetzt den (gekürzten) Fingerprint zusätzlich zur Subject CN.
+
+Audit-Bericht inkl. Findings F6-F9 (Accept, dokumentiert) in
+``docs/SECURITY-AUDIT-0.8-TLS.local.md`` (gitignored).
+
+
+
 Zwei verwandte aber separate TLS-Themen:
 
 **Custom Root-CAs fuer ausgehende Verbindungen.** Wer eine interne CA
