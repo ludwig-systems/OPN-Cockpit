@@ -692,3 +692,81 @@ Environment="OPNCOCKPIT_TLS_KEY=/etc/opn-cockpit/server.key"
 Env-Vars haben Vorrang vor `settings.json` — praktisch wenn du die UI
 nicht benutzen willst oder Cert-Rotation extern automatisierst (z. B.
 mit `step ca renew`).
+
+## Zwei-Faktor-Authentifizierung (TOTP)
+
+> **Nur Multi-User-Mode.** Single-User-PAW hat lokales Master-Passwort +
+> Inaktivitäts-Lock; 2FA wäre dort redundant.
+
+OPN-Cockpit unterstützt zeitbasierte Einmalpasswörter (TOTP, RFC 6238) als
+optionale zweite Faktor pro User. Standard: 6-stellig, 30-Sekunden-Fenster,
+±30 s Clock-Skew toleriert.
+
+### Einrichten
+
+1. Im Multi-User-Mode einloggen.
+2. In der Topbar auf das **Schild-Symbol** klicken (Tooltip: „2FA / TOTP
+   einrichten").
+3. „Einrichten" anklicken — der Server liefert:
+   - eine `otpauth://`-URI (für QR-Code-Render in der Authenticator-App)
+   - das Base32-Secret als Fallback für die manuelle Eingabe
+4. Authenticator-App öffnen und entweder:
+   - QR-Code scannen (Plain-URI über externen QR-Generator wie
+     [qr-code-generator.com](https://www.qr-code-generator.com/) oder
+     `qrencode -t ANSI "otpauth://..."` lokal), oder
+   - Secret manuell eintippen (alle Authenticator-Apps unterstützen das
+     unter „Setup-Key eingeben").
+5. Den aktuell angezeigten 6-stelligen Code im Cockpit-Modal eintragen
+   und „Bestätigen + 2FA aktivieren" klicken.
+6. **Server zeigt jetzt 8 Backup-Codes — JETZT speichern.** Sie werden
+   nicht erneut angezeigt. Verwendung: einmalig pro Code bei Verlust des
+   Authenticator-Geräts.
+
+Empfohlene Authenticator-Apps: **Aegis** (Android, Open Source),
+**Bitwarden** (Cross-Platform), **1Password**, Microsoft Authenticator,
+Google Authenticator.
+
+### Login mit 2FA
+
+Nach Aktivierung läuft der Login zweistufig:
+
+1. Username + Passwort wie bisher → Server antwortet mit
+   ``totp_required: true`` und einer signierten 5-Minuten-Challenge.
+2. 6-stelligen Authenticator-Code (oder Backup-Code wie
+   ``ABCDE-FGHIJ``) eingeben → Server prüft und gibt das Session-Token
+   aus.
+
+Backup-Codes werden bei Verbrauch automatisch entfernt — die Anzeige
+„Noch X Backup-Code(s) verfügbar" im Modal hält die Übersicht.
+
+### Deaktivieren
+
+Im selben Modal: „2FA deaktivieren" verlangt **aktuelles Passwort** UND
+**aktuellen TOTP-Code/Backup-Code**. Damit reicht ein gestohlener
+Session-Token allein nicht, um 2FA abzuschalten.
+
+### Admin-Recovery
+
+Hat ein User Authenticator + Backup-Codes verloren, kann ein Admin
+TOTP für ihn zurücksetzen:
+
+```bash
+curl -X POST https://cockpit/api/users/<user_id>/totp/disable \
+  -H "Authorization: Bearer <admin-token>"
+```
+
+Der Reset erscheint im Audit-Log mit Admin-Username als Actor. Nach dem
+Reset loggt sich der User wieder ohne 2FA ein und kann TOTP per
+Self-Service neu einrichten.
+
+### API-Übersicht
+
+| Endpoint | Zweck |
+|---|---|
+| `GET /api/users/me/totp` | Status (enabled + Backup-Codes-Remaining) |
+| `POST /api/users/me/totp/enroll` | Neues Secret erzeugen (noch nicht aktiv) |
+| `POST /api/users/me/totp/confirm` | Mit Code bestätigen → 8 Backup-Codes (einmalig) |
+| `POST /api/users/me/totp/disable` | Self-Disable mit Passwort + Code |
+| `POST /api/auth/login` | Schritt 1; bei aktivem 2FA → `totp_required` |
+| `POST /api/auth/login/totp` | Schritt 2; Challenge + Code → Session-Token |
+| `POST /api/users/{id}/totp/disable` | Admin-Recovery-Reset |

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from opn_cockpit.audit.backend import AuditBackend, audit_actor, get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
+from opn_cockpit.security import totp as totp_mod
 from opn_cockpit.security.session import Session
 from opn_cockpit.vault.errors import (
     CorruptVaultError,
@@ -21,6 +23,8 @@ from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     CurrentSessionResponse,
     LoginRequest,
+    TotpChallengeResponse,
+    TotpLoginRequest,
     UnlockRequest,
     UnlockResponse,
 )
@@ -51,18 +55,37 @@ def _login_limiter(request: Request) -> RateLimiter:
     return limiter
 
 
-def _client_key(request: Request) -> str:
-    """Liefert einen stabilen Client-Schluessel — Audit #4.
+_TRUST_FORWARDED_FOR_ENV = "OPNCOCKPIT_TRUST_FORWARDED_FOR"
 
-    Reverse-Proxy-Setup nutzt X-Forwarded-For (linker erster Eintrag),
-    sonst die direkte Client-IP. Defensiv gegen Header-Injection: nur
-    ersten Komma-Separierten Wert nehmen, max 64 Zeichen.
+
+def _trust_forwarded_for() -> bool:
+    """True wenn der Server hinter einem vertrauenswuerdigen Reverse-Proxy
+    laeuft und ``X-Forwarded-For`` als Client-IP gelten soll.
+
+    Audit-Finding G2: Ohne diesen Schalter konnte ein Angreifer, der den
+    Cockpit-Server direkt erreicht (kein Proxy davor), beliebige XFF-IPs
+    setzen und damit den Rate-Limit-Bucket pro fake-IP umgehen. Default
+    ``false`` haerten wir gegen genau diesen Fall.
     """
-    fwd = request.headers.get("X-Forwarded-For", "")
-    if fwd:
-        first = fwd.split(",", 1)[0].strip()
-        if first:
-            return first[:64]
+    return os.environ.get(_TRUST_FORWARDED_FOR_ENV, "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _client_key(request: Request) -> str:
+    """Liefert einen stabilen Client-Schluessel fuer Rate-Limiting.
+
+    Audit-Finding G2: ``X-Forwarded-For`` wird NUR akzeptiert wenn die
+    Env-Var ``OPNCOCKPIT_TRUST_FORWARDED_FOR=true`` gesetzt ist
+    (Reverse-Proxy-Deploy). Sonst zaehlt die direkte ``request.client.host``,
+    sodass ein Angreifer ohne Proxy davor den Bucket nicht spoofen kann.
+    """
+    if _trust_forwarded_for():
+        fwd = request.headers.get("X-Forwarded-For", "")
+        if fwd:
+            first = fwd.split(",", 1)[0].strip()
+            if first:
+                return first[:64]
     client = request.client
     return client.host if client else "unknown"
 
@@ -162,7 +185,7 @@ def unlock(
 
 @router.post(
     "/login",
-    response_model=UnlockResponse,
+    response_model=None,  # Union: UnlockResponse oder TotpChallengeResponse
     status_code=status.HTTP_200_OK,
 )
 def login(
@@ -170,12 +193,16 @@ def login(
     request: Request,
     manager: SessionManager = Depends(get_session_manager),
     server: ServerState = Depends(get_server_state),
-) -> UnlockResponse:
+) -> UnlockResponse | TotpChallengeResponse:
     """Multi-User-Login per Username + Passwort.
 
     Nur im Multi-User-Mode aktiv und nur wenn der Server bereits
     ``ready`` ist (Admin angelegt + zentraler Vault entsperrt). Liefert
     sonst 409.
+
+    Wenn der User TOTP aktiviert hat, ist dies nur Schritt 1: Server
+    haelt die Auth-Daten kurz im ``_pending_totp_logins``-Cache und gibt
+    eine Challenge zurueck. Schritt 2 ist ``POST /api/auth/login/totp``.
     """
     if not server.is_multi_user_mode:
         raise HTTPException(
@@ -211,6 +238,18 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Benutzername oder Passwort falsch.",
         )
+    user = result.user
+    if user is not None and user.totp_enabled:
+        # Schritt 1 erfolgreich, aber wir bauen noch keine Session - der
+        # User muss Schritt 2 (TOTP-Code) bestehen.
+        challenge = totp_mod.issue_challenge(
+            user.id, _challenge_secret(request),
+        )
+        # Login-Versuch zaehlt noch nicht als Erfolg, aber zaehlen wir
+        # auch nicht als Fehler — sonst koennte ein Angreifer den
+        # Rate-Limiter durch Passwort-Tippen vor jedem TOTP-Versuch
+        # einseitig fuellen. Schritt-2-Fehler werden separat geahndet.
+        return TotpChallengeResponse(challenge=challenge.to_token())
     limiter.register_success(client_key)
     token, session = manager.create_from(result)
     _audit_user_logged_in(payload.username)
@@ -221,6 +260,138 @@ def login(
         inactivity_timeout_s=int(session.inactivity_timeout_s),
         seconds_until_expiry=int(session.seconds_until_expiry()),
     )
+
+
+@router.post(
+    "/login/totp",
+    response_model=UnlockResponse,
+    status_code=status.HTTP_200_OK,
+)
+def login_totp(
+    payload: TotpLoginRequest,
+    request: Request,
+    manager: SessionManager = Depends(get_session_manager),
+    server: ServerState = Depends(get_server_state),
+) -> UnlockResponse:
+    """Schritt 2 des Logins: TOTP-Code oder Backup-Code.
+
+    Erfordert die ``challenge`` aus Schritt 1. Der Server prueft
+    Signatur+Frist der Challenge, danach den Code gegen das User-Secret
+    bzw. die Backup-Codes. Bei Erfolg wird die Session erzeugt.
+    """
+    if not server.is_multi_user_mode:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="TOTP-Login ist nur im Multi-User-Mode verfuegbar.",
+        )
+    if server.bootstrap_status != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Server-Status: {server.bootstrap_status}.",
+        )
+    limiter = _login_limiter(request)
+    _check_rate_limit(request, limiter)
+    client_key = _client_key(request)
+
+    parsed = totp_mod.TotpChallenge.from_token(payload.challenge)
+    if parsed is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Challenge-Format ungueltig.",
+        )
+    secret = _challenge_secret(request)
+    if not totp_mod.verify_challenge(parsed, secret):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Challenge abgelaufen oder gefaelscht - bitte neu einloggen.",
+        )
+    store = server.user_store
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User-Store nicht initialisiert.",
+        )
+    user = store.get_user(parsed.user_id)
+    if user is None or user.disabled or not user.totp_enabled:
+        # Konsistent gleiche Meldung wie bei falschem Code, damit ein
+        # Angreifer nicht aus dem Fehlertext lernt.
+        limiter.register_failure(client_key)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="TOTP-Login fehlgeschlagen.",
+        )
+
+    code = payload.code.strip()
+    user_secret = store.get_totp_secret(user.id)
+    used_backup = False
+    if not totp_mod.verify_code(user_secret, code):
+        # Vielleicht ein Backup-Code?
+        hashes = store.get_backup_code_hashes(user.id)
+        consumed, remaining = totp_mod.verify_backup_code(code, hashes)
+        if not consumed:
+            limiter.register_failure(client_key)
+            _audit_totp_failed(user.username)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="TOTP-Login fehlgeschlagen.",
+            )
+        used_backup = True
+        store.set_backup_code_hashes(user.id, remaining)
+
+    # Auth komplett — Session bauen wie im Single-Step-Login.
+    try:
+        backend = server.auth_backend()
+    except ServerStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    # Wir koennen das Passwort nicht erneut pruefen (haben wir nicht
+    # mehr), aber Backend hat alle Daten — die zentralen Vault-Bytes
+    # plus das Master-PW liegen in ``UserDbAuthBackend``. Wir bauen die
+    # Session direkt aus User + Backend.
+    from opn_cockpit.security.auth_backend import (  # noqa: PLC0415 — lokal, vermeidet zirkulaeren Import
+        AuthResult,
+        UserDbAuthBackend,
+    )
+    if not isinstance(backend, UserDbAuthBackend):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Auth-Backend unterstuetzt TOTP-Login nicht.",
+        )
+    auth_result = AuthResult(
+        opened_vault=backend.opened_vault,
+        vault_path=backend.vault_path,
+        master_password=backend.master_password,
+        user=user,
+    )
+    limiter.register_success(client_key)
+    token, session = manager.create_from(auth_result)
+    _audit_user_logged_in(
+        user.username + (" (backup-code)" if used_backup else " (totp)"),
+    )
+    return UnlockResponse(
+        token=token,
+        vault_path=str(auth_result.vault_path),
+        vault_filename=auth_result.vault_path.name,
+        inactivity_timeout_s=int(session.inactivity_timeout_s),
+        seconds_until_expiry=int(session.seconds_until_expiry()),
+    )
+
+
+def _challenge_secret(request: Request) -> bytes:
+    """Liefert das HMAC-Secret fuer TOTP-Challenges aus dem App-State.
+
+    Wird beim App-Boot in ``app.state.totp_challenge_secret`` gesetzt
+    (siehe ``web/server.py``).
+    """
+    secret = getattr(request.app.state, "totp_challenge_secret", None)
+    if not isinstance(secret, bytes):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="TOTP-Challenge-Secret nicht initialisiert.",
+        )
+    return secret
 
 
 @router.post(
@@ -312,9 +483,19 @@ def _audit_login_failed_user(username: str) -> None:
     )
 
 
-def _audit_user_logged_in(username: str) -> None:
+def _audit_totp_failed(username: str) -> None:
     _audit_log().append(
-        AuditEventKind.VAULT_OPENED,
+        AuditEventKind.LOGIN_FAILED,
+        actor=username,
+        summary=f"TOTP-Code-Verifikation fehlgeschlagen fuer '{username}'.",
+    )
+
+
+def _audit_user_logged_in(username: str) -> None:
+    # Audit-Finding G7: eigener Event-Kind statt VAULT_OPENED-Reuse,
+    # damit Login-Forensik im UI-Audit-Filter sauber abrufbar ist.
+    _audit_log().append(
+        AuditEventKind.USER_LOGIN_SUCCESS,
         actor=username,
         summary=f"Multi-User-Login erfolgreich: '{username}'.",
     )

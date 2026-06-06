@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import tempfile
 import uuid
 from datetime import UTC, datetime
@@ -118,6 +119,9 @@ def _write_index(device_dir: Path, records: list[BackupRecord]) -> None:
         tmp.write(payload)
         tmp_path = Path(tmp.name)
     os.replace(tmp_path, path)
+    # Audit-Finding G1: Index enthaelt Geraete-Namen und Plan-IDs.
+    with contextlib.suppress(OSError):
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
 def _sort_records_desc(records: list[BackupRecord]) -> list[BackupRecord]:
@@ -166,6 +170,12 @@ def append_backup(
         with gzip.open(tmp_path, "wb", compresslevel=6) as gz:
             gz.write(content)
         os.replace(tmp_path, target_file)
+        # Audit-Finding G1: OPNsense-Backup-XMLs enthalten Cert/Key/PSK.
+        # Auf POSIX 0o600 erzwingen; auf Windows ist os.chmod weitgehend
+        # ein No-Op (NTFS-ACL muesste expliziter ueber icacls), aber
+        # schadet nicht.
+        with contextlib.suppress(OSError):
+            os.chmod(target_file, stat.S_IRUSR | stat.S_IWUSR)
     except OSError as exc:
         # Falls Tempfile noch lebt, wegraeumen - tmp_path kann hier u. U.
         # noch nicht gebunden sein (z. B. NamedTemporaryFile-Fehler), darum

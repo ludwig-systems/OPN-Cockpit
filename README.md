@@ -24,6 +24,8 @@ Konfiguration mehrerer Standorte über die OPNsense-REST-API:
   OPNsense-Boxen mit interner-CA-Cert mit aktiver TLS-Prüfung verwaltet werden
 - **Cockpit-eigenes HTTPS** — Server-Zertifikat hinterlegen, damit
   `https://cockpit.lab:9876` ohne Browser-Warnung erreichbar ist
+- **TOTP / 2FA** (Multi-User, opt-in) — pro User aktivierbar mit
+  Authenticator-App + 8 Backup-Codes; Admin-Recovery-Reset
 
 Web-Frontend (Vanilla HTML/CSS/JS) auf einem FastAPI-Backend. Läuft als
 **Single-User-Desktop** unter Windows, als **Multi-User-Server** unter
@@ -234,6 +236,12 @@ minimalen Rechten.
 - **Safety-Net SSH-Rollback** nutzt `paramiko` mit Private-Key-Auth
   (Password-Auth bewusst nicht implementiert). Klartext-Key wird sofort
   nach `connect()` freigegeben und nicht in Tracebacks geleakt.
+- **TOTP / 2FA** (Multi-User-Mode, opt-in pro User): RFC 6238, 6-stellig,
+  ±30s Clock-Skew. 8 SHA-256-gehashte Backup-Codes pro User; jeder
+  Verbrauch wird automatisch entfernt. Self-Disable verlangt aktuelles
+  Passwort + aktuellen Code. Admin-Reset (für Recovery bei Verlust der
+  Authenticator-App) ist möglich und wird auditiert. Siehe
+  [docs/FEATURES.md → Zwei-Faktor-Authentifizierung](docs/FEATURES.md#zwei-faktor-authentifizierung-totp).
 
 ## Entwicklung
 

@@ -388,6 +388,12 @@
         throw new Error(body.detail || `Fehler ${response.status}`);
       }
       const data = await response.json();
+      if (data.totp_required) {
+        // 2-Schritt-Login: Passwort war OK, jetzt TOTP-Code anfordern.
+        $('#mu-password').value = '';
+        showTotpChallenge(data.challenge, username);
+        return;
+      }
       setToken(data.token);
       $('#mu-password').value = '';
       await enterMain(data);
@@ -396,6 +402,71 @@
       errorBox.hidden = false;
       btn.disabled = false;
       btn.textContent = 'Anmelden';
+    }
+  }
+
+  // -------------------- TOTP-Login (Schritt 2) --------------------
+
+  function showTotpChallenge(challenge, username) {
+    state.totpChallenge = challenge;
+    state.totpUsername = username;
+    const panel = $('#mu-totp-panel');
+    const loginForm = $('#mu-login-form');
+    if (panel) panel.hidden = false;
+    if (loginForm) loginForm.hidden = true;
+    const codeInput = $('#mu-totp-code');
+    if (codeInput) {
+      codeInput.value = '';
+      setTimeout(() => codeInput.focus(), 50);
+    }
+    const errBox = $('#mu-totp-error');
+    if (errBox) errBox.hidden = true;
+    const btn = $('#mu-login-btn');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Anmelden';
+    }
+  }
+
+  function hideTotpChallenge() {
+    state.totpChallenge = null;
+    state.totpUsername = null;
+    const panel = $('#mu-totp-panel');
+    const loginForm = $('#mu-login-form');
+    if (panel) panel.hidden = true;
+    if (loginForm) loginForm.hidden = false;
+  }
+
+  async function doMultiUserTotpSubmit() {
+    const challenge = state.totpChallenge;
+    const code = ($('#mu-totp-code')?.value || '').trim();
+    if (!challenge || !code) return;
+    const errBox = $('#mu-totp-error');
+    if (errBox) errBox.hidden = true;
+    const btn = $('#mu-totp-submit');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Pruefe…';
+    }
+    try {
+      const response = await apiPost('/api/auth/login/totp', { challenge, code });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Fehler ${response.status}`);
+      }
+      const data = await response.json();
+      setToken(data.token);
+      hideTotpChallenge();
+      await enterMain(data);
+    } catch (err) {
+      if (errBox) {
+        errBox.textContent = err.message;
+        errBox.hidden = false;
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Bestaetigen';
+      }
     }
   }
 
@@ -898,9 +969,11 @@
     const isMulti = state.serverMode === 'user-db';
     const usersBtn = $('#users-open-btn');
     const pwBtn = $('#password-self-btn');
+    const totpBtn = $('#totp-self-btn');
     const userBadge = $('#current-user-badge');
     const singleSwitchBtn = $('#single-switch-btn');
     if (pwBtn) pwBtn.hidden = !isMulti;
+    if (totpBtn) totpBtn.hidden = !isMulti;
     if (usersBtn) usersBtn.hidden = true;
     if (userBadge) userBadge.hidden = !isMulti;
     // Single-Mode-Switch-Button nur im Single-Mode sichtbar
@@ -5743,6 +5816,123 @@
     }
   }
 
+  // -------------------- Self-Service TOTP (2FA) --------------------
+
+  async function openTotpModal() {
+    const modal = $('#totp-modal');
+    if (!modal) return;
+    modal.hidden = false;
+    $('#totp-status-msg').textContent = 'Lade Status…';
+    $('#totp-enroll-block').hidden = true;
+    $('#totp-codes-block').hidden = true;
+    $('#totp-disable-block').hidden = true;
+    $('#totp-error').hidden = true;
+    try {
+      const response = await apiGet('/api/users/me/totp');
+      if (!response.ok) throw new Error(`Status ${response.status}`);
+      const data = await response.json();
+      if (data.enabled) {
+        $('#totp-status-msg').innerHTML =
+          `<strong>2FA aktiv.</strong> Noch ${data.backup_codes_remaining} Backup-Code(s) verfuegbar.`;
+        $('#totp-disable-block').hidden = false;
+      } else {
+        $('#totp-status-msg').textContent =
+          '2FA ist noch nicht eingerichtet. Klicke unten auf "Einrichten" und scanne den QR-Code in deiner Authenticator-App.';
+        $('#totp-start-enroll-btn').hidden = false;
+      }
+    } catch (err) {
+      $('#totp-status-msg').textContent = `Status nicht abrufbar: ${err.message}`;
+    }
+  }
+
+  function closeTotpModal() {
+    const modal = $('#totp-modal');
+    if (modal) modal.hidden = true;
+  }
+
+  async function startTotpEnroll() {
+    $('#totp-error').hidden = true;
+    try {
+      const response = await apiPost('/api/users/me/totp/enroll', {});
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Fehler ${response.status}`);
+      }
+      const data = await response.json();
+      $('#totp-secret-text').textContent = data.secret_base32;
+      $('#totp-uri-text').textContent = data.otpauth_uri;
+      $('#totp-start-enroll-btn').hidden = true;
+      $('#totp-enroll-block').hidden = false;
+      $('#totp-confirm-code').value = '';
+      setTimeout(() => $('#totp-confirm-code').focus(), 50);
+    } catch (err) {
+      $('#totp-error').textContent = err.message;
+      $('#totp-error').hidden = false;
+    }
+  }
+
+  async function confirmTotpEnroll() {
+    const code = $('#totp-confirm-code').value.trim();
+    if (!code) return;
+    $('#totp-error').hidden = true;
+    try {
+      const response = await apiPost('/api/users/me/totp/confirm', { code });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Fehler ${response.status}`);
+      }
+      const data = await response.json();
+      $('#totp-enroll-block').hidden = true;
+      const list = $('#totp-backup-codes-list');
+      list.innerHTML = '';
+      (data.backup_codes || []).forEach((c) => {
+        const li = document.createElement('li');
+        li.textContent = c;
+        list.appendChild(li);
+      });
+      $('#totp-codes-block').hidden = false;
+      $('#totp-status-msg').innerHTML =
+        '<strong>2FA aktiviert.</strong> Backup-Codes JETZT speichern - sie werden nicht erneut angezeigt.';
+    } catch (err) {
+      $('#totp-error').textContent = err.message;
+      $('#totp-error').hidden = false;
+    }
+  }
+
+  async function disableTotp() {
+    const pw = $('#totp-disable-pw').value;
+    const code = $('#totp-disable-code').value.trim();
+    if (!pw || !code) {
+      $('#totp-error').textContent = 'Passwort und Code sind beide noetig.';
+      $('#totp-error').hidden = false;
+      return;
+    }
+    if (!confirm('2FA wirklich deaktivieren? Backup-Codes werden geloescht.')) return;
+    $('#totp-error').hidden = true;
+    try {
+      const response = await apiPost('/api/users/me/totp/disable', {
+        current_password: pw,
+        code,
+      });
+      if (response.status === 401) {
+        $('#totp-error').textContent = 'Passwort oder Code falsch.';
+        $('#totp-error').hidden = false;
+        return;
+      }
+      if (response.status !== 204 && !response.ok) {
+        const body = await response.json().catch(() => ({}));
+        $('#totp-error').textContent = body.detail || `Fehler ${response.status}`;
+        $('#totp-error').hidden = false;
+        return;
+      }
+      showToast('2FA deaktiviert.');
+      closeTotpModal();
+    } catch (err) {
+      $('#totp-error').textContent = err.message;
+      $('#totp-error').hidden = false;
+    }
+  }
+
   // -------------------- Single-Mode Vault wechseln --------------------
 
   async function openSingleSwitchModal() {
@@ -6476,6 +6666,18 @@
         if (e.key === 'Enter') $('#mu-password').focus();
       });
     }
+    // TOTP-Schritt-2-Form (nur sichtbar wenn Step 1 ergibt totp_required)
+    const muTotpSubmit = $('#mu-totp-submit');
+    if (muTotpSubmit) {
+      muTotpSubmit.addEventListener('click', doMultiUserTotpSubmit);
+      $('#mu-totp-code').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doMultiUserTotpSubmit();
+      });
+    }
+    const muTotpCancel = $('#mu-totp-cancel');
+    if (muTotpCancel) {
+      muTotpCancel.addEventListener('click', hideTotpChallenge);
+    }
     const themeMulti = $('#theme-toggle-multi');
     if (themeMulti) themeMulti.addEventListener('click', toggleTheme);
 
@@ -6557,6 +6759,17 @@
     if (usersBtn) usersBtn.addEventListener('click', openUsersModal);
     const pwSelfBtn = $('#password-self-btn');
     if (pwSelfBtn) pwSelfBtn.addEventListener('click', openSelfPasswordModal);
+    // TOTP-Self-Service
+    const totpBtn = $('#totp-self-btn');
+    if (totpBtn) totpBtn.addEventListener('click', openTotpModal);
+    const totpClose = $('#totp-close');
+    if (totpClose) totpClose.addEventListener('click', closeTotpModal);
+    const totpStartBtn = $('#totp-start-enroll-btn');
+    if (totpStartBtn) totpStartBtn.addEventListener('click', startTotpEnroll);
+    const totpConfirmBtn = $('#totp-confirm-btn');
+    if (totpConfirmBtn) totpConfirmBtn.addEventListener('click', confirmTotpEnroll);
+    const totpDisableBtn = $('#totp-disable-btn');
+    if (totpDisableBtn) totpDisableBtn.addEventListener('click', disableTotp);
 
     // User-Verwaltungs-Modal
     const umClose = $('#users-modal-close');

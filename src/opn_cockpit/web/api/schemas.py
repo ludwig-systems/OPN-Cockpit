@@ -66,6 +66,7 @@ class UserResponse(BaseModel):
     created_at_iso: str
     last_login_at_iso: str | None
     disabled: bool
+    totp_enabled: bool = False
 
 
 class UserListResponse(BaseModel):
@@ -113,6 +114,71 @@ class UnlockResponse(BaseModel):
     vault_filename: str
     inactivity_timeout_s: int
     seconds_until_expiry: int
+
+
+class TotpChallengeResponse(BaseModel):
+    """Antwort auf POST /api/auth/login, wenn der User TOTP aktiviert hat.
+
+    Schritt 1 (Passwort) war erfolgreich; der Server haelt ``challenge``
+    fuer max. 5 Minuten als signiertes Token. Schritt 2 ist
+    ``POST /api/auth/login/totp`` mit ``challenge`` + ``code`` (oder einem
+    Backup-Code).
+    """
+
+    totp_required: bool = True
+    challenge: str
+
+
+class TotpLoginRequest(BaseModel):
+    """Schritt 2 des Logins: TOTP-Code oder Backup-Code."""
+
+    challenge: str = Field(..., min_length=1)
+    code: str = Field(..., min_length=1, max_length=24)
+
+
+class TotpEnrollResponse(BaseModel):
+    """Antwort auf POST /api/users/me/totp/enroll.
+
+    Liefert das Secret + die otpauth-URI. Frontend zeigt das als QR-Code
+    UND als Klartext-Secret (Manual-Eingabe). User muss anschliessend
+    einen aktuellen Code via /confirm-Endpoint einreichen — erst dann
+    wird TOTP scharf geschaltet.
+    """
+
+    secret_base32: str
+    otpauth_uri: str
+    issuer: str
+    digits: int
+    interval_s: int
+
+
+class TotpConfirmRequest(BaseModel):
+    code: str = Field(..., min_length=1, max_length=24)
+
+
+class TotpConfirmResponse(BaseModel):
+    """Antwort auf erfolgreichen TOTP-Confirm: Backup-Codes (einmalig).
+
+    Diese Codes werden **nicht** wieder ausgeliefert — der User muss sie
+    bei diesem Step abspeichern. Verlust = TOTP nur per Admin-Reset
+    abschaltbar.
+    """
+
+    enabled: bool
+    backup_codes: list[str]
+
+
+class TotpDisableRequest(BaseModel):
+    """Self-Service-Disable braucht aktuelles Passwort UND aktuellen
+    TOTP-Code als Defense-in-Depth gegen Token-Hijack."""
+
+    current_password: str = Field(..., min_length=1)
+    code: str = Field(..., min_length=1, max_length=24)
+
+
+class TotpStatusResponse(BaseModel):
+    enabled: bool
+    backup_codes_remaining: int
 
 
 class CurrentSessionResponse(BaseModel):

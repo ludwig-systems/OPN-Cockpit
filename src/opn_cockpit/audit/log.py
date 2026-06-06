@@ -20,8 +20,11 @@ Passwort lesbar bleibt (post-mortem, anderer Admin).
 
 from __future__ import annotations
 
+import contextlib
 import getpass
 import json
+import os
+import stat
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
@@ -62,6 +65,7 @@ class AuditEventKind(StrEnum):
     USER_CREATED = "user_created"
     USER_UPDATED = "user_updated"
     USER_DELETED = "user_deleted"
+    USER_LOGIN_SUCCESS = "user_login_success"
     BACKUP_DOWNLOADED = "backup_downloaded"
     API_KEY_REVEALED = "api_key_revealed"
     PRE_APPLY_BACKUP = "pre_apply_backup"
@@ -253,6 +257,21 @@ class AuditLog:
 
     def _write_line(self, line: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Audit-Finding G5: Auf POSIX 0o600 erzwingen, damit andere
+        # Lokal-User nicht mitlesen koennen. Erstes Anlegen: O_CREAT mit
+        # mode=0o600; spaeter chmod als best-effort falls jemand die
+        # Permissions geaendert hat. Auf Windows ist os.chmod weitgehend
+        # ein No-Op (NTFS-ACL muesste expliziter via icacls), schadet
+        # aber nicht.
+        if not self.path.exists():
+            fd = os.open(
+                str(self.path),
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                0o600,
+            )
+            os.close(fd)
+        with contextlib.suppress(OSError):
+            os.chmod(self.path, stat.S_IRUSR | stat.S_IWUSR)
         # "a" + utf-8: append-only, line-orientiert, kein lock-Stress.
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(line)

@@ -28,12 +28,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from opn_cockpit.audit.backend import get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
+from opn_cockpit.security import totp as totp_mod
 from opn_cockpit.security.session import Session
 from opn_cockpit.security.users import Role, User, UserStore, UserStoreError
 from opn_cockpit.web.api.bootstrap import get_server_state
 from opn_cockpit.web.api.schemas import (
     AdminPasswordResetRequest,
     PasswordChangeRequest,
+    TotpConfirmRequest,
+    TotpConfirmResponse,
+    TotpDisableRequest,
+    TotpEnrollResponse,
+    TotpStatusResponse,
     UserCreateRequest,
     UserListResponse,
     UserResponse,
@@ -70,6 +76,7 @@ def _to_response(user: User) -> UserResponse:
         created_at_iso=user.created_at_iso,
         last_login_at_iso=user.last_login_at_iso,
         disabled=user.disabled,
+        totp_enabled=user.totp_enabled,
     )
 
 
@@ -328,3 +335,206 @@ def _role_or_none(role: str | None) -> Role | None:
     if role is None:
         return None
     return _role_or_400(role)
+
+
+# ---------------------------------------------------------------------------
+# TOTP Self-Service (v0.8)
+# ---------------------------------------------------------------------------
+
+
+def _require_multi_user_self(session: Session, store: UserStore) -> User:
+    """Wirft 409 wenn Single-User-Mode, sonst liefert den eingeloggten User.
+
+    Liest den User **frisch aus der DB**, nicht aus dem Session-Cache.
+    Wichtig fuer TOTP-Flows: das ``totp_enabled``-Flag aendert sich
+    waehrend des Enroll/Disable-Flows; die Session-Kopie ist nach dem
+    Login eingefroren und wuerde 409 ausloesen, obwohl das Flag in der
+    DB stimmt.
+    """
+    if session.user is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "TOTP-Self-Service ist nur im Multi-User-Mode verfuegbar."
+            ),
+        )
+    fresh = store.get_user(session.user.id)
+    if fresh is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Eingeloggter User existiert nicht mehr.",
+        )
+    return fresh
+
+
+@router.get("/me/totp", response_model=TotpStatusResponse)
+def totp_status(
+    server: ServerState = Depends(get_server_state),
+    session: Session = Depends(require_session),
+) -> TotpStatusResponse:
+    """Status des eigenen TOTP-Eintrags (enabled + Anzahl Backup-Codes)."""
+    store = _user_store(server)
+    user = _require_multi_user_self(session, store)
+    remaining = len(store.get_backup_code_hashes(user.id)) if user.totp_enabled else 0
+    return TotpStatusResponse(
+        enabled=user.totp_enabled,
+        backup_codes_remaining=remaining,
+    )
+
+
+@router.post("/me/totp/enroll", response_model=TotpEnrollResponse)
+def totp_enroll(
+    server: ServerState = Depends(get_server_state),
+    session: Session = Depends(require_session),
+) -> TotpEnrollResponse:
+    """Startet die TOTP-Einrichtung.
+
+    Erzeugt ein frisches Secret und speichert es **noch nicht** als
+    aktiv — erst nach erfolgreichem ``confirm`` schaltet TOTP scharf.
+    Wer den Flow abbricht, bleibt ohne TOTP.
+
+    Wiederholtes Enrollment ueberschreibt das vorherige Secret. Wenn
+    ``totp_enabled=True`` schon aktiv ist, schlagen wir 409 vor —
+    erst per ``disable`` deaktivieren, dann neu einrichten.
+    """
+    store = _user_store(server)
+    user = _require_multi_user_self(session, store)
+    if user.totp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "TOTP ist bereits aktiv. Erst deaktivieren, dann neu "
+                "einrichten."
+            ),
+        )
+    new_secret = totp_mod.generate_secret()
+    store.set_totp_secret(user.id, new_secret)
+    uri = totp_mod.provisioning_uri(new_secret, user.username)
+    return TotpEnrollResponse(
+        secret_base32=new_secret,
+        otpauth_uri=uri,
+        issuer=totp_mod.ISSUER,
+        digits=totp_mod.TOTP_DIGITS,
+        interval_s=totp_mod.TOTP_INTERVAL_S,
+    )
+
+
+@router.post("/me/totp/confirm", response_model=TotpConfirmResponse)
+def totp_confirm(
+    payload: TotpConfirmRequest,
+    server: ServerState = Depends(get_server_state),
+    session: Session = Depends(require_session),
+) -> TotpConfirmResponse:
+    """Bestaetigt das Enrollment mit einem aktuellen Authenticator-Code.
+
+    Erzeugt 8 Backup-Codes (Klartext, EINMALIG an den User zurueck) und
+    speichert deren Hashes. Setzt ``totp_enabled=True``. Ab jetzt ist
+    Login 2-stufig fuer diesen User.
+    """
+    store = _user_store(server)
+    user = _require_multi_user_self(session, store)
+    if user.totp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="TOTP ist bereits aktiv.",
+        )
+    secret = store.get_totp_secret(user.id)
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Kein laufendes Enrollment. Erst /enroll aufrufen.",
+        )
+    if not totp_mod.verify_code(secret, payload.code):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "Code passt nicht. Pruefe Uhrzeit auf dem Authenticator-"
+                "Geraet (+-30s toleriert)."
+            ),
+        )
+    plaintext_codes = totp_mod.generate_backup_codes()
+    hashes = [totp_mod.hash_backup_code(c) for c in plaintext_codes]
+    store.enable_totp(user.id, hashes)
+    _audit(
+        AuditEventKind.USER_UPDATED,
+        actor=user.username,
+        summary=f"TOTP aktiviert fuer '{user.username}' (8 Backup-Codes ausgestellt).",
+    )
+    return TotpConfirmResponse(enabled=True, backup_codes=plaintext_codes)
+
+
+@router.post("/me/totp/disable", status_code=status.HTTP_204_NO_CONTENT)
+def totp_disable(
+    payload: TotpDisableRequest,
+    server: ServerState = Depends(get_server_state),
+    session: Session = Depends(require_session),
+) -> None:
+    """Deaktiviert TOTP fuer den eingeloggten User.
+
+    Erfordert aktuelles Passwort UND aktuellen TOTP-Code (oder
+    Backup-Code) als Defense-in-Depth: ein gestohlenes Token reicht
+    nicht zum Deaktivieren von 2FA.
+    """
+    store = _user_store(server)
+    user = _require_multi_user_self(session, store)
+    if not user.totp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="TOTP war nicht aktiv.",
+        )
+    verified = store.authenticate(user.username, payload.current_password)
+    if verified is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Aktuelles Passwort falsch.",
+        )
+    secret = store.get_totp_secret(user.id)
+    code_ok = totp_mod.verify_code(secret, payload.code)
+    if not code_ok:
+        hashes = store.get_backup_code_hashes(user.id)
+        consumed, _ = totp_mod.verify_backup_code(payload.code, hashes)
+        if not consumed:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="TOTP-Code passt nicht.",
+            )
+    store.disable_totp(user.id)
+    _audit(
+        AuditEventKind.USER_UPDATED,
+        actor=user.username,
+        summary=f"TOTP deaktiviert fuer '{user.username}' (Self-Service).",
+    )
+
+
+@router.post("/{user_id}/totp/disable", status_code=status.HTTP_204_NO_CONTENT)
+def admin_totp_disable(
+    user_id: int,
+    server: ServerState = Depends(get_server_state),
+    admin: Session = Depends(require_admin),
+) -> None:
+    """Admin schaltet TOTP fuer einen User ab.
+
+    Recovery-Pfad falls der User Authenticator-App + Backup-Codes
+    verloren hat. Bewusst ohne Code-Verifikation — der Admin trifft die
+    Entscheidung. Wird strikt auditiert.
+    """
+    store = _user_store(server)
+    target = store.get_user(user_id)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User-ID {user_id} nicht gefunden.",
+        )
+    if not target.totp_enabled:
+        # Idempotent — Admin-Reset auf nicht-aktivem TOTP ist no-op + 204.
+        return
+    store.disable_totp(user_id)
+    assert admin.user is not None
+    _audit(
+        AuditEventKind.USER_UPDATED,
+        actor=admin.user.username,
+        summary=(
+            f"TOTP fuer '{target.username}' durch Admin "
+            f"'{admin.user.username}' zurueckgesetzt."
+        ),
+    )

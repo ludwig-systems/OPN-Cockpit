@@ -135,19 +135,38 @@
 
         <!-- Multi-User-Login (auth_backend=user-db, ready) -->
         <div class="login-view" data-view="multi-user" hidden>
-          <p class="login-hint">
-            Melde dich mit deinem Benutzernamen am Multi-User-Server an.
-          </p>
+          <div id="mu-login-form">
+            <p class="login-hint">
+              Melde dich mit deinem Benutzernamen am Multi-User-Server an.
+            </p>
 
-          <label class="form-label" for="mu-username">Benutzername</label>
-          <input id="mu-username" class="form-input" type="text" autocomplete="username" />
+            <label class="form-label" for="mu-username">Benutzername</label>
+            <input id="mu-username" class="form-input" type="text" autocomplete="username" />
 
-          <label class="form-label" for="mu-password">Passwort</label>
-          <input id="mu-password" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
+            <label class="form-label" for="mu-password">Passwort</label>
+            <input id="mu-password" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
 
-          <div class="form-error" id="mu-error" hidden></div>
+            <div class="form-error" id="mu-error" hidden></div>
 
-          <button class="btn-primary" id="mu-login-btn">Anmelden</button>
+            <button class="btn-primary" id="mu-login-btn">Anmelden</button>
+          </div>
+
+          <div id="mu-totp-panel" hidden>
+            <p class="login-hint">
+              Zwei-Faktor-Authentifizierung — gib den 6-stelligen Code aus
+              deiner Authenticator-App ein (oder einen Backup-Code).
+            </p>
+            <label class="form-label" for="mu-totp-code">Authenticator-Code</label>
+            <input id="mu-totp-code" class="form-input" type="text"
+                   autocomplete="one-time-code" inputmode="numeric"
+                   placeholder="123456 oder Backup-Code"
+                   spellcheck="false" data-lpignore="true" />
+            <div class="form-error" id="mu-totp-error" hidden></div>
+            <button class="btn-primary" id="mu-totp-submit">Bestaetigen</button>
+            <div class="login-secondary-row">
+              <button class="btn-link" id="mu-totp-cancel">Abbrechen</button>
+            </div>
+          </div>
 
           <div class="login-secondary-row">
             <button class="btn-link" id="theme-toggle-multi">Theme</button>
@@ -299,6 +318,12 @@
               <rect x="3" y="6.5" width="9" height="6" rx="1"/>
               <path d="M5 6.5V4.5a2.5 2.5 0 015 0v2"/>
               <circle cx="7.5" cy="9.5" r="0.6" fill="currentColor"/>
+            </svg>
+          </button>
+          <button class="icon-btn" id="totp-self-btn" title="2FA / TOTP einrichten" hidden>
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 7.5l2 2 4-4.5"/>
+              <circle cx="7.5" cy="7.5" r="5.5"/>
             </svg>
           </button>
           <button class="icon-btn" id="single-switch-btn" title="Anderen Tresor entsperren" hidden>
@@ -1559,6 +1584,65 @@
         <div class="modal-footer">
           <button class="btn-link" id="pwself-cancel">Abbrechen</button>
           <button class="btn-primary btn-primary-inline" id="pwself-submit">Speichern</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: TOTP (2FA) Self-Service ================ -->
+    <div class="modal-backdrop" id="totp-modal" hidden>
+      <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="totp-title">
+        <div class="modal-header">
+          <h2 id="totp-title">Zwei-Faktor-Authentifizierung (TOTP)</h2>
+          <button class="icon-btn modal-close" id="totp-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <p id="totp-status-msg" class="form-hint">Lade Status...</p>
+
+          <button class="btn-primary" id="totp-start-enroll-btn" hidden>Einrichten</button>
+
+          <div id="totp-enroll-block" hidden>
+            <p class="form-hint">
+              Scanne den QR-Code in deiner Authenticator-App (Google Authenticator,
+              Microsoft Authenticator, Aegis, Bitwarden, &hellip;) oder gib das
+              Secret manuell ein. Bestaetige dann mit dem aktuell angezeigten Code.
+            </p>
+            <label class="form-label">Provisioning-URI (fuer QR-Render)</label>
+            <code id="totp-uri-text" class="totp-code-block"></code>
+            <label class="form-label">Secret (Manuell-Eingabe-Fallback)</label>
+            <code id="totp-secret-text" class="totp-code-block"></code>
+            <label class="form-label" for="totp-confirm-code">6-stelliger Code</label>
+            <input id="totp-confirm-code" class="form-input" type="text"
+                   inputmode="numeric" autocomplete="off"
+                   placeholder="123456" data-lpignore="true" />
+            <button class="btn-primary" id="totp-confirm-btn">Bestaetigen + 2FA aktivieren</button>
+          </div>
+
+          <div id="totp-codes-block" hidden>
+            <p class="form-hint" style="color: var(--color-warn, #c8521b);">
+              <strong>Backup-Codes (einmalige Anzeige!)</strong> Speichere sie an
+              einem sicheren Ort. Pro Code kannst du dich einmalig anmelden, wenn
+              du keinen Authenticator-Zugriff hast.
+            </p>
+            <ol id="totp-backup-codes-list" class="totp-backup-list"></ol>
+          </div>
+
+          <div id="totp-disable-block" hidden>
+            <hr />
+            <p class="form-hint">2FA deaktivieren benoetigt aktuelles Passwort + aktuellen TOTP-/Backup-Code.</p>
+            <label class="form-label" for="totp-disable-pw">Aktuelles Passwort</label>
+            <input id="totp-disable-pw" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
+            <label class="form-label" for="totp-disable-code">TOTP- oder Backup-Code</label>
+            <input id="totp-disable-code" class="form-input" type="text" inputmode="numeric" data-lpignore="true" />
+            <button class="btn-danger" id="totp-disable-btn">2FA deaktivieren</button>
+          </div>
+
+          <div class="form-error" id="totp-error" hidden></div>
         </div>
       </div>
     </div>

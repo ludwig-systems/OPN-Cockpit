@@ -4,6 +4,63 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### Zwei-Faktor-Authentifizierung (TOTP, opt-in)
+
+Multi-User-Mode kennt jetzt TOTP nach RFC 6238 als optionale 2FA pro User:
+
+- **Self-Service-Enrollment:** "Mein Konto → TOTP" zeigt Provisioning-URI
+  (für QR-Render in der Authenticator-App, z.&nbsp;B. Google/Microsoft/Aegis/
+  Bitwarden) plus das Base32-Secret für die manuelle Eingabe. Nach
+  Bestätigung mit dem ersten 6-stelligen Code schaltet 2FA scharf und der
+  Server liefert **8 Backup-Codes** zur einmaligen Anzeige.
+- **Zwei-Schritt-Login:** ``POST /api/auth/login`` antwortet bei aktivem
+  TOTP mit ``totp_required=true`` plus einer 5-Minuten-Challenge (signiert
+  via HMAC-SHA256). ``POST /api/auth/login/totp`` schließt mit dem
+  6-stelligen Code oder einem Backup-Code ab.
+- **Defense-in-Depth beim Disable:** Selbst-Deaktivierung verlangt
+  **aktuelles Passwort + aktuellen Code**, damit ein gestohlener Session-
+  Token allein 2FA nicht ausschaltet.
+- **Admin-Recovery:** ``POST /api/users/{id}/totp/disable`` schaltet 2FA
+  für einen anderen User ab (Audit-protokolliert) — Recovery-Pfad falls
+  Authenticator + Backup-Codes verloren gingen.
+- **Persistenz:** ``totp_secret``, ``totp_enabled`` und die SHA-256-Hashes
+  der Backup-Codes liegen in ``users.db``; ein verbrauchter Backup-Code
+  wird automatisch entfernt.
+
+Neue Abhängigkeit: ``pyotp>=2.9``. Single-User-PAW-Modus ist unverändert
+(kein User-Konzept, kein 2FA).
+
+### Security-Audit (Gesamtbetrachtung)
+
+Vollständiger Self-Audit über die gesamte v0.8-Codebasis (siehe
+``docs/SECURITY-AUDIT-FULL-0.8.local.md``). Sieben Findings gefixt,
+fünf akzeptiert.
+
+- **G1 (HIGH)** — OPNsense-Backup-XMLs (``backups/<device>/<uuid>.xml.gz``)
+  werden jetzt mit ``chmod 0o600`` geschrieben (Files + Index). Schützt
+  Cert/Key/PSK-Material in den Configs auf Multi-User-Linux gegen
+  unprivilegierte Lokal-User. Windows-NTFS no-op (Service-User ist Owner).
+- **G2 (MEDIUM)** — Rate-Limiter respektiert ``X-Forwarded-For`` nur noch
+  wenn ``OPNCOCKPIT_TRUST_FORWARDED_FOR=true`` gesetzt ist. Default off
+  verhindert XFF-Spoofing-Bypass bei Direkt-Bind ohne Reverse-Proxy.
+- **G3 (MEDIUM)** — File-Picker-Endpoints (``/api/files/browse``,
+  ``/pick-folder``, ``/pick-file``) prüfen jetzt auf Loopback-Origin via
+  ``ipaddress.is_loopback`` plus Marker-Whitelist (``localhost``,
+  ``testclient``). Schutz, falls Single-User versehentlich auf 0.0.0.0
+  gebunden wurde.
+- **G4 (LOW)** — Bearer-Authorization-Header wird jetzt RFC-6750-konform
+  case-insensitive akzeptiert.
+- **G5 (LOW)** — ``audit.jsonl`` wird initial mit ``O_CREAT`` Mode 0o600
+  angelegt plus Defense-in-Depth ``chmod`` bei jedem Write.
+- **G6 (LOW)** — Neuer ``Permissions-Policy``-Header sperrt nicht
+  gebrauchte Browser-Features (geolocation, camera, microphone, payment,
+  usb, sensors).
+- **G7 (LOW)** — Neuer ``USER_LOGIN_SUCCESS``-Audit-Event-Kind ersetzt das
+  überladene ``VAULT_OPENED`` für Multi-User-Logins; ermöglicht saubere
+  Login-Forensik im UI-Filter.
+
+Akzeptierte Findings (G8–G13) im Audit-Doku dokumentiert mit Begründung.
+
 ### TLS-Vertrauen + Cockpit-eigenes HTTPS
 
 **Security-Härtung (Post-Audit, gleicher Release):**

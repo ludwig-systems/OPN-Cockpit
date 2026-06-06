@@ -33,13 +33,25 @@ def require_session_with_token(
     Wird intern von ``require_session`` benutzt und in der Logout-Route,
     die das Token zur Revoke-Logik braucht.
     """
-    if not authorization or not authorization.startswith(BEARER_PREFIX):
+    # Audit-Finding G4: RFC 6750 schreibt den Scheme-Namen "Bearer" als
+    # case-insensitive vor. Vorher wurde nur "Bearer " (exakt) akzeptiert;
+    # ein Browser/Client mit kleingeschriebenem "bearer" hatte das Token
+    # also nicht durchgereicht. Wir splitten am ersten Whitespace und
+    # vergleichen scheme-case-insensitive.
+    if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Authorization header.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = authorization[len(BEARER_PREFIX) :].strip()
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization header.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = parts[1].strip()
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

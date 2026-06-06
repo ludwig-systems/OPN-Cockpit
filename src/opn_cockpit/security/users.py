@@ -13,6 +13,8 @@ und ``VaultAuthBackend``).
 
 from __future__ import annotations
 
+import contextlib
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -44,6 +46,10 @@ class User:
     oder Initial-Passwort angelegt wurde (z. B. der Default-Admin
     `admin` / `OPN-Cockpit!`). Solange das Flag steht, sperrt der Web-
     Layer alle Aktionen ausser dem Self-Service-Passwort-Wechsel.
+
+    ``totp_enabled`` ist True, sobald der User die TOTP-Einrichtung
+    abgeschlossen hat (Secret + Bestaetigung mit aktuellem Code). Wird
+    Login erzwingt dann den 2-Schritt-Flow.
     """
 
     id: int
@@ -54,6 +60,7 @@ class User:
     last_login_at_iso: str | None
     disabled: bool
     must_change_password: bool = False
+    totp_enabled: bool = False
 
 
 def default_users_db_path() -> Path:
@@ -105,6 +112,22 @@ class UserStore:
                 self._conn.execute(
                     "ALTER TABLE users ADD COLUMN must_change_password "
                     "INTEGER NOT NULL DEFAULT 0"
+                )
+            # TOTP-Felder (v0.8). totp_secret bleibt leer bis Enrollment.
+            # totp_backup_codes_json haelt eine JSON-Liste von SHA-256-
+            # Hashes; jeder verbrauchte Backup-Code wird daraus geloescht.
+            if "totp_secret" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE users ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''",
+                )
+            if "totp_enabled" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+                )
+            if "totp_backup_codes_json" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE users ADD COLUMN totp_backup_codes_json "
+                    "TEXT NOT NULL DEFAULT '[]'",
                 )
 
     # ----- CRUD -----
@@ -275,6 +298,94 @@ class UserStore:
             )
         return cursor.rowcount > 0
 
+    # ----- TOTP -----
+
+    def get_totp_secret(self, user_id: int) -> str:
+        """Liefert das aktuelle TOTP-Secret (leer wenn nicht gesetzt)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT totp_secret FROM users WHERE id = ?", (user_id,),
+            ).fetchone()
+        if row is None:
+            return ""
+        return str(row["totp_secret"] or "")
+
+    def set_totp_secret(self, user_id: int, secret: str) -> None:
+        """Schreibt das TOTP-Secret (ohne ``totp_enabled`` zu setzen).
+
+        Wird beim Enrollment-Start aufgerufen. Erst wenn der User den ersten
+        Code bestaetigt, wird via :meth:`enable_totp` das Flag gesetzt.
+        Solange ``totp_enabled=0`` ist, geht der Login wie bisher ohne 2FA.
+        """
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "UPDATE users SET totp_secret = ? WHERE id = ?",
+                (secret, user_id),
+            )
+        if cursor.rowcount == 0:
+            raise UserStoreError(f"User-ID {user_id} nicht gefunden.")
+
+    def enable_totp(self, user_id: int, backup_code_hashes: list[str]) -> None:
+        """Setzt ``totp_enabled=1`` + speichert die Backup-Code-Hashes.
+
+        Wird nach erfolgreicher Code-Bestaetigung im Enrollment-Flow
+        aufgerufen. Backup-Codes liegen als SHA-256-Hashes in einer
+        JSON-Liste.
+        """
+        payload = json.dumps(backup_code_hashes)
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "UPDATE users SET totp_enabled = 1, totp_backup_codes_json = ? "
+                "WHERE id = ?",
+                (payload, user_id),
+            )
+        if cursor.rowcount == 0:
+            raise UserStoreError(f"User-ID {user_id} nicht gefunden.")
+
+    def disable_totp(self, user_id: int) -> None:
+        """Deaktiviert TOTP komplett: Secret + Flag + Backup-Codes weg."""
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "UPDATE users SET totp_secret = '', totp_enabled = 0, "
+                "totp_backup_codes_json = '[]' WHERE id = ?",
+                (user_id,),
+            )
+        if cursor.rowcount == 0:
+            raise UserStoreError(f"User-ID {user_id} nicht gefunden.")
+
+    def get_backup_code_hashes(self, user_id: int) -> list[str]:
+        """Liefert die aktuelle Liste der Backup-Code-Hashes."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT totp_backup_codes_json FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+        if row is None:
+            return []
+        raw = row["totp_backup_codes_json"] or "[]"
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [str(h) for h in parsed if isinstance(h, str)]
+
+    def set_backup_code_hashes(self, user_id: int, hashes: list[str]) -> None:
+        """Persistiert die aktualisierte Backup-Code-Liste.
+
+        Wird vom Login-Flow aufgerufen, wenn ein Backup-Code verbraucht
+        wurde (Liste hat ein Element weniger).
+        """
+        payload = json.dumps(hashes)
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "UPDATE users SET totp_backup_codes_json = ? WHERE id = ?",
+                (payload, user_id),
+            )
+        if cursor.rowcount == 0:
+            raise UserStoreError(f"User-ID {user_id} nicht gefunden.")
+
     def count(self) -> int:
         with self._lock:
             row = self._conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()
@@ -299,10 +410,11 @@ def _row_to_user(row: sqlite3.Row, *, last_login_override: str | None = None) ->
     # must_change_password kann fehlen wenn die DB von vor dem Schema-Update
     # kommt — _init_schema-Migration zieht es im naechsten Open nach.
     mcp = False
-    try:
+    with contextlib.suppress(IndexError, KeyError):
         mcp = bool(row["must_change_password"])
-    except (IndexError, KeyError):
-        pass
+    totp_enabled = False
+    with contextlib.suppress(IndexError, KeyError):
+        totp_enabled = bool(row["totp_enabled"])
     return User(
         id=row["id"],
         username=row["username"],
@@ -312,6 +424,7 @@ def _row_to_user(row: sqlite3.Row, *, last_login_override: str | None = None) ->
         last_login_at_iso=last_login_override or row["last_login_at_iso"],
         disabled=bool(row["disabled"]),
         must_change_password=mcp,
+        totp_enabled=totp_enabled,
     )
 
 

@@ -149,11 +149,17 @@ def _bootstrap_limiter(request: Request) -> RateLimiter:
 
 
 def _client_ip(request: Request) -> str:
-    fwd = request.headers.get("X-Forwarded-For", "")
-    if fwd:
-        first = fwd.split(",", 1)[0].strip()
-        if first:
-            return first[:64]
+    """Client-IP fuer Rate-Limit. Audit-Finding G2: XFF nur wenn
+    ``OPNCOCKPIT_TRUST_FORWARDED_FOR=true`` (Reverse-Proxy-Setup)."""
+    import os  # noqa: PLC0415 — vermeidet zirkulaere Imports im Bootstrap
+    if os.environ.get("OPNCOCKPIT_TRUST_FORWARDED_FOR", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }:
+        fwd = request.headers.get("X-Forwarded-For", "")
+        if fwd:
+            first = fwd.split(",", 1)[0].strip()
+            if first:
+                return first[:64]
     client = request.client
     return client.host if client else "unknown"
 

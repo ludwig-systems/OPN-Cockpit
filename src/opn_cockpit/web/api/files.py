@@ -16,6 +16,7 @@ Sicherheits-Profil:
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import string
 import sys
@@ -32,6 +33,51 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 # Native Folder-Picker (Windows): SHBrowseForFolderW darf nicht parallel
 # aufgerufen werden — sonst kollidieren mehrere offene Dialoge.
 _dialog_lock = threading.Lock()
+
+# Audit-Finding G3: file-Picker-Endpoints sind un-auth (Setup-Wizard
+# braucht sie vor Login). Damit niemand sie aus dem LAN nutzen kann
+# wenn der Single-User-Mode versehentlich auf 0.0.0.0 gebunden wurde,
+# erlauben wir den Picker nur von Loopback-Origins.
+#
+# ``request.client.host`` ist die echte Socket-Source-IP vom ASGI-Server
+# (uvicorn) - die kann nicht ueber Header-Spoofing manipuliert werden,
+# anders als X-Forwarded-For. Bei ``starlette.testclient.TestClient`` ist
+# der Wert konventionell ``"testclient"``; wir lassen das durch, damit
+# Tests laufen.
+_LOOPBACK_LITERAL_HOSTS: frozenset[str] = frozenset({
+    "localhost", "testclient",
+})
+
+
+def _is_loopback_origin(host: str) -> bool:
+    if not host:
+        return False
+    if host in _LOOPBACK_LITERAL_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _require_loopback_origin(request: Request) -> None:
+    """Wirft 403 wenn der Request nicht von einer Loopback-Adresse kommt.
+
+    Schutz fuer File-Picker und Folder-Browser im Single-User-Mode, falls
+    der Bind versehentlich auf 0.0.0.0 oder eine LAN-Adresse gestellt wurde.
+    Im Multi-User-Mode greift schon vorher der ``is_single_user_mode``-Check.
+    """
+    client = request.client
+    host = client.host if client else ""
+    if not _is_loopback_origin(host):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "File-Picker ist nur von Loopback erreichbar (Single-User-PAW). "
+                "Fuer Remote-Bedienung den Multi-User-Server-Mode mit "
+                "manueller Pfad-Eingabe nutzen."
+            ),
+        )
 
 
 class BrowseEntry(BaseModel):
@@ -104,6 +150,7 @@ def browse(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Folder-Picker ist nur im Single-User-Mode verfuegbar.",
         )
+    _require_loopback_origin(request)
 
     if not path:
         # Erst-Aufruf ohne Pfad: Windows -> Drive-Liste, Unix -> Home.
@@ -259,6 +306,7 @@ def pick_folder_native(request: Request) -> PickFolderResponse:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Native Picker ist nur im Single-User-Mode verfuegbar.",
         )
+    _require_loopback_origin(request)
     if sys.platform != "win32":
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -386,6 +434,7 @@ def pick_file_native(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Native Picker ist nur im Single-User-Mode verfuegbar.",
         )
+    _require_loopback_origin(request)
     if sys.platform != "win32":
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,

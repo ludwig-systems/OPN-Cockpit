@@ -108,6 +108,12 @@ def create_app() -> FastAPI:
         # Bootstrap ist seltener als Login — strenger limitieren.
         max_attempts=5, window_s=60 * 60.0, cooldown_s=10 * 60.0,
     )
+    # TOTP-Challenge-HMAC-Secret. Wird beim ersten Login-Schritt
+    # gebraucht um die Challenge zu signieren, beim zweiten zum
+    # Verifizieren. Lazy-laden + im App-State haengen damit Worker und
+    # Background-Threads dasselbe Secret sehen.
+    from opn_cockpit.security.totp import load_or_generate_challenge_secret  # noqa: PLC0415
+    app.state.totp_challenge_secret = load_or_generate_challenge_secret()
 
     _install_security_middleware(app)
 
@@ -190,6 +196,12 @@ def _install_security_middleware(app: FastAPI) -> None:
         "base-uri 'self'; "
         "form-action 'self'"
     )
+    # Audit-Finding G6: Permissions-Policy als Defense-in-Depth gegen
+    # Browser-Features, die das Tool nie braucht.
+    permissions_policy = (
+        "geolocation=(), microphone=(), camera=(), payment=(), "
+        "usb=(), accelerometer=(), gyroscope=(), magnetometer=()"
+    )
     hsts_enabled = os.environ.get("OPNCOCKPIT_HSTS_ENABLED", "").strip() in {"1", "true", "yes"}
     hsts_max_age = os.environ.get("OPNCOCKPIT_HSTS_MAX_AGE", "31536000").strip()
     hsts_header = f"max-age={hsts_max_age}; includeSubDomains"
@@ -201,6 +213,7 @@ def _install_security_middleware(app: FastAPI) -> None:
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("Content-Security-Policy", csp)
+        response.headers.setdefault("Permissions-Policy", permissions_policy)
         if hsts_enabled:
             response.headers.setdefault("Strict-Transport-Security", hsts_header)
         return response
