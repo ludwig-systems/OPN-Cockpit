@@ -5861,6 +5861,18 @@
       const data = await response.json();
       $('#totp-secret-text').textContent = data.secret_base32;
       $('#totp-uri-text').textContent = data.otpauth_uri;
+      const qrWrap = $('#totp-qr-wrapper');
+      if (qrWrap) {
+        // SVG kommt direkt vom Server (qrcode-Library, kein Pillow).
+        // Wir leeren den Wrapper und setzen innerHTML — CSP erlaubt
+        // 'self' fuer style-src + img-src; SVG-Inline ist als
+        // gestreamter Content erlaubt.
+        if (data.qr_svg) {
+          qrWrap.innerHTML = data.qr_svg;
+        } else {
+          qrWrap.innerHTML = '<p class="form-hint">QR-Render fehlgeschlagen — bitte Secret manuell eintragen (siehe unten).</p>';
+        }
+      }
       $('#totp-start-enroll-btn').hidden = true;
       $('#totp-enroll-block').hidden = false;
       $('#totp-confirm-code').value = '';

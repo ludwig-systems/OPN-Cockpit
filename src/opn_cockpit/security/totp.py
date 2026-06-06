@@ -75,13 +75,42 @@ def provisioning_uri(secret: str, username: str) -> str:
 
     Format: ``otpauth://totp/<Issuer>:<User>?secret=<...>&issuer=<Issuer>``.
     Authenticator-Apps (Google, Microsoft, Aegis, Bitwarden) rendern daraus
-    den QR-Code; Frontends koennen das URI per JS-Library lokal in einen
-    QR umsetzen — kein Server-Side-QR-Rendering noetig.
+    den QR-Code.
     """
     return pyotp.TOTP(secret, digits=TOTP_DIGITS, interval=TOTP_INTERVAL_S).provisioning_uri(
         name=username,
         issuer_name=ISSUER,
     )
+
+
+def render_qr_svg(otpauth_uri: str) -> str:
+    """Rendert die ``otpauth://``-URI als SVG-String (kein Pillow noetig).
+
+    Output: ein vollstaendiges ``<svg>...</svg>``-Element. Das Frontend
+    kann es direkt per ``innerHTML`` einsetzen, oder als Base64-Data-URI
+    in ein ``<img src="">`` packen.
+
+    Wir nutzen ``SvgPathImage`` (eine zusammenhaengende SVG-Path-Geometrie)
+    statt ``SvgImage`` (ein ``<rect>`` pro Modul) — das spart bei einem
+    typischen otpauth-QR ~70% Output-Bytes.
+
+    Bei Render-Fehlern wird ein leerer String zurueckgegeben; der
+    Aufrufer hat dann immer noch den Klartext-URI + das Base32-Secret als
+    Fallback fuer Manual-Eingabe.
+    """
+    import qrcode  # noqa: PLC0415 — lazy, hat einen messbaren Import-Footprint
+    import qrcode.image.svg  # noqa: PLC0415
+
+    try:
+        img = qrcode.make(
+            otpauth_uri,
+            image_factory=qrcode.image.svg.SvgPathImage,
+            box_size=8,
+            border=2,
+        )
+        return str(img.to_string(encoding="unicode"))
+    except (ValueError, OSError):
+        return ""
 
 
 def verify_code(secret: str, code: str) -> bool:

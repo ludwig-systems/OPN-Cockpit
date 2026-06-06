@@ -139,14 +139,18 @@ class TotpLoginRequest(BaseModel):
 class TotpEnrollResponse(BaseModel):
     """Antwort auf POST /api/users/me/totp/enroll.
 
-    Liefert das Secret + die otpauth-URI. Frontend zeigt das als QR-Code
-    UND als Klartext-Secret (Manual-Eingabe). User muss anschliessend
-    einen aktuellen Code via /confirm-Endpoint einreichen — erst dann
-    wird TOTP scharf geschaltet.
+    Liefert Secret + otpauth-URI + fertig gerendertes SVG des QR-Codes.
+    Frontend zeigt den QR (zum Scannen) plus das Base32-Secret (Manual-
+    Eingabe-Fallback). User muss anschliessend einen aktuellen Code via
+    /confirm-Endpoint einreichen — erst dann wird TOTP scharf geschaltet.
+
+    ``qr_svg`` kann leer sein, falls die Server-Side-QR-Generation
+    fehlschlaegt; in dem Fall hat der Client immer noch URI + Secret.
     """
 
     secret_base32: str
     otpauth_uri: str
+    qr_svg: str = ""
     issuer: str
     digits: int
     interval_s: int

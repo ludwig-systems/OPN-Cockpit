@@ -1612,10 +1612,14 @@
               Microsoft Authenticator, Aegis, Bitwarden, &hellip;) oder gib das
               Secret manuell ein. Bestaetige dann mit dem aktuell angezeigten Code.
             </p>
-            <label class="form-label">Provisioning-URI (fuer QR-Render)</label>
-            <code id="totp-uri-text" class="totp-code-block"></code>
-            <label class="form-label">Secret (Manuell-Eingabe-Fallback)</label>
-            <code id="totp-secret-text" class="totp-code-block"></code>
+            <div id="totp-qr-wrapper" class="totp-qr-wrapper"></div>
+            <details class="totp-fallback-details">
+              <summary>QR scannt nicht? Secret manuell eintragen</summary>
+              <label class="form-label">Secret (Base32)</label>
+              <code id="totp-secret-text" class="totp-code-block"></code>
+              <label class="form-label">Provisioning-URI</label>
+              <code id="totp-uri-text" class="totp-code-block"></code>
+            </details>
             <label class="form-label" for="totp-confirm-code">6-stelliger Code</label>
             <input id="totp-confirm-code" class="form-input" type="text"
                    inputmode="numeric" autocomplete="off"

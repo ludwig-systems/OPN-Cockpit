@@ -413,6 +413,7 @@ def totp_enroll(
     return TotpEnrollResponse(
         secret_base32=new_secret,
         otpauth_uri=uri,
+        qr_svg=totp_mod.render_qr_svg(uri),
         issuer=totp_mod.ISSUER,
         digits=totp_mod.TOTP_DIGITS,
         interval_s=totp_mod.TOTP_INTERVAL_S,
