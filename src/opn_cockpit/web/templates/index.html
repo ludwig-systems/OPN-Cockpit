@@ -651,6 +651,7 @@
                 Cisco-Style "commit-confirmed": nach Apply hat man X Sekunden zum
                 Bestaetigen, sonst rollt Cockpit per SSH zum Pre-Apply-Backup zurueck.
                 Voraussetzung: SSH-Zugang per Private-Key.
+                <a href="#" id="ad-ssh-guide-link" class="btn-link" style="margin-left:6px;">Anleitung</a>
               </div>
             </div>
           </div>
@@ -690,6 +691,105 @@
     </div>
 
     <!-- (Standalone Aliase-Modal entfernt: ist jetzt ein Tab im Device-Modal.) -->
+
+    <!-- ================ MODAL: SSH-Key-Anleitung ================ -->
+    <div class="modal-backdrop" id="ssh-guide-modal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="ssh-guide-title">
+        <div class="modal-header">
+          <h2 id="ssh-guide-title">SSH-Key fuer Safety-Net einrichten</h2>
+          <button class="icon-btn modal-close" id="ssh-guide-close" aria-label="Schliessen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body ssh-guide-body">
+          <p class="form-hint">
+            Cockpit braucht einen <strong>SSH-Private-Key</strong>, mit dem es
+            sich im Notfall (Apply hat die Firewall ausgesperrt) auf die OPNsense
+            einloggen und das Pre-Apply-Backup wiederherstellen kann. Drei
+            Schritte:
+          </p>
+
+          <h3 class="modal-section-title">1. Key-Paar auf deinem Rechner erzeugen</h3>
+          <p class="form-hint">
+            Ed25519 ist klein und sicher. Erzeuge das Paar mit deinem
+            OS-Tool deiner Wahl:
+          </p>
+          <h4 class="ssh-guide-os-title">Windows (PowerShell oder cmd)</h4>
+          <code class="totp-code-block">ssh-keygen -t ed25519 -f opncockpit-safetynet -C "opncockpit-safetynet@$env:COMPUTERNAME"</code>
+          <h4 class="ssh-guide-os-title">Linux / macOS</h4>
+          <code class="totp-code-block">ssh-keygen -t ed25519 -f opncockpit-safetynet -C "opncockpit-safetynet@$(hostname)"</code>
+          <p class="form-hint">
+            <strong>Passphrase leer lassen</strong> (Eingabe bestaetigen mit Enter
+            x2) — Cockpit kann keine Passphrase-geschuetzten Keys oeffnen.
+            Ergebnis: zwei Dateien
+            <code>opncockpit-safetynet</code> (Private-Key, geheim halten) und
+            <code>opncockpit-safetynet.pub</code> (Public-Key).
+          </p>
+
+          <h3 class="modal-section-title">2. Public-Key auf der OPNsense hinterlegen</h3>
+          <p class="form-hint">
+            In der OPNsense-Web-GUI:
+          </p>
+          <ol class="ssh-guide-steps">
+            <li><strong>System &rarr; Access &rarr; Users</strong> oeffnen.</li>
+            <li>Den User waehlen, mit dem Cockpit per SSH einloggen darf
+              (typisch <code>root</code> bei OPNsense — alternativ ein
+              dedizierter <code>opncockpit</code>-Service-User mit
+              Shell-Zugang).</li>
+            <li>Feld <strong>"authorized keys"</strong> aufsuchen und den
+              <strong>Inhalt der <code>.pub</code>-Datei</strong> hineinkopieren
+              (eine Zeile, beginnt mit <code>ssh-ed25519 ...</code>).</li>
+            <li>Speichern. Pruefen: <code>ssh -i opncockpit-safetynet root@opnsense.lab</code>
+              sollte ohne Passwort durchgehen.</li>
+          </ol>
+          <p class="form-hint">
+            Falls SSH auf der OPNsense noch nicht erlaubt ist:
+            <strong>System &rarr; Settings &rarr; Administration</strong> &rarr;
+            <em>"Enable Secure Shell"</em> + <em>"Permit root user login"</em> aktivieren.
+            Erlaube mindestens "Permit password login" deaktivieren wenn moeglich
+            (Key-only).
+          </p>
+
+          <h3 class="modal-section-title">3. Private-Key in Cockpit einfuegen</h3>
+          <p class="form-hint">
+            Inhalt der Private-Key-Datei (ohne <code>.pub</code>!) in den
+            <strong>SSH-Private-Key (PEM)</strong>-Bereich des Geraete-Modals
+            kopieren — Cockpit verschluesselt ihn im Tresor.
+          </p>
+          <h4 class="ssh-guide-os-title">Windows (PowerShell)</h4>
+          <code class="totp-code-block">Get-Content opncockpit-safetynet | Set-Clipboard</code>
+          <h4 class="ssh-guide-os-title">Linux / macOS</h4>
+          <code class="totp-code-block">cat opncockpit-safetynet | (xclip -selection clipboard 2>/dev/null || pbcopy)</code>
+          <p class="form-hint">
+            Im Modal "SSH-User" auf den OPNsense-User setzen (oft
+            <code>root</code>) und "SSH-Port" anpassen falls OPNsense nicht
+            auf 22 hoert. Danach "Test-Connection" im Info-Tab des Geraetes —
+            dort gibt es kein SSH-Probe, aber ein erfolgreicher API-Test
+            sagt zumindest dass Host erreichbar ist. Der erste echte
+            SSH-Login findet erst beim Safety-Net-Rollback statt.
+          </p>
+
+          <h3 class="modal-section-title">Sicherheits-Hinweise</h3>
+          <ul class="ssh-guide-steps">
+            <li>Den Private-Key auf deinem Rechner nach dem Upload
+              <strong>loeschen</strong> oder in einen Password-Manager
+              packen — er liegt im Cockpit-Tresor verschluesselt sicher.</li>
+            <li>Pro Cockpit-Installation einen <strong>eigenen Key</strong>
+              — nie den gleichen Key auch fuer interaktive SSH-Logins
+              verwenden.</li>
+            <li>Wer den Cockpit-Tresor entsperren kann, hat damit auch
+              SSH-Zugang zu allen Firewalls. Master-Passwort entsprechend
+              waehlen.</li>
+          </ul>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="ssh-guide-cancel">Schliessen</button>
+        </div>
+      </div>
+    </div>
 
     <!-- ================ MODAL: Geräte-Detail (mit Tabs) ================ -->
     <div class="modal-backdrop" id="device-modal" hidden>

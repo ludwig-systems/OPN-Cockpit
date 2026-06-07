@@ -122,6 +122,8 @@ from opn_cockpit.web.api.schemas import (
     RuleEntryResponse,
     SyncAliasRequest,
     SyncAliasResponse,
+    SyncUnboundHostRequest,
+    SyncUnboundHostResponse,
     TagSummary,
     UnboundDomainEntryResponse,
     UnboundForwardEntryResponse,
@@ -922,6 +924,103 @@ def sync_alias_from_master(
         source_summary=(
             f"{source.name} ({source.type}, "
             f"{len(source.content)} Eintraege) von {master.name}"
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/inventory/compare/sync-unbound-hosts - Master -> Targets uebernehmen
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/compare/sync-unbound-hosts",
+    response_model=SyncUnboundHostResponse,
+)
+def sync_unbound_host_from_master(
+    payload: SyncUnboundHostRequest,
+    session: Session = Depends(require_session),
+) -> SyncUnboundHostResponse:
+    """Holt einen Host-Override vom Master und erzeugt einen Plan fuer die Targets.
+
+    Analog zu :func:`sync_alias_from_master`. Identitaet ist
+    ``(host, domain)``; Targets bekommen einen ``add_unbound_host``-Plan.
+    Existiert der Eintrag auf einem Target schon identisch, markiert der
+    Planner ihn als SKIP — keine Doppelanlage.
+    """
+    from opn_cockpit.core.objects.unbound import UnboundHostSpec  # noqa: PLC0415
+    from opn_cockpit.web.api.plans import (  # noqa: PLC0415
+        _devices_or_404,
+        _generate_and_save_plan,
+    )
+
+    require_write_role(session)
+
+    visible = filter_devices_for(session.opened.data.devices, session)
+    visible_by_id = {d.id: d for d in visible}
+    master = visible_by_id.get(payload.master_device_id)
+    if master is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Master-Geraet '{payload.master_device_id}' nicht sichtbar.",
+        )
+
+    # Master-Config holen + Host-Override extrahieren
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    tgt = HttpTarget(host=master.host, port=master.port, verify=master.tls_verify)
+    try:
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            master_xml = download_backup(client, tgt, master.api_key, master.api_secret)
+    except OpnCockpitError as exc:
+        reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Master-Geraet '{master.name}' nicht erreichbar: {reason}",
+        ) from exc
+
+    # display_name matchen: f"{host}.{domain}" oder f"{host}" wenn domain leer.
+    target_display = payload.display_name.strip().lower()
+    source = next(
+        (h for h in extract_unbound_hosts(master_xml)
+         if (
+             (f"{h.host}.{h.domain}" if h.domain else h.host).lower()
+             == target_display
+         )),
+        None,
+    )
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Host-Override '{payload.display_name}' existiert auf "
+                f"Master-Geraet '{master.name}' nicht."
+            ),
+        )
+
+    target_devices = _devices_or_404(session, payload.target_device_ids)
+    spec = UnboundHostSpec(
+        host=source.host,
+        domain=source.domain,
+        server=source.server,
+        description=source.description,
+        enabled=source.enabled,
+    )
+    plan = _generate_and_save_plan(
+        session=session,
+        action="add_unbound_host",
+        subsystem="unbound_hosts",
+        spec=spec,
+        devices=target_devices,
+    )
+
+    return SyncUnboundHostResponse(
+        plan_id=plan.plan_id,
+        host=source.host,
+        domain=source.domain,
+        target_count=len(target_devices),
+        source_summary=(
+            f"{source.host}.{source.domain} → {source.server} von {master.name}"
         ),
     )
 

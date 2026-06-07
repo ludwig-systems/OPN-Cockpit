@@ -713,6 +713,29 @@ class SyncAliasResponse(BaseModel):
     """Kurzfassung was als Master uebernommen wurde."""
 
 
+class SyncUnboundHostRequest(BaseModel):
+    """Sync-Aktion fuer Unbound-Host-Overrides: pull vom Master, pushe Plan
+    zu Targets.
+
+    Identitaet ist ``display_name`` = ``f"{host}.{domain}"`` (der Row-Key
+    aus der Compare-Matrix). Server splittet das beim Match gegen die
+    Master-Eintraege — die echten host/domain-Felder werden aus dem
+    Master-Item gezogen, nicht aus dem display_name geparst.
+    """
+
+    master_device_id: str = Field(..., min_length=1)
+    target_device_ids: list[str] = Field(..., min_length=1)
+    display_name: str = Field(..., min_length=1)
+
+
+class SyncUnboundHostResponse(BaseModel):
+    plan_id: str
+    host: str
+    domain: str
+    target_count: int
+    source_summary: str
+
+
 class AliasEntryResponse(BaseModel):
     name: str
     type: str

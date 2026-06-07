@@ -1698,6 +1698,28 @@
     }
   }
 
+  async function doSyncUnboundHost(displayName, masterId, targetIds) {
+    try {
+      const r = await apiPost('/api/inventory/compare/sync-unbound-hosts', {
+        master_device_id: masterId,
+        target_device_ids: targetIds,
+        display_name: displayName,
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Sync fehlgeschlagen (${r.status}).`);
+        return;
+      }
+      const data = await r.json();
+      showToast(`Plan erzeugt: ${data.source_summary} → ${data.target_count} Gerät(e)`);
+      closeCompareModal();
+      await openExistingPlanInPreview(data.plan_id);
+    } catch (err) {
+      showToast(`Sync fehlgeschlagen: ${err.message}`);
+    }
+  }
+
   async function openExistingPlanInPreview(planId) {
     // Holt einen bereits erzeugten Plan und oeffnet den Plan-Modal direkt
     // in der Vorschau-Phase (statt im leeren Input-Form). Wird vom Sync-
@@ -1710,7 +1732,12 @@
         return;
       }
       currentPlan = await response.json();
-      planMode = currentPlan.subsystem === 'routes' ? 'route' : 'alias';
+      // planMode steuert nur das Plan-Input-Form (was wir hier eh ueberspringen,
+      // wir landen direkt in preview). Subsystem-spezifische Mapping:
+      const sub = currentPlan.subsystem;
+      if (sub === 'routes') planMode = 'route';
+      else if (sub === 'unbound_hosts') planMode = 'unbound';
+      else planMode = 'alias';
       retryDeviceIds = null;
       planPhase = 'preview';
       $('#plan-modal-title').textContent = 'Sync: Plan-Vorschau';
@@ -1849,8 +1876,11 @@
       nameSpan.style.marginLeft = '6px';
       nameTd.appendChild(nameSpan);
       // Sync-Button (Master = Spalte 0). Nur sichtbar wenn Master einen
-      // Wert hat UND es Drift / Absent-Cells gibt.
-      if (!row.uniform && data.subsystem === 'aliases') {
+      // Wert hat UND es Drift / Absent-Cells gibt. Aktuell unterstuetzt:
+      // - 'aliases' (Sync per alias_name)
+      // - 'unbound' (Sync per display_name = host.domain) — Host-Overrides
+      const supportsSync = data.subsystem === 'aliases' || data.subsystem === 'unbound';
+      if (!row.uniform && supportsSync) {
         const masterCell = cellsByDevice[masterId];
         if (masterCell && masterCell.status === 'present') {
           const syncBtn = document.createElement('button');
@@ -1858,17 +1888,22 @@
           syncBtn.className = 'btn-link compare-sync-btn';
           syncBtn.textContent = 'Sync ←';
           syncBtn.title = `'${colsById[masterId].device_name}' als Master uebernehmen`;
+          const label = data.subsystem === 'aliases' ? 'Alias' : 'Host-Override';
           syncBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             const targets = orderedCols.slice(1).map((c) => c.device_id);
             const ok = confirm(
-              `Alias '${row.name}' von '${colsById[masterId].device_name}' auf ` +
+              `${label} '${row.name}' von '${colsById[masterId].device_name}' auf ` +
               `${targets.length} Gerät(e) uebertragen?\n\n` +
               targets.map((tid) => `· ${colsById[tid]?.device_name || tid}`).join('\n')
               + '\n\nEin Plan wird erzeugt, du kannst ihn vor dem Apply pruefen.',
             );
             if (!ok) return;
-            doSyncAlias(row.name, masterId, targets);
+            if (data.subsystem === 'aliases') {
+              doSyncAlias(row.name, masterId, targets);
+            } else {
+              doSyncUnboundHost(row.name, masterId, targets);
+            }
           });
           nameTd.appendChild(syncBtn);
         }
@@ -7279,6 +7314,29 @@
     $('#add-modal-cancel').addEventListener('click', closeAddModal);
     $('#add-modal-confirm').addEventListener('click', doAddOrEditDevice);
     // Backdrop-Click bewusst nicht — Eingabe-Modal, X / Abbrechen reichen.
+    // SSH-Anleitung-Modal
+    const sshGuideLink = $('#ad-ssh-guide-link');
+    if (sshGuideLink) {
+      sshGuideLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        const m = $('#ssh-guide-modal');
+        if (m) m.hidden = false;
+      });
+    }
+    const sshGuideClose = $('#ssh-guide-close');
+    if (sshGuideClose) {
+      sshGuideClose.addEventListener('click', () => {
+        const m = $('#ssh-guide-modal');
+        if (m) m.hidden = true;
+      });
+    }
+    const sshGuideCancel = $('#ssh-guide-cancel');
+    if (sshGuideCancel) {
+      sshGuideCancel.addEventListener('click', () => {
+        const m = $('#ssh-guide-modal');
+        if (m) m.hidden = true;
+      });
+    }
 
     // Device-Modal
     $('#device-modal-close').addEventListener('click', closeDeviceModal);
