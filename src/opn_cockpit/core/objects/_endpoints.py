@@ -60,6 +60,12 @@ UNBOUND_RECONFIGURE = "/api/unbound/service/reconfigure"
 UNBOUND_DOMAIN_SEARCH = "/api/unbound/settings/searchDomainOverride"
 UNBOUND_DOMAIN_GET = "/api/unbound/settings/getDomainOverride/{uuid}"
 
+# Unbound-DNS Query-Forwards (UI-Tab "Query Forwarding"): die globalen
+# Forward-Server (oft DoT/DoH), an die ALLE Queries (oder fuer eine
+# bestimmte Domain) weitergegeben werden. Read-only-Anzeige.
+UNBOUND_FORWARD_SEARCH = "/api/unbound/settings/searchForward"
+UNBOUND_FORWARD_GET = "/api/unbound/settings/getForward/{uuid}"
+
 # ---------------------------------------------------------------------------
 # Discovery (v1.1)
 # ---------------------------------------------------------------------------

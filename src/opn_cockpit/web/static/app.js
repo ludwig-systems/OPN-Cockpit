@@ -969,11 +969,9 @@
     const isMulti = state.serverMode === 'user-db';
     const usersBtn = $('#users-open-btn');
     const pwBtn = $('#password-self-btn');
-    const totpBtn = $('#totp-self-btn');
     const userBadge = $('#current-user-badge');
     const singleSwitchBtn = $('#single-switch-btn');
     if (pwBtn) pwBtn.hidden = !isMulti;
-    if (totpBtn) totpBtn.hidden = !isMulti;
     if (usersBtn) usersBtn.hidden = true;
     if (userBadge) userBadge.hidden = !isMulti;
     // Single-Mode-Switch-Button nur im Single-Mode sichtbar
@@ -2877,9 +2875,11 @@
   let unbEditOriginalDomain = '';
   let unbTargetDeviceId = '';
 
-  // Domain-Overrides (Weiterleitungen) - read-only zweiter Sub-Tab.
+  // Domain-Overrides + Query-Forwards - read-only Sub-Tabs.
   let domRawDomains = [];
   let domLoadedForDeviceId = null;
+  let fwdRawForwards = [];
+  let fwdLoadedForDeviceId = null;
   let dnsActiveSub = 'hosts';
 
   function switchDnsSubtab(sub) {
@@ -2894,6 +2894,8 @@
     });
     if (sub === 'domains') {
       loadUnboundDomainsTab().catch(() => {});
+    } else if (sub === 'forwards') {
+      loadUnboundForwardsTab().catch(() => {});
     }
   }
 
@@ -2922,6 +2924,84 @@
       renderDomainList();
     } catch (err) {
       $('#dom-status').textContent = err.message;
+    }
+  }
+
+  async function loadUnboundForwardsTab(force = false) {
+    if (!currentDeviceId) return;
+    if (!force && fwdLoadedForDeviceId === currentDeviceId) {
+      renderForwardList();
+      return;
+    }
+    fwdRawForwards = [];
+    fwdLoadedForDeviceId = currentDeviceId;
+    $('#fwd-status').textContent = 'Lade…';
+    $('#fwd-filter').value = '';
+    $('#fwd-list').innerHTML = '';
+    try {
+      const r = await apiGet(`/api/inventory/devices/${currentDeviceId}/unbound-forwards`);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        $('#fwd-status').textContent = body.detail || `Fehler ${r.status}`;
+        return;
+      }
+      const data = await r.json();
+      fwdRawForwards = data.forwards || [];
+      $('#fwd-status').textContent = data.summary;
+      renderForwardList();
+    } catch (err) {
+      $('#fwd-status').textContent = err.message;
+    }
+  }
+
+  function renderForwardList() {
+    const list = $('#fwd-list');
+    list.innerHTML = '';
+    const filter = ($('#fwd-filter').value || '').trim().toLowerCase();
+    const matching = filter
+      ? fwdRawForwards.filter((f) =>
+          (f.domain || '').toLowerCase().includes(filter)
+          || (f.server || '').toLowerCase().includes(filter)
+          || (f.type || '').toLowerCase().includes(filter)
+          || (f.description || '').toLowerCase().includes(filter))
+      : fwdRawForwards;
+    if (matching.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.padding = '24px';
+      empty.style.textAlign = 'center';
+      empty.style.color = 'var(--text-subtle)';
+      empty.textContent = filter
+        ? 'Kein Treffer fuer den Filter.'
+        : 'Keine Abfrage-Weiterleitungen auf diesem Geraet.';
+      list.appendChild(empty);
+      return;
+    }
+    for (const f of matching) {
+      const row = document.createElement('div');
+      row.className = 'alm-row';
+      const head = document.createElement('div');
+      head.className = 'alm-row-head';
+      const name = document.createElement('span');
+      name.className = 'alm-name';
+      const enabledMarker = f.enabled ? '' : ' (deaktiviert)';
+      const dom = f.domain || '(global)';
+      name.textContent = dom + enabledMarker;
+      const meta = document.createElement('span');
+      meta.className = 'alm-meta';
+      const portPart = f.port && f.port !== 53 ? ':' + f.port : '';
+      const typePart = f.type && f.type !== 'forward' ? ' [' + f.type + ']' : '';
+      meta.textContent = '→ ' + f.server + portPart + typePart;
+      head.appendChild(name);
+      head.appendChild(meta);
+      row.appendChild(head);
+      if (f.description) {
+        const descr = document.createElement('div');
+        descr.className = 'alm-descr';
+        descr.textContent = f.description;
+        row.appendChild(descr);
+      }
+      list.appendChild(row);
     }
   }
 
@@ -6009,15 +6089,23 @@
     box.hidden = false;
   }
 
-  // -------------------- Self-Service Passwort --------------------
+  // -------------------- Mein Konto: Passwort + TOTP --------------------
 
   function openSelfPasswordModal() {
     $('#pwself-current').value = '';
     $('#pwself-new1').value = '';
     $('#pwself-new2').value = '';
     $('#pwself-error').hidden = true;
+    // TOTP-Sektion auch resetten + Status neu laden — beides liegt
+    // jetzt im selben Modal.
+    $('#totp-enroll-block').hidden = true;
+    $('#totp-codes-block').hidden = true;
+    $('#totp-disable-block').hidden = true;
+    $('#totp-error').hidden = true;
+    $('#totp-start-enroll-btn').hidden = true;
     $('#pwself-modal').hidden = false;
     setTimeout(() => $('#pwself-current').focus(), 0);
+    loadTotpStatus().catch(() => {});
   }
 
   function closeSelfPasswordModal() {
@@ -6064,17 +6152,10 @@
     }
   }
 
-  // -------------------- Self-Service TOTP (2FA) --------------------
+  // -------------------- Self-Service TOTP (2FA, lebt im Mein-Konto-Modal) --------------------
 
-  async function openTotpModal() {
-    const modal = $('#totp-modal');
-    if (!modal) return;
-    modal.hidden = false;
+  async function loadTotpStatus() {
     $('#totp-status-msg').textContent = 'Lade Status…';
-    $('#totp-enroll-block').hidden = true;
-    $('#totp-codes-block').hidden = true;
-    $('#totp-disable-block').hidden = true;
-    $('#totp-error').hidden = true;
     try {
       const response = await apiGet('/api/users/me/totp');
       if (!response.ok) throw new Error(`Status ${response.status}`);
@@ -6083,19 +6164,16 @@
         $('#totp-status-msg').innerHTML =
           `<strong>2FA aktiv.</strong> Noch ${data.backup_codes_remaining} Backup-Code(s) verfuegbar.`;
         $('#totp-disable-block').hidden = false;
+        $('#totp-start-enroll-btn').hidden = true;
       } else {
         $('#totp-status-msg').textContent =
-          '2FA ist noch nicht eingerichtet. Klicke unten auf "Einrichten" und scanne den QR-Code in deiner Authenticator-App.';
+          '2FA ist noch nicht eingerichtet. Klicke unten auf "2FA einrichten" und scanne den QR-Code in deiner Authenticator-App.';
         $('#totp-start-enroll-btn').hidden = false;
+        $('#totp-disable-block').hidden = true;
       }
     } catch (err) {
       $('#totp-status-msg').textContent = `Status nicht abrufbar: ${err.message}`;
     }
-  }
-
-  function closeTotpModal() {
-    const modal = $('#totp-modal');
-    if (modal) modal.hidden = true;
   }
 
   async function startTotpEnroll() {
@@ -7019,11 +7097,9 @@
     if (usersBtn) usersBtn.addEventListener('click', openUsersModal);
     const pwSelfBtn = $('#password-self-btn');
     if (pwSelfBtn) pwSelfBtn.addEventListener('click', openSelfPasswordModal);
-    // TOTP-Self-Service
-    const totpBtn = $('#totp-self-btn');
-    if (totpBtn) totpBtn.addEventListener('click', openTotpModal);
-    const totpClose = $('#totp-close');
-    if (totpClose) totpClose.addEventListener('click', closeTotpModal);
+    // TOTP-Self-Service lebt jetzt im selben Mein-Konto-Modal — Buttons
+    // sind in dessen DOM-Block und brauchen Direkt-Bindings (kein eigener
+    // Open/Close-Btn mehr).
     const totpStartBtn = $('#totp-start-enroll-btn');
     if (totpStartBtn) totpStartBtn.addEventListener('click', startTotpEnroll);
     const totpConfirmBtn = $('#totp-confirm-btn');
@@ -7249,6 +7325,8 @@
     });
     const domFilter = $('#dom-filter');
     if (domFilter) domFilter.addEventListener('input', renderDomainList);
+    const fwdFilter = $('#fwd-filter');
+    if (fwdFilter) fwdFilter.addEventListener('input', renderForwardList);
     const unbCancel = $('#unbound-modal-cancel');
     if (unbCancel) unbCancel.addEventListener('click', closeUnboundModal);
     const unbClose = $('#unbound-modal-close');

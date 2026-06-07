@@ -836,6 +836,170 @@ def compare_unbound_domains(
     )
 
 
+# ---------------------------------------------------------------------------
+# Unbound Query-Forwards (Abfrage-Weiterleitungen) — read-only Vergleich
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class UnboundForwardItem:
+    """Eine Unbound-Query-Forward-Eintragung.
+
+    Identitaet ist ``(domain, server, port)``: derselbe Forward-Server
+    kann fuer mehrere Domains existieren (selektives Forwarding),
+    deshalb reicht ``domain`` allein nicht.
+    """
+
+    domain: str
+    server: str
+    port: int
+    type: str
+    verify: str
+    description: str
+    enabled: bool
+
+    @property
+    def identity_key(self) -> str:
+        return f"{self.domain.lower()}|{self.server.lower()}|{self.port}"
+
+    @property
+    def display_name(self) -> str:
+        # Leere Domain = global ("alle Queries").
+        dom = self.domain or "(global)"
+        return f"{dom} → {self.server}:{self.port}"
+
+    @property
+    def content_fingerprint(self) -> str:
+        raw = (
+            f"{self.type}\0{self.verify}\0{self.description}\0"
+            f"{'1' if self.enabled else '0'}"
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _iter_unbound_forward_nodes(root: ET.Element) -> list[ET.Element]:
+    # OPNsense XML-Pfade fuer Query-Forwards. Je nach Version unter
+    # ``unbound/forwarding/forward`` oder ``OPNsense/unboundplus/dots/dot``.
+    for path in (
+        "./unbound/forwarding/forward",
+        "./opnsense/unbound/forwarding/forward",
+        "./OPNsense/unboundplus/dots/dot",
+        "./OPNsense/unbound/forwarding/forward",
+    ):
+        found = root.findall(path)
+        if found:
+            return found
+    return []
+
+
+def extract_unbound_forwards(xml_bytes: bytes) -> list[UnboundForwardItem]:
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return []
+    items: list[UnboundForwardItem] = []
+    for node in _iter_unbound_forward_nodes(root):
+        server = (node.findtext("server") or node.findtext("forward_addr") or "").strip()
+        if not server:
+            continue
+        domain = (node.findtext("domain") or "").strip()
+        port_raw = (node.findtext("port") or "53").strip()
+        try:
+            port = int(port_raw)
+        except ValueError:
+            port = 53
+        type_ = (node.findtext("type") or "forward").strip()
+        verify = (node.findtext("verify") or "").strip()
+        descr = (node.findtext("descr")
+                 or node.findtext("description") or "").strip()
+        enabled_raw = (node.findtext("enabled") or "1").strip()
+        items.append(UnboundForwardItem(
+            domain=domain,
+            server=server,
+            port=port,
+            type=type_,
+            verify=verify,
+            description=descr,
+            enabled=enabled_raw not in ("0", "false", "no"),
+        ))
+    return items
+
+
+def compare_unbound_forwards(
+    per_device: dict[str, list[UnboundForwardItem] | None],
+    columns: list[str],
+) -> AliasComparison:
+    """Vergleichs-Matrix fuer Unbound-Query-Forwards.
+
+    Identitaet = (domain, server, port). Cell-``type`` = Forward-Type
+    (forward/dot/doh).
+    """
+    all_keys: set[str] = set()
+    items_by_device: dict[str, dict[str, UnboundForwardItem]] = {}
+    for device_id in columns:
+        items = per_device.get(device_id)
+        if items is None:
+            items_by_device[device_id] = {}
+            continue
+        items_by_device[device_id] = {f.identity_key: f for f in items}
+        all_keys.update(f.identity_key for f in items)
+
+    rows: list[AliasRow] = []
+    drift_count = 0
+    for key in sorted(all_keys, key=str.lower):
+        display_name = ""
+        cells: list[tuple[str, AliasCell]] = []
+        fingerprints_seen: set[str] = set()
+        any_absent = False
+        for device_id in columns:
+            if per_device.get(device_id) is None:
+                cells.append((device_id, AliasCell(status="unreachable")))
+                continue
+            entry = items_by_device[device_id].get(key)
+            if entry is None:
+                cells.append((device_id, AliasCell(status="absent")))
+                any_absent = True
+                continue
+            if not display_name:
+                display_name = entry.display_name
+            detail = [f"type: {entry.type}"]
+            if entry.verify:
+                detail.append(f"verify: {entry.verify}")
+            if not entry.enabled:
+                detail.append("deaktiviert")
+            if entry.description:
+                detail.append(f"descr: {entry.description}")
+            cells.append((device_id, AliasCell(
+                status="present",
+                type=entry.type,
+                content_fingerprint=entry.content_fingerprint,
+                content_count=0,
+                description=entry.description,
+                content=tuple(detail),
+            )))
+            fingerprints_seen.add(entry.content_fingerprint)
+        uniform = not any_absent and len(fingerprints_seen) == 1
+        if not uniform:
+            drift_count += 1
+        rows.append(AliasRow(name=display_name or key, cells=tuple(cells), uniform=uniform))
+
+    if not rows:
+        summary = "Keine Query-Forwards auf den gewaehlten Geraeten."
+    elif drift_count == 0:
+        summary = f"{len(rows)} Query-Forwards, alle auf allen Geraeten identisch."
+    else:
+        summary = (
+            f"{len(rows)} Query-Forwards insgesamt, davon {drift_count} mit "
+            "Unterschieden zwischen den Geraeten."
+        )
+
+    return AliasComparison(
+        columns=tuple(columns),
+        rows=tuple(rows),
+        summary=summary,
+    )
+
+
 __all__ = [
     "AliasCell",
     "AliasComparison",
@@ -844,15 +1008,18 @@ __all__ = [
     "RouteItem",
     "RuleItem",
     "UnboundDomainItem",
+    "UnboundForwardItem",
     "UnboundHostItem",
     "compare_aliases",
     "compare_routes",
     "compare_rules",
     "compare_unbound_domains",
+    "compare_unbound_forwards",
     "compare_unbound_hosts",
     "extract_aliases",
     "extract_routes",
     "extract_rules",
     "extract_unbound_domains",
+    "extract_unbound_forwards",
     "extract_unbound_hosts",
 ]

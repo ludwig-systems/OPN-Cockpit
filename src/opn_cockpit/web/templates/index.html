@@ -320,17 +320,10 @@
               <path d="M10 9.5c1.5 0 4 1 4 3"/>
             </svg>
           </button>
-          <button class="icon-btn" id="password-self-btn" title="Eigenes Passwort aendern" hidden>
+          <button class="icon-btn" id="password-self-btn" title="Mein Konto (Passwort + 2FA)" hidden>
             <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="6.5" width="9" height="6" rx="1"/>
-              <path d="M5 6.5V4.5a2.5 2.5 0 015 0v2"/>
-              <circle cx="7.5" cy="9.5" r="0.6" fill="currentColor"/>
-            </svg>
-          </button>
-          <button class="icon-btn" id="totp-self-btn" title="2FA / TOTP einrichten" hidden>
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 7.5l2 2 4-4.5"/>
-              <circle cx="7.5" cy="7.5" r="5.5"/>
+              <circle cx="7.5" cy="5.5" r="2.6"/>
+              <path d="M2.5 13c0-2.5 2.2-4 5-4s5 1.5 5 4"/>
             </svg>
           </button>
           <button class="icon-btn" id="single-switch-btn" title="Anderen Tresor entsperren" hidden>
@@ -517,7 +510,8 @@
                     <button class="compare-tab" data-subsystem="routes">Routen</button>
                     <button class="compare-tab" data-subsystem="rules">Regeln</button>
                     <button class="compare-tab" data-subsystem="unbound">DNS-Hosts</button>
-                    <button class="compare-tab" data-subsystem="unbound-domains">DNS-Weiterleitungen</button>
+                    <button class="compare-tab" data-subsystem="unbound-domains">DNS-Overrides</button>
+                    <button class="compare-tab" data-subsystem="unbound-forwards">DNS-Weiterleitungen</button>
                   </div>
                   <div class="compare-status" id="cmp-status">Lade Vergleich…</div>
                 </div>
@@ -860,7 +854,11 @@
               </button>
               <button class="dns-subtab" id="unb-sub-domains"
                       data-subtab="domains" type="button" role="tab">
-                Domain-Overrides (Weiterleitungen)
+                Domain-Overrides
+              </button>
+              <button class="dns-subtab" id="unb-sub-forwards"
+                      data-subtab="forwards" type="button" role="tab">
+                Abfrage-Weiterleitungen
               </button>
             </div>
 
@@ -883,7 +881,7 @@
               <div class="alm-list" id="unb-list"></div>
             </div>
 
-            <!-- Sub-Pane: Domain-Overrides (Weiterleitungen) -->
+            <!-- Sub-Pane: Domain-Overrides -->
             <div class="dns-subpane" data-dns-subpane="domains" hidden>
               <div class="alm-toolbar">
                 <input id="dom-filter" class="form-input" type="search"
@@ -891,12 +889,29 @@
                 <div class="alm-status" id="dom-status">—</div>
               </div>
               <div class="form-hint" style="margin-bottom:8px;">
-                Domain-Overrides leiten alle DNS-Queries fuer eine Domain
-                an einen externen Resolver weiter (z.B. Active-Directory-DNS).
-                Read-only in Cockpit — CRUD im OPNsense-Web-GUI unter
-                <em>Services &rarr; Unbound DNS &rarr; Overrides</em>.
+                Domain-Overrides aus
+                <em>Services &rarr; Unbound DNS &rarr; Overrides &rarr;
+                Domain Overrides</em>. Leiten DNS-Queries fuer eine
+                spezifische Domain an einen Resolver weiter
+                (z. B. Active-Directory-DNS). Read-only.
               </div>
               <div class="alm-list" id="dom-list"></div>
+            </div>
+
+            <!-- Sub-Pane: Query-Forwards (UI-Tab "Query Forwarding") -->
+            <div class="dns-subpane" data-dns-subpane="forwards" hidden>
+              <div class="alm-toolbar">
+                <input id="fwd-filter" class="form-input" type="search"
+                       placeholder="Filter (Domain, Server, Type)..." autocomplete="off" />
+                <div class="alm-status" id="fwd-status">—</div>
+              </div>
+              <div class="form-hint" style="margin-bottom:8px;">
+                Abfrage-Weiterleitungen aus
+                <em>Services &rarr; Unbound DNS &rarr; Query Forwarding</em>:
+                die globalen Forward-Server (oft DoT/DoH), an die Unbound
+                alle DNS-Anfragen reicht. Read-only.
+              </div>
+              <div class="alm-list" id="fwd-list"></div>
             </div>
           </div>
 
@@ -1307,7 +1322,7 @@
 
     <!-- ================ MODAL: Tresor-Settings (F5a + F5b) ================ -->
     <div class="modal-backdrop" id="vault-settings-modal" hidden>
-      <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="vault-settings-title">
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="vault-settings-title">
         <div class="modal-header">
           <h2 id="vault-settings-title">Tresor-Einstellungen</h2>
           <button class="icon-btn modal-close" id="vault-settings-close" aria-label="Schliessen">
@@ -1590,11 +1605,11 @@
       </div>
     </div>
 
-    <!-- ================ MODAL: Eigenes Passwort aendern ================ -->
+    <!-- ================ MODAL: Mein Konto (Passwort + 2FA) ================ -->
     <div class="modal-backdrop" id="pwself-modal" hidden>
-      <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="pwself-title">
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="pwself-title">
         <div class="modal-header">
-          <h2 id="pwself-title">Eigenes Passwort aendern</h2>
+          <h2 id="pwself-title">Mein Konto</h2>
           <button class="icon-btn modal-close" id="pwself-close" aria-label="Schliessen">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
               <line x1="3" y1="3" x2="11" y2="11"/>
@@ -1604,62 +1619,63 @@
         </div>
 
         <div class="modal-body">
-          <label class="form-label" for="pwself-current">Aktuelles Passwort</label>
-          <input id="pwself-current" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
-
-          <label class="form-label" for="pwself-new1">Neues Passwort (min. 12)</label>
-          <input id="pwself-new1" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
-
-          <label class="form-label" for="pwself-new2">Wiederholen</label>
-          <input id="pwself-new2" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
-
+          <!-- Sektion: Passwort aendern -->
+          <h3 class="modal-section-title">Passwort aendern</h3>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="pwself-current">Aktuelles Passwort</label>
+              <input id="pwself-current" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="pwself-new1">Neues Passwort (min. 12)</label>
+              <input id="pwself-new1" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="pwself-new2">Wiederholen</label>
+              <input id="pwself-new2" class="form-input" type="password" data-lpignore="true" autocomplete="new-password" />
+            </div>
+          </div>
           <div class="form-error" id="pwself-error" hidden></div>
-        </div>
+          <div class="form-row" style="margin-top:8px;">
+            <button class="btn-primary" id="pwself-submit" type="button">Passwort speichern</button>
+          </div>
 
-        <div class="modal-footer">
-          <button class="btn-link" id="pwself-cancel">Abbrechen</button>
-          <button class="btn-primary btn-primary-inline" id="pwself-submit">Speichern</button>
-        </div>
-      </div>
-    </div>
+          <div class="form-divider"></div>
 
-    <!-- ================ MODAL: TOTP (2FA) Self-Service ================ -->
-    <div class="modal-backdrop" id="totp-modal" hidden>
-      <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="totp-title">
-        <div class="modal-header">
-          <h2 id="totp-title">Zwei-Faktor-Authentifizierung (TOTP)</h2>
-          <button class="icon-btn modal-close" id="totp-close" aria-label="Schliessen">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-              <line x1="3" y1="3" x2="11" y2="11"/>
-              <line x1="11" y1="3" x2="3" y2="11"/>
-            </svg>
-          </button>
-        </div>
-
-        <div class="modal-body">
+          <!-- Sektion: Zwei-Faktor-Authentifizierung -->
+          <h3 class="modal-section-title">Zwei-Faktor-Authentifizierung (TOTP)</h3>
           <p id="totp-status-msg" class="form-hint">Lade Status...</p>
 
-          <button class="btn-primary" id="totp-start-enroll-btn" hidden>Einrichten</button>
+          <button class="btn-primary" id="totp-start-enroll-btn" type="button" hidden>2FA einrichten</button>
 
           <div id="totp-enroll-block" hidden>
             <p class="form-hint">
-              Scanne den QR-Code in deiner Authenticator-App (Google Authenticator,
-              Microsoft Authenticator, Aegis, Bitwarden, &hellip;) oder gib das
-              Secret manuell ein. Bestaetige dann mit dem aktuell angezeigten Code.
+              Scanne den QR-Code in deiner Authenticator-App (Google
+              Authenticator, Microsoft Authenticator, Aegis, Bitwarden,
+              &hellip;) oder gib das Secret manuell ein. Bestaetige
+              dann mit dem aktuell angezeigten Code.
             </p>
-            <div id="totp-qr-wrapper" class="totp-qr-wrapper"></div>
-            <details class="totp-fallback-details">
-              <summary>QR scannt nicht? Secret manuell eintragen</summary>
-              <label class="form-label">Secret (Base32)</label>
-              <code id="totp-secret-text" class="totp-code-block"></code>
-              <label class="form-label">Provisioning-URI</label>
-              <code id="totp-uri-text" class="totp-code-block"></code>
-            </details>
-            <label class="form-label" for="totp-confirm-code">6-stelliger Code</label>
-            <input id="totp-confirm-code" class="form-input" type="text"
-                   inputmode="numeric" autocomplete="off"
-                   placeholder="123456" data-lpignore="true" />
-            <button class="btn-primary" id="totp-confirm-btn">Bestaetigen + 2FA aktivieren</button>
+            <div class="form-row">
+              <div class="form-col" style="flex:0 0 260px;">
+                <div id="totp-qr-wrapper" class="totp-qr-wrapper"></div>
+              </div>
+              <div class="form-col">
+                <details class="totp-fallback-details">
+                  <summary>QR scannt nicht? Secret manuell eintragen</summary>
+                  <label class="form-label">Secret (Base32)</label>
+                  <code id="totp-secret-text" class="totp-code-block"></code>
+                  <label class="form-label">Provisioning-URI</label>
+                  <code id="totp-uri-text" class="totp-code-block"></code>
+                </details>
+                <label class="form-label" for="totp-confirm-code">6-stelliger Code aus der App</label>
+                <input id="totp-confirm-code" class="form-input" type="text"
+                       inputmode="numeric" autocomplete="off"
+                       placeholder="123456" data-lpignore="true" />
+                <button class="btn-primary" id="totp-confirm-btn" type="button" style="margin-top:8px;">
+                  Bestaetigen + 2FA aktivieren
+                </button>
+              </div>
+            </div>
           </div>
 
           <div id="totp-codes-block" hidden>
@@ -1672,16 +1688,27 @@
           </div>
 
           <div id="totp-disable-block" hidden>
-            <hr />
             <p class="form-hint">2FA deaktivieren benoetigt aktuelles Passwort + aktuellen TOTP-/Backup-Code.</p>
-            <label class="form-label" for="totp-disable-pw">Aktuelles Passwort</label>
-            <input id="totp-disable-pw" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
-            <label class="form-label" for="totp-disable-code">TOTP- oder Backup-Code</label>
-            <input id="totp-disable-code" class="form-input" type="text" inputmode="numeric" data-lpignore="true" />
-            <button class="btn-danger" id="totp-disable-btn">2FA deaktivieren</button>
+            <div class="form-row">
+              <div class="form-col">
+                <label class="form-label" for="totp-disable-pw">Aktuelles Passwort</label>
+                <input id="totp-disable-pw" class="form-input" type="password" data-lpignore="true" autocomplete="current-password" />
+              </div>
+              <div class="form-col">
+                <label class="form-label" for="totp-disable-code">TOTP- oder Backup-Code</label>
+                <input id="totp-disable-code" class="form-input" type="text" inputmode="numeric" data-lpignore="true" />
+              </div>
+              <div class="form-col" style="display:flex; align-items:flex-end;">
+                <button class="btn-danger" id="totp-disable-btn" type="button">2FA deaktivieren</button>
+              </div>
+            </div>
           </div>
 
           <div class="form-error" id="totp-error" hidden></div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-link" id="pwself-cancel">Schliessen</button>
         </div>
       </div>
     </div>

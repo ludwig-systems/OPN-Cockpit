@@ -36,16 +36,19 @@ from opn_cockpit.core.config_compare import (
     RouteItem,
     RuleItem,
     UnboundDomainItem,
+    UnboundForwardItem,
     UnboundHostItem,
     compare_aliases,
     compare_routes,
     compare_rules,
     compare_unbound_domains,
+    compare_unbound_forwards,
     compare_unbound_hosts,
     extract_aliases,
     extract_routes,
     extract_rules,
     extract_unbound_domains,
+    extract_unbound_forwards,
     extract_unbound_hosts,
 )
 from opn_cockpit.core.config_drift import compute_drift_hash
@@ -113,6 +116,7 @@ from opn_cockpit.web.api.schemas import (
     InventoryResponse,
     DeviceRulesResponse,
     DeviceUnboundDomainsResponse,
+    DeviceUnboundForwardsResponse,
     DeviceUnboundHostsResponse,
     RouteEntryResponse,
     RuleEntryResponse,
@@ -120,6 +124,7 @@ from opn_cockpit.web.api.schemas import (
     SyncAliasResponse,
     TagSummary,
     UnboundDomainEntryResponse,
+    UnboundForwardEntryResponse,
     UnboundHostEntryResponse,
 )
 from opn_cockpit.web.auth.dependencies import require_session
@@ -781,6 +786,12 @@ def compare_configs(
             for did, x in xml_by_device.items()
         }
         comparison = compare_unbound_domains(per_device_dom, column_order)
+    elif payload.subsystem == "unbound-forwards":
+        per_device_fwd: dict[str, list[UnboundForwardItem] | None] = {
+            did: extract_unbound_forwards(x) if x is not None else None
+            for did, x in xml_by_device.items()
+        }
+        comparison = compare_unbound_forwards(per_device_fwd, column_order)
     else:
         # Schema-Validator stellt das eigentlich sicher, defensiver Fallback
         raise HTTPException(
@@ -1346,6 +1357,104 @@ def get_device_unbound_domains(
         reachable=True,
         summary=f"{len(entries)} Domain-Override(s) live geladen.",
         domains=entries,
+        checked_at_iso=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/unbound-forwards  - Live Query-Forwards
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/unbound-forwards",
+    response_model=DeviceUnboundForwardsResponse,
+)
+def get_device_unbound_forwards(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> DeviceUnboundForwardsResponse:
+    """Liefert die Live-Unbound-Query-Forwards (UI-Tab "Query Forwarding").
+
+    Diese Liste sind die globalen Forward-Server, an die Unbound DNS-
+    Anfragen weiterleitet (oft DoT/DoH). ``domain`` ist leer fuer
+    "alle Queries" oder auf eine Ziel-Domain eingeschraenkt.
+
+    Read-only — CRUD waere ein eigener Adapter.
+    """
+    from opn_cockpit.core.objects._endpoints import UNBOUND_FORWARD_SEARCH  # noqa: PLC0415
+
+    devices_by_id = {d.id: d for d in session.opened.data.devices}
+    device = devices_by_id.get(device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(device, session)
+    timestamp = _iso_now()
+
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    try:
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            response = client.call(
+                tgt, device.api_key, device.api_secret,
+                "POST", UNBOUND_FORWARD_SEARCH,
+                json={"current": 1, "rowCount": -1},
+            )
+    except OpnCockpitError as exc:
+        reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+        return DeviceUnboundForwardsResponse(
+            device_id=device.id,
+            device_name=device.name,
+            reachable=False,
+            summary=f"Query-Forwards nicht ladbar: {reason}",
+            forwards=[],
+            checked_at_iso=timestamp,
+        )
+
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        rows = []
+
+    entries: list[UnboundForwardEntryResponse] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        uuid = str(row.get("uuid", ""))
+        if not uuid:
+            continue
+        enabled_raw = str(row.get("enabled", "1"))
+        # OPNsense gibt den Port oft als String zurueck; defensiv parsen.
+        port_raw = row.get("port", row.get("forward_tcp_upstream", "53"))
+        try:
+            port = int(str(port_raw)) if port_raw not in ("", None) else 53
+        except (TypeError, ValueError):
+            port = 53
+        entries.append(UnboundForwardEntryResponse(
+            uuid=uuid,
+            enabled=enabled_raw not in ("", "0", "false", "False"),
+            domain=str(row.get("domain", "")).strip(),
+            server=str(row.get("server", row.get("forward_addr", ""))).strip(),
+            port=port,
+            type=str(row.get("type", "forward")).strip(),
+            verify=str(row.get("verify", "")).strip(),
+            description=str(row.get("description", row.get("descr", ""))).strip(),
+        ))
+
+    session.touch()
+    return DeviceUnboundForwardsResponse(
+        device_id=device.id,
+        device_name=device.name,
+        reachable=True,
+        summary=f"{len(entries)} Query-Forward(s) live geladen.",
+        forwards=entries,
         checked_at_iso=timestamp,
     )
 

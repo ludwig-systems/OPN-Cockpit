@@ -655,9 +655,13 @@ class CompareRequest(BaseModel):
     """N Geraete + Subsystem zum Vergleichen."""
 
     device_ids: list[str] = Field(..., min_length=2)
-    subsystem: str = Field(..., pattern=r"^(aliases|routes|rules|unbound|unbound-domains)$")
+    subsystem: str = Field(
+        ...,
+        pattern=r"^(aliases|routes|rules|unbound|unbound-domains|unbound-forwards)$",
+    )
     """Unterstuetzte Subsysteme: aliases, routes, rules, unbound (Host-
-    Overrides), unbound-domains (Domain-Overrides / Weiterleitungen)."""
+    Overrides), unbound-domains (Domain-Overrides), unbound-forwards
+    (Query-Forwards / Abfrage-Weiterleitungen)."""
 
 
 class CompareCellResponse(BaseModel):
@@ -784,6 +788,33 @@ class DeviceUnboundDomainsResponse(BaseModel):
     reachable: bool
     summary: str
     domains: list[UnboundDomainEntryResponse]
+    checked_at_iso: str
+
+
+class UnboundForwardEntryResponse(BaseModel):
+    """Ein Unbound-Query-Forward (DoT/DoH/Plain).
+
+    ``domain`` ist leer fuer "alle Queries" (globaler Forward), sonst die
+    Ziel-Domain (selektives Forwarding). ``server`` ist die Resolver-IP,
+    ``type`` typisch ``forward``/``dot``/``doh``.
+    """
+
+    uuid: str
+    enabled: bool
+    domain: str
+    server: str
+    port: int
+    type: str
+    verify: str
+    description: str
+
+
+class DeviceUnboundForwardsResponse(BaseModel):
+    device_id: str
+    device_name: str
+    reachable: bool
+    summary: str
+    forwards: list[UnboundForwardEntryResponse]
     checked_at_iso: str
 
 
