@@ -180,7 +180,10 @@ class BackupScheduler:
             if not settings.scheduled_backup_enabled:
                 continue
             interval_h = max(MIN_INTERVAL_HOURS, settings.scheduled_backup_interval_hours)
-            devices = list(vault_data.devices)
+            # Wartungsmodus: planmaessig offline-Geraete aus der Schleife
+            # ausschliessen, damit der Audit-Log nicht mit Fehler-Backups
+            # zulaeuft. Manuelle Backups bleiben moeglich (User-Aktion).
+            devices = [d for d in vault_data.devices if not d.maintenance]
             devices_checked += len(devices)
 
             due_devices = [d for d in devices if self._is_due(d, interval_h)]

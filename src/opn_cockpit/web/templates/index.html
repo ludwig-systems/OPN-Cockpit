@@ -298,6 +298,13 @@
         </div>
 
         <div class="topbar-actions">
+          <!-- Disk-Space-Widget (Linux/Server-Setup; auf Single-User-Windows versteckt) -->
+          <div class="topbar-disk" id="topbar-disk" hidden>
+            <div class="topbar-disk-track" aria-hidden="true">
+              <div class="topbar-disk-fill" id="topbar-disk-fill"></div>
+            </div>
+            <span class="topbar-disk-pct" id="topbar-disk-pct">--%</span>
+          </div>
           <button class="icon-btn topbar-retry-indicator" id="retry-indicator-btn" title="Laufende Auto-Retries" hidden>
             <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
               <path d="M2.5 7.5a5 5 0 109-3"/>
@@ -509,7 +516,8 @@
                     <button class="compare-tab is-active" data-subsystem="aliases">Aliase</button>
                     <button class="compare-tab" data-subsystem="routes">Routen</button>
                     <button class="compare-tab" data-subsystem="rules">Regeln</button>
-                    <button class="compare-tab" data-subsystem="unbound">DNS</button>
+                    <button class="compare-tab" data-subsystem="unbound">DNS-Hosts</button>
+                    <button class="compare-tab" data-subsystem="unbound-domains">DNS-Weiterleitungen</button>
                   </div>
                   <div class="compare-status" id="cmp-status">Lade Vergleich…</div>
                 </div>
@@ -618,6 +626,23 @@
             <div class="form-col">
               <label class="form-label" for="ad-apisecret">API-Secret</label>
               <input id="ad-apisecret" class="form-input" type="password" data-lpignore="true" autocomplete="off" />
+            </div>
+          </div>
+
+          <div class="form-divider"></div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-checkbox">
+                <input id="ad-maintenance" type="checkbox" />
+                <span>Wartungsmodus (Polling deaktivieren)</span>
+              </label>
+              <div class="form-hint">
+                Schliesst dieses Geraet von Heartbeat, Scheduled Backups
+                und Drift-Check aus — solange aktiviert. Praktisch wenn ein
+                Standort planmaessig offline ist (Hardware-Tausch, Mobile-
+                Rack im Transit). Manuelle Aktionen (Plan/Apply,
+                Test-Connection, Backup-Download) bleiben moeglich.
+              </div>
             </div>
           </div>
 
@@ -826,23 +851,53 @@
             <div class="alm-list" id="rtm-list"></div>
           </div>
 
-          <!-- Tab: DNS (Unbound Host-Overrides) -->
+          <!-- Tab: DNS (Unbound Host-Overrides + Domain-Overrides) -->
           <div class="modal-tab-pane" data-tab-pane="unbound" role="tabpanel" hidden>
-            <div class="alm-toolbar">
-              <input id="unb-filter" class="form-input" type="search"
-                     placeholder="Filter (Hostname, Domain, IP)..." autocomplete="off" />
-              <div class="alm-status" id="unb-status">—</div>
-            </div>
-            <div class="form-row" style="margin-bottom:12px;">
-              <button class="btn-secondary action-row-btn" id="unb-add-btn">
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="6.5" y1="2" x2="6.5" y2="11"/>
-                  <line x1="2" y1="6.5" x2="11" y2="6.5"/>
-                </svg>
-                <span>Neuer Host-Override</span>
+            <div class="dns-subtabs" role="tablist">
+              <button class="dns-subtab dns-subtab-active" id="unb-sub-hosts"
+                      data-subtab="hosts" type="button" role="tab">
+                Host-Overrides
+              </button>
+              <button class="dns-subtab" id="unb-sub-domains"
+                      data-subtab="domains" type="button" role="tab">
+                Domain-Overrides (Weiterleitungen)
               </button>
             </div>
-            <div class="alm-list" id="unb-list"></div>
+
+            <!-- Sub-Pane: Host-Overrides -->
+            <div class="dns-subpane" data-dns-subpane="hosts">
+              <div class="alm-toolbar">
+                <input id="unb-filter" class="form-input" type="search"
+                       placeholder="Filter (Hostname, Domain, IP)..." autocomplete="off" />
+                <div class="alm-status" id="unb-status">—</div>
+              </div>
+              <div class="form-row" style="margin-bottom:12px;">
+                <button class="btn-secondary action-row-btn" id="unb-add-btn">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="6.5" y1="2" x2="6.5" y2="11"/>
+                    <line x1="2" y1="6.5" x2="11" y2="6.5"/>
+                  </svg>
+                  <span>Neuer Host-Override</span>
+                </button>
+              </div>
+              <div class="alm-list" id="unb-list"></div>
+            </div>
+
+            <!-- Sub-Pane: Domain-Overrides (Weiterleitungen) -->
+            <div class="dns-subpane" data-dns-subpane="domains" hidden>
+              <div class="alm-toolbar">
+                <input id="dom-filter" class="form-input" type="search"
+                       placeholder="Filter (Domain, Resolver-IP)..." autocomplete="off" />
+                <div class="alm-status" id="dom-status">—</div>
+              </div>
+              <div class="form-hint" style="margin-bottom:8px;">
+                Domain-Overrides leiten alle DNS-Queries fuer eine Domain
+                an einen externen Resolver weiter (z.B. Active-Directory-DNS).
+                Read-only in Cockpit — CRUD im OPNsense-Web-GUI unter
+                <em>Services &rarr; Unbound DNS &rarr; Overrides</em>.
+              </div>
+              <div class="alm-list" id="dom-list"></div>
+            </div>
           </div>
 
           <!-- Tab: Regeln (Firewall-Filter) -->
@@ -874,102 +929,8 @@
       </div>
     </div>
 
-    <!-- ================ MODAL: Server-TLS-Zertifikat hochladen ================ -->
-    <div class="modal-backdrop" id="srv-tls-modal" hidden>
-      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="srv-tls-title">
-        <div class="modal-header">
-          <h2 id="srv-tls-title">Cockpit-HTTPS-Zertifikat</h2>
-          <button class="icon-btn modal-close" id="srv-tls-close" aria-label="Schliessen">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-              <line x1="3" y1="3" x2="11" y2="11"/>
-              <line x1="11" y1="3" x2="3" y2="11"/>
-            </svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="form-hint" style="margin-bottom:12px;">
-            Hier landet das Zertifikat fuer den Cockpit-eigenen HTTPS-Port.
-            Das ist NICHT dasselbe wie die OPNsense-API-CAs (Sektion oben);
-            das ist das Cert, das dein Browser sieht wenn du
-            <code>https://cockpit.lab:9876</code> aufrufst.
-          </div>
-          <div class="form-row">
-            <div class="form-col">
-              <label class="form-label" for="srv-tls-cert">Server-Zertifikat (PEM)</label>
-              <textarea id="srv-tls-cert" class="form-input" rows="8"
-                placeholder="-----BEGIN CERTIFICATE-----..."
-                style="font-family:monospace;font-size:11px;" autocomplete="off"></textarea>
-              <div class="form-hint">
-                Bei Chain: Fullchain — zuerst dein Server-Cert, dann
-                Intermediate, ggf. Root. Alle Bloecke zusammen einfuegen.
-              </div>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-col">
-              <label class="form-label" for="srv-tls-key">Privater Schluessel (PEM)</label>
-              <textarea id="srv-tls-key" class="form-input" rows="6"
-                placeholder="-----BEGIN PRIVATE KEY-----..."
-                style="font-family:monospace;font-size:11px;" autocomplete="off"></textarea>
-              <div class="form-hint">
-                Wird mit 0600 auf der Cockpit-Maschine abgelegt (nur Service-User).
-                Cockpit ueberprueft nicht ob Key zum Cert passt — wenn die zwei
-                nicht zusammenpassen, scheitert uvicorn beim Boot mit SSL-Error
-                und schreibt das ins Log.
-              </div>
-            </div>
-          </div>
-          <div class="form-hint" style="color:var(--danger,#c0392b);">
-            ⚠ Nach Save: Cockpit-Service neu starten, sonst greift die Aenderung nicht.
-          </div>
-          <div class="form-error" id="srv-tls-error" hidden></div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-link" id="srv-tls-cancel">Abbrechen</button>
-          <button class="btn-primary btn-primary-inline" id="srv-tls-confirm">Speichern</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ================ MODAL: Root-CA hinzufuegen ================ -->
-    <div class="modal-backdrop" id="ca-add-modal" hidden>
-      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="ca-add-title">
-        <div class="modal-header">
-          <h2 id="ca-add-title">Root-CA hinzufuegen</h2>
-          <button class="icon-btn modal-close" id="ca-add-close" aria-label="Schliessen">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-              <line x1="3" y1="3" x2="11" y2="11"/>
-              <line x1="11" y1="3" x2="3" y2="11"/>
-            </svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="form-hint" style="margin-bottom:12px;">
-            PEM-codierten <strong>Root-CA</strong>-Zertifikat einfuegen
-            (mit <code>-----BEGIN CERTIFICATE-----</code> / <code>END</code>-
-            Zeilen). Mehrere Zertifikate hintereinander sind erlaubt — z. B.
-            Root + Intermediate.
-          </div>
-          <div class="form-row">
-            <div class="form-col">
-              <label class="form-label" for="ca-pem">PEM-Inhalt</label>
-              <textarea id="ca-pem" class="form-input" rows="10"
-                        placeholder="-----BEGIN CERTIFICATE-----..."
-                        style="font-family:monospace;font-size:11px;" autocomplete="off"></textarea>
-            </div>
-          </div>
-          <div class="form-row" style="margin-bottom:8px;">
-            <button class="btn-secondary" id="ca-inspect-btn" type="button">Vorschau pruefen</button>
-          </div>
-          <div id="ca-preview" class="ca-preview" hidden></div>
-          <div class="form-error" id="ca-add-error" hidden></div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-link" id="ca-add-cancel">Abbrechen</button>
-          <button class="btn-primary btn-primary-inline" id="ca-add-confirm">Hinzufuegen</button>
-        </div>
-      </div>
-    </div>
+    <!-- (Trust-CA und Server-TLS sind jetzt inline im Vault-Settings-Modal,
+         keine separaten Sub-Modals mehr.) -->
 
     <!-- ================ MODAL: Unbound Host-Override (Add / Edit) ================ -->
     <div class="modal-backdrop" id="unbound-modal" hidden>
@@ -1513,6 +1474,34 @@
           </div>
           <div class="form-error" id="vs-ca-error" hidden></div>
 
+          <!-- Inline-Expand fuer CA-Eingabe (statt Sub-Modal) -->
+          <div id="vs-ca-add-form" class="inline-expand-form" hidden>
+            <div class="form-hint" style="margin-bottom:10px;">
+              PEM-codierten Root-CA waehlen oder einfuegen. Mehrere
+              Zertifikate hintereinander erlaubt (Root + Intermediate).
+            </div>
+            <div class="file-upload-row">
+              <label class="btn-secondary btn-file-pick" for="vs-ca-file">
+                Zertifikatsdatei waehlen...
+              </label>
+              <input id="vs-ca-file" type="file"
+                     accept=".pem,.crt,.cer,.cert,.ca,application/x-pem-file"
+                     class="file-input-hidden" />
+              <span id="vs-ca-filename" class="file-pick-label"></span>
+            </div>
+            <label class="form-label" for="vs-ca-pem">PEM-Inhalt (Fallback fuer Copy&amp;Paste)</label>
+            <textarea id="vs-ca-pem" class="form-input form-input-mono" rows="8"
+                      placeholder="-----BEGIN CERTIFICATE-----..."
+                      autocomplete="off"></textarea>
+            <div class="form-row" style="margin-top:8px; gap:8px;">
+              <button class="btn-secondary" id="vs-ca-inspect-btn" type="button">Vorschau pruefen</button>
+              <button class="btn-primary" id="vs-ca-confirm-btn" type="button">Hinzufuegen</button>
+              <button class="btn-link" id="vs-ca-cancel-btn" type="button">Abbrechen</button>
+            </div>
+            <div id="vs-ca-preview" class="ca-preview" hidden></div>
+            <div class="form-error" id="vs-ca-add-error" hidden></div>
+          </div>
+
           <div class="form-divider"></div>
 
           <!-- Sektion: Cockpit-eigenes HTTPS (App-weit, nicht im Tresor) -->
@@ -1530,6 +1519,52 @@
             <button class="btn-link btn-danger-text" id="vs-srv-tls-clear-btn" type="button" hidden>Entfernen (zu HTTP zurueck)</button>
           </div>
           <div class="form-error" id="vs-srv-tls-error" hidden></div>
+
+          <!-- Inline-Expand fuer Server-TLS-Upload (statt Sub-Modal) -->
+          <div id="vs-srv-tls-form" class="inline-expand-form" hidden>
+            <div class="form-hint" style="margin-bottom:10px;">
+              Datei waehlen (primaer) oder PEM-Inhalt einfuegen (Fallback).
+              Cockpit prueft ob Cert + Key zusammenpassen — Mismatch fliegt
+              mit 422 statt den Service beim Boot zu briken.
+            </div>
+
+            <label class="form-label" for="vs-srv-tls-cert">Server-Zertifikat (Fullchain)</label>
+            <div class="file-upload-row">
+              <label class="btn-secondary btn-file-pick" for="vs-srv-tls-cert-file">
+                Cert-Datei waehlen...
+              </label>
+              <input id="vs-srv-tls-cert-file" type="file"
+                     accept=".pem,.crt,.cer,.cert,.fullchain,application/x-pem-file"
+                     class="file-input-hidden" />
+              <span id="vs-srv-tls-cert-filename" class="file-pick-label"></span>
+            </div>
+            <textarea id="vs-srv-tls-cert" class="form-input form-input-mono" rows="6"
+              placeholder="-----BEGIN CERTIFICATE-----..." autocomplete="off"></textarea>
+
+            <label class="form-label" for="vs-srv-tls-key" style="margin-top:14px;">
+              Privater Schluessel
+            </label>
+            <div class="file-upload-row">
+              <label class="btn-secondary btn-file-pick" for="vs-srv-tls-key-file">
+                Key-Datei waehlen...
+              </label>
+              <input id="vs-srv-tls-key-file" type="file"
+                     accept=".pem,.key,application/x-pem-file"
+                     class="file-input-hidden" />
+              <span id="vs-srv-tls-key-filename" class="file-pick-label"></span>
+            </div>
+            <textarea id="vs-srv-tls-key" class="form-input form-input-mono" rows="5"
+              placeholder="-----BEGIN PRIVATE KEY-----..." autocomplete="off"></textarea>
+
+            <div class="form-hint totp-codes-warning" style="margin-top:10px;">
+              ⚠ Nach Save: Cockpit-Service neu starten, sonst greift die Aenderung nicht.
+            </div>
+            <div class="form-row" style="margin-top:8px; gap:8px;">
+              <button class="btn-primary" id="vs-srv-tls-confirm-btn" type="button">Speichern</button>
+              <button class="btn-link" id="vs-srv-tls-cancel-btn" type="button">Abbrechen</button>
+            </div>
+            <div class="form-error" id="vs-srv-tls-form-error" hidden></div>
+          </div>
 
           <div class="form-divider"></div>
 
@@ -1628,7 +1663,7 @@
           </div>
 
           <div id="totp-codes-block" hidden>
-            <p class="form-hint" style="color: var(--color-warn, #c8521b);">
+            <p class="form-hint totp-codes-warning">
               <strong>Backup-Codes (einmalige Anzeige!)</strong> Speichere sie an
               einem sicheren Ort. Pro Code kannst du dich einmalig anmelden, wenn
               du keinen Authenticator-Zugriff hast.

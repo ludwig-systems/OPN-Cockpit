@@ -700,6 +700,142 @@ def compare_unbound_hosts(
     )
 
 
+# ---------------------------------------------------------------------------
+# Unbound Domain-Overrides (DNS-Weiterleitungen) — read-only Vergleich
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class UnboundDomainItem:
+    """Eine Unbound-Domain-Override-Eintragung (Weiterleitung): Domain
+    -> externer Resolver (oft Active-Directory-DNS)."""
+
+    domain: str
+    server: str
+    description: str
+    enabled: bool
+
+    @property
+    def identity_key(self) -> str:
+        return self.domain.lower()
+
+    @property
+    def display_name(self) -> str:
+        return self.domain or "(leer)"
+
+    @property
+    def content_fingerprint(self) -> str:
+        raw = f"{self.server}\0{self.description}\0{'1' if self.enabled else '0'}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _iter_unbound_domain_nodes(root: ET.Element) -> list[ET.Element]:
+    for path in (
+        "./unbound/domainoverrides/domain",
+        "./opnsense/unbound/domainoverrides/domain",
+        "./OPNsense/unboundplus/domainoverrides/domain",
+    ):
+        found = root.findall(path)
+        if found:
+            return found
+    return []
+
+
+def extract_unbound_domains(xml_bytes: bytes) -> list[UnboundDomainItem]:
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return []
+    items: list[UnboundDomainItem] = []
+    for node in _iter_unbound_domain_nodes(root):
+        domain = (node.findtext("domain") or "").strip()
+        if not domain:
+            continue
+        server = (node.findtext("ip") or node.findtext("server") or "").strip()
+        descr = (node.findtext("descr")
+                 or node.findtext("description") or "").strip()
+        enabled_raw = (node.findtext("enabled") or "1").strip()
+        items.append(UnboundDomainItem(
+            domain=domain,
+            server=server,
+            description=descr,
+            enabled=enabled_raw not in ("0", "false", "no"),
+        ))
+    return items
+
+
+def compare_unbound_domains(
+    per_device: dict[str, list[UnboundDomainItem] | None],
+    columns: list[str],
+) -> AliasComparison:
+    """Vergleichs-Matrix fuer Unbound-Domain-Overrides (Weiterleitungen).
+
+    Identitaet = ``domain`` (case-insensitive). Cell-``type`` = Ziel-IP.
+    """
+    all_keys: set[str] = set()
+    items_by_device: dict[str, dict[str, UnboundDomainItem]] = {}
+    for device_id in columns:
+        items = per_device.get(device_id)
+        if items is None:
+            items_by_device[device_id] = {}
+            continue
+        items_by_device[device_id] = {d.identity_key: d for d in items}
+        all_keys.update(d.identity_key for d in items)
+
+    rows: list[AliasRow] = []
+    drift_count = 0
+    for key in sorted(all_keys, key=str.lower):
+        display_name = ""
+        cells: list[tuple[str, AliasCell]] = []
+        fingerprints_seen: set[str] = set()
+        any_absent = False
+        for device_id in columns:
+            if per_device.get(device_id) is None:
+                cells.append((device_id, AliasCell(status="unreachable")))
+                continue
+            entry = items_by_device[device_id].get(key)
+            if entry is None:
+                cells.append((device_id, AliasCell(status="absent")))
+                any_absent = True
+                continue
+            if not display_name:
+                display_name = entry.display_name
+            detail = [f"resolver: {entry.server or '-'}"]
+            if not entry.enabled:
+                detail.append("deaktiviert")
+            if entry.description:
+                detail.append(f"descr: {entry.description}")
+            cells.append((device_id, AliasCell(
+                status="present",
+                type=entry.server,
+                content_fingerprint=entry.content_fingerprint,
+                content_count=0,
+                description=entry.description,
+                content=tuple(detail),
+            )))
+            fingerprints_seen.add(entry.content_fingerprint)
+        uniform = not any_absent and len(fingerprints_seen) == 1
+        if not uniform:
+            drift_count += 1
+        rows.append(AliasRow(name=display_name or key, cells=tuple(cells), uniform=uniform))
+
+    if not rows:
+        summary = "Keine Unbound-Domain-Overrides auf den gewaehlten Geraeten."
+    elif drift_count == 0:
+        summary = f"{len(rows)} Domain-Overrides, alle auf allen Geraeten identisch."
+    else:
+        summary = (
+            f"{len(rows)} Domain-Overrides insgesamt, davon {drift_count} mit "
+            "Unterschieden zwischen den Geraeten."
+        )
+
+    return AliasComparison(
+        columns=tuple(columns),
+        rows=tuple(rows),
+        summary=summary,
+    )
+
+
 __all__ = [
     "AliasCell",
     "AliasComparison",
@@ -707,13 +843,16 @@ __all__ = [
     "AliasRow",
     "RouteItem",
     "RuleItem",
+    "UnboundDomainItem",
     "UnboundHostItem",
     "compare_aliases",
     "compare_routes",
     "compare_rules",
+    "compare_unbound_domains",
     "compare_unbound_hosts",
     "extract_aliases",
     "extract_routes",
     "extract_rules",
+    "extract_unbound_domains",
     "extract_unbound_hosts",
 ]

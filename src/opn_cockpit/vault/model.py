@@ -49,6 +49,15 @@ class VaultDevice:
     ssh_user: str = ""
     ssh_private_key_pem: str = ""
 
+    # v0.8: Wartungsmodus. Wenn True wird das Geraet von allen Polling-
+    # Pfaden ausgeschlossen — Heartbeat, Scheduled Backups, Drift-Check,
+    # Update-Check. Damit fuellt sich das Audit-Log nicht mit Fehler-
+    # eintraegen, wenn ein Standort planmaessig offline ist (Hardware-
+    # Tausch, Mobile-Rack im Transit, Stilllegung in Vorbereitung).
+    # Manuelle Aktionen (Plan/Apply, Test-Connection, Backup-Download)
+    # bleiben moeglich — der User entscheidet bewusst.
+    maintenance: bool = False
+
     @staticmethod
     def new_id() -> str:
         return str(uuid.uuid4())
@@ -183,6 +192,7 @@ def _device_from_dict(raw: dict[str, Any]) -> VaultDevice:
         ssh_port=int(raw.get("ssh_port", 22)),
         ssh_user=str(raw.get("ssh_user", "")),
         ssh_private_key_pem=str(raw.get("ssh_private_key_pem", "")),
+        maintenance=bool(raw.get("maintenance", False)),
     )
 
 

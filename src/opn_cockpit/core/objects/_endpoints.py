@@ -54,6 +54,12 @@ UNBOUND_HOST_SET = "/api/unbound/settings/setHostOverride/{uuid}"
 UNBOUND_HOST_DEL = "/api/unbound/settings/delHostOverride/{uuid}"
 UNBOUND_RECONFIGURE = "/api/unbound/service/reconfigure"
 
+# Unbound-DNS Domain-Overrides (Weiterleitungen): leiten alle Queries fuer
+# eine Domain an einen externen Resolver weiter. Read-only-Anzeige (CRUD
+# kann spaeter folgen).
+UNBOUND_DOMAIN_SEARCH = "/api/unbound/settings/searchDomainOverride"
+UNBOUND_DOMAIN_GET = "/api/unbound/settings/getDomainOverride/{uuid}"
+
 # ---------------------------------------------------------------------------
 # Discovery (v1.1)
 # ---------------------------------------------------------------------------

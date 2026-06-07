@@ -125,10 +125,13 @@ Klick auf eine Karte → Device-Modal mit sechs Tabs:
   plus „Backup erzeugen" (server-only ohne Browser-Download-Dialog)
 - **Aliase** — Live-Liste mit Filter + Bearbeiten/Löschen pro Eintrag
 - **Routen** — Live-Liste der statischen Routen + Bearbeiten/Löschen
-- **Regeln** — Live-Liste der Firewall-Filter-Regeln, plus
-  „Neue Regel" / Bearbeiten / Löschen. Benötigt das `os-firewall`-Plugin
-  auf der OPNsense (ab 24+ Standard)
-- **DNS** — Live-Liste der Unbound-Host-Overrides, plus
+- **Regeln** — Live-Liste der **Automation-Filter-Regeln** (Firewall →
+  Automation → Filter), plus „Neue Regel" / Bearbeiten / Löschen. Ab
+  OPNsense 23.7 in Core integriert (vorher als `os-firewall`-Plugin).
+  Klassische „Firewall → Rules" (Legacy-XML) sind nicht API-zugänglich
+  und werden nicht angezeigt
+- **DNS** — Live-Liste der Unbound Host-Overrides + Domain-Overrides
+  (Weiterleitungen) in getrennten Tabs, plus
   „Neuer Host-Override" / Bearbeiten / Löschen
 
 Bearbeiten/Löschen läuft immer durch den Plan/Apply-Flow:

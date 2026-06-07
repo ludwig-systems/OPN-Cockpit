@@ -4,8 +4,8 @@ Multi-Site-Management für OPNsense-Firewalls. Zentrale, ferngesteuerte
 Konfiguration mehrerer Standorte über die OPNsense-REST-API:
 
 - **Vier CRUD-Subsysteme** mit voller Edit/Delete-Unterstützung:
-  Aliase, statische Routen, Filter-Regeln (`os-firewall`-Plugin), Unbound
-  DNS Host-Overrides
+  Aliase, statische Routen, Filter-Regeln (Automation-Filter, ab
+  OPNsense 23.7 in Core), Unbound DNS Host-Overrides + Domain-Overrides
 - **Plan/Apply-Vorschau** vor jedem Rollout, Read-back-Verifikation, parallel
   über N Geräte
 - **Config-Compare-Matrix** zeigt Drift zwischen 2–N Geräten pro Subsystem
@@ -72,7 +72,7 @@ minimalen Rechten.
      Firmware-Status):
      - `Diagnostics: Configuration History` *(Backup-Download)*
      - `Firewall: Aliases: Edit`
-     - `Firewall: Rules: Edit` *(Filter-Regeln, benötigt `os-firewall`-Plugin)*
+     - `Firewall: Rules: Edit` *(Automation-Filter, ab OPNsense 23.7 in Core; vorher als `os-firewall`-Plugin)*
      - `Services: Unbound DNS: Edit Host Override`
      - `Services: Unbound DNS: Restart Service`
      - `System: Firmware`
@@ -121,8 +121,9 @@ minimalen Rechten.
   „Backup erzeugen" (server-only)
 - **Aliase** — Live-Liste mit Filter, Edit/Delete pro Eintrag
 - **Routen** — Live-Liste aller statischen Routen, Edit/Delete pro Eintrag
-- **Regeln** — Live-Liste der Firewall-Filter-Regeln, Add/Edit/Delete
-  (benötigt `os-firewall`-Plugin)
+- **Regeln** — Live-Liste der Automation-Filter-Regeln (Firewall →
+  Automation → Filter), Add/Edit/Delete. Klassische „Firewall → Rules"
+  (Legacy-XML-Editor) sind nicht API-zugänglich und werden nicht angezeigt.
 - **DNS** — Live-Liste der Unbound-Host-Overrides, Add/Edit/Delete
 
 ### Plan/Apply-Flow

@@ -56,11 +56,20 @@ und `disabled` sind editierbar. Identische Werte → SKIP.
 
 ---
 
-## Firewall-Filter-Regeln
+## Firewall-Filter-Regeln (Automation-Rules)
 
-> ⚠️ **Voraussetzung:** `os-firewall`-Plugin auf der OPNsense (ab 24+
-> Standard). Ohne Plugin liefert der List-Endpoint `reachable=false` mit
-> Hinweis.
+> ℹ️ **Welche Regeln zeigt Cockpit?** OPNsense hat zwei getrennte
+> Regel-Editoren:
+>
+> - **Firewall → Automation → Filter** — die "neuen" Regeln, JSON-API,
+>   ab OPNsense 23.7 fest in Core integriert (vorher als optionales
+>   `os-firewall`-Plugin). **Diese zeigt Cockpit.**
+> - **Firewall → Rules** — der klassische Legacy-XML-Editor. Hat keine
+>   stabile JSON-API und wird hier **nicht** angezeigt. Wer dort Regeln
+>   verwaltet, sieht sie nur in der OPNsense-Web-GUI.
+>
+> Wenn der Regeln-Tab leer ist, hat das Gerät einfach keine
+> Automation-Regeln — kein Bug.
 
 **Live-Liste:** Karte → **Regeln-Tab** → Cockpit ruft
 `POST /api/firewall/filter/searchRule` und zeigt alle Regeln mit

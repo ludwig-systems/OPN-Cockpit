@@ -1302,6 +1302,7 @@
     const article = document.createElement('article');
     article.className = 'card';
     if (reachability === 'offline') article.classList.add('offline');
+    if (reachability === 'maintenance') article.classList.add('maintenance');
     if (!device.tls_verify) article.classList.add('tls-warning');
     if (state.selectedDeviceIds.has(device.id)) article.classList.add('selected');
 
@@ -1338,6 +1339,13 @@
         <circle cx="7" cy="9.4" r="0.55" fill="currentColor"/>
       </svg>`;
       row.appendChild(warn);
+    }
+    if (device.maintenance) {
+      const mnt = document.createElement('span');
+      mnt.className = 'card-maintenance-badge';
+      mnt.title = 'Wartungsmodus: Polling (Heartbeat + Backups + Drift) ist deaktiviert';
+      mnt.textContent = 'Wartung';
+      row.appendChild(mnt);
     }
     // Quick-Action-Icons: erscheinen auf Hover. Container damit wir das
     // ganze Set ueber CSS einblenden koennen.
@@ -1556,6 +1564,7 @@
 
   function computeReachability(hb) {
     if (!hb) return 'checking';
+    if (hb.maintenance) return 'maintenance';
     const age = Date.now() - hb.checked_at_ms;
     if (age > HEARTBEAT_STALE_AFTER_MS) return 'checking';
     return hb.reachable ? 'online' : 'offline';
@@ -1563,6 +1572,7 @@
 
   function formatHeartbeatLabel(hb, reach) {
     if (!hb) return 'prüfe…';
+    if (reach === 'maintenance') return 'Wartungsmodus';
     if (reach === 'checking') return 'prüfe…';
     const age = Math.round((Date.now() - hb.checked_at_ms) / 1000);
     if (age < 5) return 'gerade eben';
@@ -2010,12 +2020,74 @@
     `;
   }
 
+  // -------------------- Disk-Space-Widget (Topbar) --------------------
+
+  let diskPollHandle = null;
+  let diskCriticalWarned = false;
+  const DISK_POLL_INTERVAL_MS = 60 * 1000;  // jede Minute reicht
+
+  async function pollDiskUsage() {
+    try {
+      const r = await apiGet('/api/system/disk');
+      if (r.status === 401) return;
+      if (!r.ok) return;
+      const data = await r.json();
+      const widget = $('#topbar-disk');
+      const fill = $('#topbar-disk-fill');
+      const label = $('#topbar-disk-pct');
+      if (!widget || !fill || !label) return;
+      if (!data.relevant) {
+        widget.hidden = true;
+        return;
+      }
+      widget.hidden = false;
+      const pct = Math.max(0, Math.min(100, Number(data.used_percent) || 0));
+      fill.style.width = pct.toFixed(1) + '%';
+      label.textContent = pct.toFixed(0) + '%';
+      widget.dataset.severity = data.severity || 'ok';
+      const gbFree = (data.free_bytes / (1024 ** 3)).toFixed(1);
+      const gbTotal = (data.total_bytes / (1024 ** 3)).toFixed(1);
+      widget.title =
+        'Speicherplatz fuer Backups, Audit-Log und Server-Daten\n'
+        + data.path + '\n'
+        + gbFree + ' GB frei von ' + gbTotal + ' GB ('
+        + pct.toFixed(1) + '% belegt)';
+      // Bei "critical" einen einmaligen Toast — nicht bei jedem Tick.
+      if (data.severity === 'critical' && !diskCriticalWarned) {
+        diskCriticalWarned = true;
+        showToast('Speicherplatz kritisch: nur ' + gbFree + ' GB frei. '
+          + 'Backups koennten ab jetzt scheitern.', true);
+      } else if (data.severity !== 'critical') {
+        diskCriticalWarned = false;
+      }
+    } catch (_) {
+      // Netzwerk-Hickup → naechster Tick versucht erneut.
+    }
+  }
+
+  function startDiskPolling() {
+    if (diskPollHandle !== null) return;
+    pollDiskUsage();
+    diskPollHandle = setInterval(pollDiskUsage, DISK_POLL_INTERVAL_MS);
+  }
+
+  function stopDiskPolling() {
+    if (diskPollHandle !== null) {
+      clearInterval(diskPollHandle);
+      diskPollHandle = null;
+    }
+    const widget = $('#topbar-disk');
+    if (widget) widget.hidden = true;
+  }
+
   // -------------------- Heartbeat-Polling --------------------
 
   function startHeartbeat() {
     if (heartbeatHandle !== null) return;
     pollHeartbeat();
     heartbeatHandle = setInterval(pollHeartbeat, HEARTBEAT_INTERVAL_MS);
+    // Disk-Widget laeuft an dasselbe Lifecycle-Event gekoppelt.
+    startDiskPolling();
   }
 
   function stopHeartbeat() {
@@ -2023,6 +2095,7 @@
       clearInterval(heartbeatHandle);
       heartbeatHandle = null;
     }
+    stopDiskPolling();
   }
 
   async function pollHeartbeat() {
@@ -2042,6 +2115,7 @@
         state.heartbeat[entry.device_id] = {
           reachable: entry.reachable,
           checked_at_ms: now,
+          maintenance: !!entry.maintenance,
         };
       }
       renderGrid();
@@ -2162,6 +2236,8 @@
     const sshHint = $('#ad-ssh-key-hint');
     if (sshHint) sshHint.textContent =
       'Akzeptierte Formate: Ed25519, ECDSA, RSA, DSA. Bei Anlage Pflichtfeld wenn Safety-Net an.';
+    const mntCb = $('#ad-maintenance');
+    if (mntCb) mntCb.checked = !!data.maintenance;
     $('#add-modal-title').textContent = data.duplicateOf
       ? `„${data.duplicateOf}" duplizieren`
       : 'Gerät hinzufügen';
@@ -2202,6 +2278,8 @@
     if (sshHint) sshHint.textContent = device.ssh_key_present
       ? 'Key ist im Tresor hinterlegt — leer lassen = unveraendert.'
       : 'Akzeptierte Formate: Ed25519, ECDSA, RSA, DSA.';
+    const mntCb = $('#ad-maintenance');
+    if (mntCb) mntCb.checked = !!device.maintenance;
     $('#add-modal-title').textContent = `„${device.name}" bearbeiten`;
     $('#add-modal-confirm').textContent = 'Speichern';
     $('#add-modal-error').hidden = true;
@@ -2262,6 +2340,7 @@
     const sshPort = parseInt(sshPortRaw, 10) || 22;
     const sshUser = $('#ad-ssh-user').value.trim();
     const sshKey = $('#ad-ssh-key').value;  // KEIN trim - PEM-Format pinpoint-sensitiv
+    const maintenance = !!($('#ad-maintenance') && $('#ad-maintenance').checked);
 
     if (modalMode === 'add') {
       if (!name || !host || !apiKey || !apiSecret) {
@@ -2299,6 +2378,7 @@
           ssh_port: sshPort,
           ssh_user: sshUser,
           ssh_private_key_pem: sshKey,
+          maintenance,
         });
       } else {
         const body = {
@@ -2309,6 +2389,7 @@
           ssh_host: sshHost,
           ssh_port: sshPort,
           ssh_user: sshUser,
+          maintenance,
         };
         if (sshKey.trim()) body.ssh_private_key_pem = sshKey;
         // Key nur senden wenn der User ihn wirklich geaendert hat - der
@@ -2422,6 +2503,9 @@
     } else if (tabName === 'rules') {
       loadRulesTab().catch(() => {});
     } else if (tabName === 'unbound') {
+      // Beim Tab-Wechsel immer auf Sub-Tab "hosts" zuruecksetzen — der
+      // User-Klick auf "Domain-Overrides" laedt diesen lazy nach.
+      switchDnsSubtab('hosts');
       loadUnboundTab().catch(() => {});
     } else if (tabName === 'updates') {
       renderUpdatesTab();
@@ -2793,6 +2877,100 @@
   let unbEditOriginalDomain = '';
   let unbTargetDeviceId = '';
 
+  // Domain-Overrides (Weiterleitungen) - read-only zweiter Sub-Tab.
+  let domRawDomains = [];
+  let domLoadedForDeviceId = null;
+  let dnsActiveSub = 'hosts';
+
+  function switchDnsSubtab(sub) {
+    dnsActiveSub = sub;
+    const tabs = document.querySelectorAll('.dns-subtab');
+    tabs.forEach((t) => {
+      t.classList.toggle('dns-subtab-active', t.dataset.subtab === sub);
+    });
+    const panes = document.querySelectorAll('.dns-subpane');
+    panes.forEach((p) => {
+      p.hidden = p.dataset.dnsSubpane !== sub;
+    });
+    if (sub === 'domains') {
+      loadUnboundDomainsTab().catch(() => {});
+    }
+  }
+
+  async function loadUnboundDomainsTab(force = false) {
+    if (!currentDeviceId) return;
+    if (!force && domLoadedForDeviceId === currentDeviceId) {
+      renderDomainList();
+      return;
+    }
+    domRawDomains = [];
+    domLoadedForDeviceId = currentDeviceId;
+    $('#dom-status').textContent = 'Lade…';
+    $('#dom-filter').value = '';
+    $('#dom-list').innerHTML = '';
+    try {
+      const r = await apiGet(`/api/inventory/devices/${currentDeviceId}/unbound-domains`);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        $('#dom-status').textContent = body.detail || `Fehler ${r.status}`;
+        return;
+      }
+      const data = await r.json();
+      domRawDomains = data.domains || [];
+      $('#dom-status').textContent = data.summary;
+      renderDomainList();
+    } catch (err) {
+      $('#dom-status').textContent = err.message;
+    }
+  }
+
+  function renderDomainList() {
+    const list = $('#dom-list');
+    list.innerHTML = '';
+    const filter = ($('#dom-filter').value || '').trim().toLowerCase();
+    const matching = filter
+      ? domRawDomains.filter((d) =>
+          (d.domain || '').toLowerCase().includes(filter)
+          || (d.server || '').toLowerCase().includes(filter)
+          || (d.description || '').toLowerCase().includes(filter))
+      : domRawDomains;
+    if (matching.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.padding = '24px';
+      empty.style.textAlign = 'center';
+      empty.style.color = 'var(--text-subtle)';
+      empty.textContent = filter
+        ? 'Kein Treffer fuer den Filter.'
+        : 'Keine Domain-Overrides (Weiterleitungen) auf diesem Geraet.';
+      list.appendChild(empty);
+      return;
+    }
+    for (const d of matching) {
+      const row = document.createElement('div');
+      row.className = 'alm-row';
+      const head = document.createElement('div');
+      head.className = 'alm-row-head';
+      const name = document.createElement('span');
+      name.className = 'alm-name';
+      const enabledMarker = d.enabled ? '' : ' (deaktiviert)';
+      name.textContent = d.domain + enabledMarker;
+      const meta = document.createElement('span');
+      meta.className = 'alm-meta';
+      meta.textContent = '→ ' + d.server;
+      head.appendChild(name);
+      head.appendChild(meta);
+      row.appendChild(head);
+      if (d.description) {
+        const descr = document.createElement('div');
+        descr.className = 'alm-descr';
+        descr.textContent = d.description;
+        row.appendChild(descr);
+      }
+      list.appendChild(row);
+    }
+  }
+
   async function loadUnboundTab(force = false) {
     if (!currentDeviceId) return;
     const device = state.devices.find((d) => d.id === currentDeviceId);
@@ -3070,9 +3248,22 @@
       empty.style.padding = '24px';
       empty.style.textAlign = 'center';
       empty.style.color = 'var(--text-subtle)';
-      empty.textContent = filter
-        ? 'Kein Treffer fuer den Filter.'
-        : 'Keine Filter-Regeln auf diesem Geraet (oder os-firewall-Plugin nicht installiert).';
+      if (filter) {
+        empty.textContent = 'Kein Treffer fuer den Filter.';
+      } else {
+        // Nur Automation-Filter (Firewall -> Automation -> Filter) sind ueber
+        // die OPNsense-API erreichbar. Klassische "Firewall -> Rules" (XML-
+        // Legacy-Editor) werden nicht angezeigt — das ist eine OPNsense-
+        // Limitierung, kein Cockpit-Bug.
+        empty.innerHTML = (
+          'Keine <strong>Automation-Filter-Regeln</strong> auf diesem Geraet.<br/>'
+          + '<small style="opacity:0.7;">'
+          + 'Nur Regeln aus "Firewall &rarr; Automation &rarr; Filter" sind via '
+          + 'OPNsense-API erreichbar. Klassische "Firewall &rarr; Rules" '
+          + '(Legacy-XML-Editor) werden hier nicht gelistet.'
+          + '</small>'
+        );
+      }
       list.appendChild(empty);
       return;
     }
@@ -4968,6 +5159,13 @@
     $('#vs-backup-ok').hidden = true;
     $('#vs-pw-error').hidden = true;
     $('#vs-pw-ok').hidden = true;
+    // Inline-Expand-Forms eingeklappt starten — User klickt explizit auf
+    // "Root-CA hinzufuegen..." / "Server-Zertifikat hinterlegen..." um sie
+    // einzublenden.
+    const caForm = $('#vs-ca-add-form');
+    if (caForm) caForm.hidden = true;
+    const tlsForm = $('#vs-srv-tls-form');
+    if (tlsForm) tlsForm.hidden = true;
     $('#vault-settings-modal').hidden = false;
     setTimeout(() => $('#vs-timeout').focus(), 0);
     // Trust-Store unabhaengig laden - das Modal soll auch ohne
@@ -5130,29 +5328,76 @@
     }
   }
 
-  function openServerTlsModal() {
-    $('#srv-tls-cert').value = '';
-    $('#srv-tls-key').value = '';
-    $('#srv-tls-error').hidden = true;
-    $('#srv-tls-modal').hidden = false;
-    setTimeout(() => $('#srv-tls-cert').focus(), 0);
+  // File-Picker -> Textarea-Helfer fuer die Inline-Forms.
+  // Akzeptiert PEM-Dateien (Cert/Key/CA), liest als Text ein. Fehler
+  // werden in eine sichtbare Fehlerzeile gespiegelt damit der User
+  // weiss warum nichts in der Textarea steht.
+  function wireFilePickerToTextarea(fileInputId, textareaId, labelId, errorBoxId) {
+    const fileInput = $('#' + fileInputId);
+    if (!fileInput) return;
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files && fileInput.files[0];
+      const label = $('#' + labelId);
+      const err = $('#' + errorBoxId);
+      if (err) err.hidden = true;
+      if (!file) {
+        if (label) label.textContent = '';
+        return;
+      }
+      // 1 MB Cap — Cert/Key/CA-PEM ist im Schnitt 1-8 KB; alles darueber
+      // ist falsche Datei und wuerde nur den Browser ausbremsen.
+      if (file.size > 1024 * 1024) {
+        if (err) {
+          err.textContent = 'Datei zu gross (>1 MB) — vermutlich kein PEM.';
+          err.hidden = false;
+        }
+        fileInput.value = '';
+        if (label) label.textContent = '';
+        return;
+      }
+      try {
+        const text = await file.text();
+        const ta = $('#' + textareaId);
+        if (ta) ta.value = text;
+        if (label) label.textContent = file.name + ' (' + Math.round(file.size / 1024 * 10) / 10 + ' KB)';
+      } catch (e) {
+        if (err) {
+          err.textContent = 'Datei nicht lesbar: ' + e.message;
+          err.hidden = false;
+        }
+      }
+    });
   }
 
-  function closeServerTlsModal() {
-    $('#srv-tls-modal').hidden = true;
+  function openServerTlsForm() {
+    $('#vs-srv-tls-cert').value = '';
+    $('#vs-srv-tls-key').value = '';
+    $('#vs-srv-tls-cert-filename').textContent = '';
+    $('#vs-srv-tls-key-filename').textContent = '';
+    const certFile = $('#vs-srv-tls-cert-file');
+    const keyFile = $('#vs-srv-tls-key-file');
+    if (certFile) certFile.value = '';
+    if (keyFile) keyFile.value = '';
+    $('#vs-srv-tls-form-error').hidden = true;
+    $('#vs-srv-tls-form').hidden = false;
+    setTimeout(() => $('#vs-srv-tls-cert-file').focus(), 0);
+  }
+
+  function closeServerTlsForm() {
+    $('#vs-srv-tls-form').hidden = true;
   }
 
   async function submitServerTls() {
-    const certPem = $('#srv-tls-cert').value;
-    const keyPem = $('#srv-tls-key').value;
-    const err = $('#srv-tls-error');
+    const certPem = $('#vs-srv-tls-cert').value;
+    const keyPem = $('#vs-srv-tls-key').value;
+    const err = $('#vs-srv-tls-form-error');
     err.hidden = true;
     if (!certPem.trim() || !keyPem.trim()) {
-      err.textContent = 'Cert und Key sind Pflichtfelder.';
+      err.textContent = 'Cert und Key sind Pflichtfelder — Datei waehlen oder einfuegen.';
       err.hidden = false;
       return;
     }
-    const btn = $('#srv-tls-confirm');
+    const btn = $('#vs-srv-tls-confirm-btn');
     btn.disabled = true;
     btn.textContent = 'Speichere…';
     try {
@@ -5168,7 +5413,7 @@
       }
       const data = await r.json();
       showToast(`Server-TLS gespeichert (${data.cert_subject_cn}). Neustart erforderlich.`);
-      closeServerTlsModal();
+      closeServerTlsForm();
       await loadServerTlsStatus();
     } catch (e) {
       err.textContent = e.message;
@@ -5285,23 +5530,26 @@
     }
   }
 
-  function openCaAddModal() {
-    $('#ca-pem').value = '';
-    $('#ca-preview').hidden = true;
-    $('#ca-preview').innerHTML = '';
-    $('#ca-add-error').hidden = true;
-    $('#ca-add-modal').hidden = false;
-    setTimeout(() => $('#ca-pem').focus(), 0);
+  function openCaAddForm() {
+    $('#vs-ca-pem').value = '';
+    $('#vs-ca-filename').textContent = '';
+    const caFile = $('#vs-ca-file');
+    if (caFile) caFile.value = '';
+    $('#vs-ca-preview').hidden = true;
+    $('#vs-ca-preview').innerHTML = '';
+    $('#vs-ca-add-error').hidden = true;
+    $('#vs-ca-add-form').hidden = false;
+    setTimeout(() => $('#vs-ca-file').focus(), 0);
   }
 
-  function closeCaAddModal() {
-    $('#ca-add-modal').hidden = true;
+  function closeCaAddForm() {
+    $('#vs-ca-add-form').hidden = true;
   }
 
   async function inspectCaPem() {
-    const pem = $('#ca-pem').value.trim();
-    const preview = $('#ca-preview');
-    const err = $('#ca-add-error');
+    const pem = $('#vs-ca-pem').value.trim();
+    const preview = $('#vs-ca-preview');
+    const err = $('#vs-ca-add-error');
     err.hidden = true;
     if (!pem) {
       err.textContent = 'Kein PEM eingegeben.';
@@ -5350,15 +5598,15 @@
   }
 
   async function submitCaAdd() {
-    const pem = $('#ca-pem').value.trim();
-    const err = $('#ca-add-error');
+    const pem = $('#vs-ca-pem').value.trim();
+    const err = $('#vs-ca-add-error');
     err.hidden = true;
     if (!pem) {
-      err.textContent = 'Kein PEM eingegeben.';
+      err.textContent = 'Kein PEM eingegeben — Datei waehlen oder einfuegen.';
       err.hidden = false;
       return;
     }
-    const btn = $('#ca-add-confirm');
+    const btn = $('#vs-ca-confirm-btn');
     btn.disabled = true;
     btn.textContent = 'Speichere…';
     try {
@@ -5372,7 +5620,7 @@
       }
       const data = await r.json();
       showToast(`Trust-Store hat jetzt ${data.entries.length} Eintraege.`);
-      closeCaAddModal();
+      closeCaAddForm();
       await loadTrustStore();
     } catch (e) {
       err.textContent = e.message;
@@ -6826,25 +7074,27 @@
       });
       $('#vs-timeout-save').addEventListener('click', saveInactivityTimeout);
       $('#vs-backup-save').addEventListener('click', saveBackupSettings);
-      $('#vs-ca-add-btn').addEventListener('click', openCaAddModal);
-      $('#ca-add-close').addEventListener('click', closeCaAddModal);
-      $('#ca-add-cancel').addEventListener('click', closeCaAddModal);
-      $('#ca-inspect-btn').addEventListener('click', () => {
+      // Trust-CA: Inline-Expand-Form im Vault-Settings (kein Sub-Modal mehr).
+      $('#vs-ca-add-btn').addEventListener('click', openCaAddForm);
+      $('#vs-ca-cancel-btn').addEventListener('click', closeCaAddForm);
+      $('#vs-ca-inspect-btn').addEventListener('click', () => {
         inspectCaPem().catch((e) => showToast(e.message, true));
       });
-      $('#ca-add-confirm').addEventListener('click', () => {
+      $('#vs-ca-confirm-btn').addEventListener('click', () => {
         submitCaAdd().catch((e) => showToast(e.message, true));
       });
-      // Server-TLS Buttons
-      $('#vs-srv-tls-upload-btn').addEventListener('click', openServerTlsModal);
+      wireFilePickerToTextarea('vs-ca-file', 'vs-ca-pem', 'vs-ca-filename', 'vs-ca-add-error');
+      // Server-TLS: Inline-Expand-Form (kein Sub-Modal mehr).
+      $('#vs-srv-tls-upload-btn').addEventListener('click', openServerTlsForm);
       $('#vs-srv-tls-clear-btn').addEventListener('click', () => {
         clearServerTls().catch((e) => showToast(e.message, true));
       });
-      $('#srv-tls-close').addEventListener('click', closeServerTlsModal);
-      $('#srv-tls-cancel').addEventListener('click', closeServerTlsModal);
-      $('#srv-tls-confirm').addEventListener('click', () => {
+      $('#vs-srv-tls-cancel-btn').addEventListener('click', closeServerTlsForm);
+      $('#vs-srv-tls-confirm-btn').addEventListener('click', () => {
         submitServerTls().catch((e) => showToast(e.message, true));
       });
+      wireFilePickerToTextarea('vs-srv-tls-cert-file', 'vs-srv-tls-cert', 'vs-srv-tls-cert-filename', 'vs-srv-tls-form-error');
+      wireFilePickerToTextarea('vs-srv-tls-key-file', 'vs-srv-tls-key', 'vs-srv-tls-key-filename', 'vs-srv-tls-form-error');
       $('#vs-pw-submit').addEventListener('click', changeVaultPassword);
       // Backdrop-Click bewusst nicht — Eingabe-Modal.
     }
@@ -6993,6 +7243,12 @@
     if (unbFilter) unbFilter.addEventListener('input', renderUnboundList);
     const unbAdd = $('#unb-add-btn');
     if (unbAdd) unbAdd.addEventListener('click', openUnboundAddModal);
+    // DNS-Sub-Tabs (Hosts / Domain-Overrides)
+    document.querySelectorAll('.dns-subtab').forEach((btn) => {
+      btn.addEventListener('click', () => switchDnsSubtab(btn.dataset.subtab));
+    });
+    const domFilter = $('#dom-filter');
+    if (domFilter) domFilter.addEventListener('input', renderDomainList);
     const unbCancel = $('#unbound-modal-cancel');
     if (unbCancel) unbCancel.addEventListener('click', closeUnboundModal);
     const unbClose = $('#unbound-modal-close');

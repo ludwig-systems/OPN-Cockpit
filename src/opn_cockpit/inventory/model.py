@@ -37,6 +37,7 @@ class Device:
     ssh_port: int = 22
     ssh_user: str = ""
     ssh_key_present: bool = False
+    maintenance: bool = False
 
     @classmethod
     def from_vault_device(cls, vd: VaultDevice) -> Device:
@@ -53,6 +54,7 @@ class Device:
             ssh_port=int(vd.ssh_port),
             ssh_user=str(vd.ssh_user),
             ssh_key_present=bool(str(vd.ssh_private_key_pem).strip()),
+            maintenance=bool(vd.maintenance),
         )
 
     @property

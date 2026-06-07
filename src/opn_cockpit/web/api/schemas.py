@@ -388,6 +388,9 @@ class DeviceResponse(BaseModel):
     ssh_key_present: bool = False
     """True wenn ein Private-Key im Tresor hinterlegt ist. Wert NICHT
     durchreichen - nur die Anwesenheit fuer das UI-Badge."""
+    maintenance: bool = False
+    """Wartungsmodus: Geraet wird von Heartbeat + Scheduled Backups +
+    Drift-Check + Update-Check ausgeschlossen."""
 
 
 class TagSummary(BaseModel):
@@ -465,6 +468,7 @@ class DeviceCreateRequest(BaseModel):
     ssh_port: int = Field(22, ge=1, le=65535)
     ssh_user: str = Field("", max_length=80)
     ssh_private_key_pem: str = Field("", max_length=20000)
+    maintenance: bool = False
 
     @field_validator("api_key", "api_secret", mode="before")
     @classmethod
@@ -494,6 +498,7 @@ class DeviceUpdateRequest(BaseModel):
     ssh_port: int | None = Field(None, ge=1, le=65535)
     ssh_user: str | None = Field(None, max_length=80)
     ssh_private_key_pem: str | None = Field(None, max_length=20000)
+    maintenance: bool | None = None
 
     @field_validator("api_key", "api_secret", mode="before")
     @classmethod
@@ -519,6 +524,9 @@ class HeartbeatEntry(BaseModel):
     device_id: str
     reachable: bool
     checked_at_iso: str
+    maintenance: bool = False
+    """True wenn das Geraet im Wartungsmodus ist — Frontend zeigt den
+    eigenen Status-Dot statt rot/gruen."""
 
 
 class HeartbeatResponse(BaseModel):
@@ -647,8 +655,9 @@ class CompareRequest(BaseModel):
     """N Geraete + Subsystem zum Vergleichen."""
 
     device_ids: list[str] = Field(..., min_length=2)
-    subsystem: str = Field(..., pattern=r"^(aliases|routes|rules|unbound)$")
-    """Unterstuetzte Subsysteme: aliases, routes, rules, unbound."""
+    subsystem: str = Field(..., pattern=r"^(aliases|routes|rules|unbound|unbound-domains)$")
+    """Unterstuetzte Subsysteme: aliases, routes, rules, unbound (Host-
+    Overrides), unbound-domains (Domain-Overrides / Weiterleitungen)."""
 
 
 class CompareCellResponse(BaseModel):
@@ -752,6 +761,29 @@ class DeviceUnboundHostsResponse(BaseModel):
     reachable: bool
     summary: str
     hosts: list[UnboundHostEntryResponse]
+    checked_at_iso: str
+
+
+class UnboundDomainEntryResponse(BaseModel):
+    """Ein Unbound-Domain-Override (Weiterleitung): Domain -> Resolver.
+
+    Wird derzeit nur read-only ausgeliefert (kein CRUD im Cockpit). Live-
+    UUID damit eine spaetere Edit-Implementation drauf aufsetzen kann.
+    """
+
+    uuid: str
+    enabled: bool
+    domain: str
+    server: str
+    description: str
+
+
+class DeviceUnboundDomainsResponse(BaseModel):
+    device_id: str
+    device_name: str
+    reachable: bool
+    summary: str
+    domains: list[UnboundDomainEntryResponse]
     checked_at_iso: str
 
 

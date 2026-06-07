@@ -35,14 +35,17 @@ from opn_cockpit.core.config_compare import (
     AliasItem,
     RouteItem,
     RuleItem,
+    UnboundDomainItem,
     UnboundHostItem,
     compare_aliases,
     compare_routes,
     compare_rules,
+    compare_unbound_domains,
     compare_unbound_hosts,
     extract_aliases,
     extract_routes,
     extract_rules,
+    extract_unbound_domains,
     extract_unbound_hosts,
 )
 from opn_cockpit.core.config_drift import compute_drift_hash
@@ -109,12 +112,14 @@ from opn_cockpit.web.api.schemas import (
     HeartbeatResponse,
     InventoryResponse,
     DeviceRulesResponse,
+    DeviceUnboundDomainsResponse,
     DeviceUnboundHostsResponse,
     RouteEntryResponse,
     RuleEntryResponse,
     SyncAliasRequest,
     SyncAliasResponse,
     TagSummary,
+    UnboundDomainEntryResponse,
     UnboundHostEntryResponse,
 )
 from opn_cockpit.web.auth.dependencies import require_session
@@ -202,6 +207,7 @@ def add_device(
             ssh_port=payload.ssh_port,
             ssh_user=payload.ssh_user,
             ssh_private_key_pem=payload.ssh_private_key_pem,
+            maintenance=bool(getattr(payload, "maintenance", False)),
         )
         devices = session.opened.data.devices
         devices.append(new_device)
@@ -343,15 +349,31 @@ def heartbeat(
         return HeartbeatResponse(results=[])
 
     timestamp = _iso_now()
-    workers = min(HEARTBEAT_MAX_WORKERS, len(targets))
+    # Wartungsmodus: kein Probe, kein TCP-Handshake. Statt das Geraet als
+    # "offline" zu melden geben wir reachable=True zurueck und markieren
+    # es als maintenance — die UI rendert daraus den eigenen Status-Dot.
+    maintenance_results = [
+        HeartbeatEntry(
+            device_id=vd.id, reachable=True, checked_at_iso=timestamp,
+            maintenance=True,
+        )
+        for vd in targets if vd.maintenance
+    ]
+    active_targets = [vd for vd in targets if not vd.maintenance]
+    if not active_targets:
+        return HeartbeatResponse(results=maintenance_results)
+    workers = min(HEARTBEAT_MAX_WORKERS, len(active_targets))
 
     def probe(vd: VaultDevice) -> HeartbeatEntry:
         ok = tcp_probe(vd.host, vd.port, timeout_s=payload.timeout_s)
-        return HeartbeatEntry(device_id=vd.id, reachable=ok, checked_at_iso=timestamp)
+        return HeartbeatEntry(
+            device_id=vd.id, reachable=ok, checked_at_iso=timestamp,
+            maintenance=False,
+        )
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(probe, targets))
-    return HeartbeatResponse(results=results)
+        results = list(pool.map(probe, active_targets))
+    return HeartbeatResponse(results=maintenance_results + results)
 
 
 # ---------------------------------------------------------------------------
@@ -753,6 +775,12 @@ def compare_configs(
             for did, x in xml_by_device.items()
         }
         comparison = compare_unbound_hosts(per_device_unbound, column_order)
+    elif payload.subsystem == "unbound-domains":
+        per_device_dom: dict[str, list[UnboundDomainItem] | None] = {
+            did: extract_unbound_domains(x) if x is not None else None
+            for did, x in xml_by_device.items()
+        }
+        comparison = compare_unbound_domains(per_device_dom, column_order)
     else:
         # Schema-Validator stellt das eigentlich sicher, defensiver Fallback
         raise HTTPException(
@@ -1054,12 +1082,17 @@ def get_device_firewall_rules(
     device_id: str,
     session: Session = Depends(require_session),
 ) -> DeviceRulesResponse:
-    """Liefert die Live-Filter-Regeln eines Geraets via OPNsense-searchRule.
+    """Liefert die Live-Automation-Filter-Regeln eines Geraets via searchRule.
 
-    Setzt das ``os-firewall``-Plugin auf der OPNsense voraus (ab 24+ Standard).
-    Wenn der Endpoint nicht antwortet (z. B. Plugin fehlt), wird ein
-    Fehler im ``summary`` zurueckgegeben statt 500 - die UI soll das
-    sauber rendern koennen.
+    Nutzt ``/api/firewall/filter/searchRule`` — die "Automation Rules"-API
+    (UI: Firewall -> Automation -> Filter). Ab OPNsense 23.7 in Core
+    integriert; vorher als optionales ``os-firewall``-Plugin verfuegbar.
+    Klassische "Firewall -> Rules" (XML-Legacy-Editor) sind ueber die API
+    NICHT erreichbar — die werden hier auch nicht angezeigt.
+
+    Wenn der Endpoint nicht antwortet (kein API-Privileg, sehr alte
+    OPNsense), wird ein Fehler im ``summary`` zurueckgegeben statt 500 -
+    die UI rendert das als sauberen Hinweis.
     """
     # Spaete Imports vermeiden zirkulaere Imports zwischen Inventory und
     # objects/firewall_rules.
@@ -1094,7 +1127,9 @@ def get_device_firewall_rules(
             reachable=False,
             summary=(
                 f"Filter-Regeln nicht ladbar: {reason}. "
-                "Pruefe ob das os-firewall-Plugin auf der OPNsense installiert ist."
+                "Pruefe das API-Privileg 'Firewall: Rules: Edit' und ob "
+                "die OPNsense-Version >=23.7 ist (vorher: optionales "
+                "os-firewall-Plugin noetig)."
             ),
             rules=[],
             checked_at_iso=timestamp,
@@ -1224,6 +1259,93 @@ def get_device_unbound_hosts(
         reachable=True,
         summary=f"{len(entries)} Host-Override(s) live geladen.",
         hosts=entries,
+        checked_at_iso=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/unbound-domains  - Live Domain-Overrides
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/unbound-domains",
+    response_model=DeviceUnboundDomainsResponse,
+)
+def get_device_unbound_domains(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> DeviceUnboundDomainsResponse:
+    """Liefert die Live-Unbound-Domain-Overrides (DNS-Weiterleitungen).
+
+    Read-only: Cockpit zeigt sie an, aber das CRUD ist (noch) nicht
+    implementiert. Wer Domain-Overrides anlegen/aendern will, muss das
+    in der OPNsense-Web-GUI tun (Services -> Unbound DNS -> Overrides).
+    """
+    from opn_cockpit.core.objects._endpoints import UNBOUND_DOMAIN_SEARCH  # noqa: PLC0415
+
+    devices_by_id = {d.id: d for d in session.opened.data.devices}
+    device = devices_by_id.get(device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(device, session)
+    timestamp = _iso_now()
+
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    try:
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            response = client.call(
+                tgt, device.api_key, device.api_secret,
+                "POST", UNBOUND_DOMAIN_SEARCH,
+                json={"current": 1, "rowCount": -1},
+            )
+    except OpnCockpitError as exc:
+        reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+        return DeviceUnboundDomainsResponse(
+            device_id=device.id,
+            device_name=device.name,
+            reachable=False,
+            summary=f"Domain-Overrides nicht ladbar: {reason}",
+            domains=[],
+            checked_at_iso=timestamp,
+        )
+
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        rows = []
+
+    entries: list[UnboundDomainEntryResponse] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        uuid = str(row.get("uuid", ""))
+        if not uuid:
+            continue
+        enabled_raw = str(row.get("enabled", "1"))
+        entries.append(UnboundDomainEntryResponse(
+            uuid=uuid,
+            enabled=enabled_raw not in ("", "0", "false", "False"),
+            domain=str(row.get("domain", "")).strip(),
+            server=str(row.get("server", row.get("ip", ""))).strip(),
+            description=str(row.get("description", row.get("descr", ""))).strip(),
+        ))
+
+    session.touch()
+    return DeviceUnboundDomainsResponse(
+        device_id=device.id,
+        device_name=device.name,
+        reachable=True,
+        summary=f"{len(entries)} Domain-Override(s) live geladen.",
+        domains=entries,
         checked_at_iso=timestamp,
     )
 
@@ -1847,6 +1969,8 @@ def _apply_device_update(current: VaultDevice, payload: DeviceUpdateRequest) -> 
         # Key nur ueberschreiben wenn explizit gesetzt - leerer String
         # bedeutet "lass den vorhandenen Key in Ruhe" (analog api_secret).
         current.ssh_private_key_pem = payload.ssh_private_key_pem
+    if payload.maintenance is not None:
+        current.maintenance = payload.maintenance
 
 
 def _require_vault_path(session: Session) -> Path:
@@ -1885,6 +2009,7 @@ def _to_device_response(device: Device) -> DeviceResponse:
         ssh_port=ssh_port,
         ssh_user=ssh_user,
         ssh_key_present=ssh_key_present,
+        maintenance=bool(getattr(device, "maintenance", False)),
     )
 
 
