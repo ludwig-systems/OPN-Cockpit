@@ -3593,6 +3593,42 @@ a.card-open-link { text-decoration: none; }
   font-size: 0.92em;
 }
 
+.ssh-guide-shortcut {
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line);
+  border-radius: 10px;
+  padding: 14px 16px 12px;
+  margin: 10px 0 22px;
+}
+
+.ssh-guide-shortcut .modal-section-title {
+  color: var(--accent-strong);
+}
+
+.ssh-guide-download-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.ssh-guide-dl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ssh-guide-dl-icon {
+  font-size: 1.05em;
+  line-height: 1;
+}
+
 #mu-totp-panel {
   margin-top: 0.5em;
 }

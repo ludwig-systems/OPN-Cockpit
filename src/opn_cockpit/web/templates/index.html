@@ -712,7 +712,44 @@
             Schritte:
           </p>
 
-          <h3 class="modal-section-title">1. Key-Paar auf deinem Rechner erzeugen</h3>
+          <div class="ssh-guide-shortcut">
+            <h3 class="modal-section-title" style="margin-top: 4px;">
+              Schnellstart: Helper-Script herunterladen
+            </h3>
+            <p class="form-hint">
+              Statt manuell mit <code>ssh-keygen</code> kannst du dir ein
+              Helper-Script ziehen, das den Schritt 1 + 2 automatisiert:
+              erzeugt das Key-Paar, oeffnet beide in einem Editor und legt
+              den Public-Key in die Zwischenablage. Du musst nur noch im
+              OPNsense-User-Editor einfuegen und den Private-Key ins
+              Cockpit kopieren.
+            </p>
+            <div class="ssh-guide-download-row">
+              <a class="btn-primary ssh-guide-dl-btn"
+                 href="/static/scripts/opncockpit-ssh-helper.ps1"
+                 download="opncockpit-ssh-helper.ps1">
+                <span class="ssh-guide-dl-icon">⬇</span> Windows (PowerShell)
+              </a>
+              <a class="btn-secondary ssh-guide-dl-btn"
+                 href="/static/scripts/opncockpit-ssh-helper.sh"
+                 download="opncockpit-ssh-helper.sh">
+                <span class="ssh-guide-dl-icon">⬇</span> Linux / macOS (Bash)
+              </a>
+            </div>
+            <p class="form-hint" style="margin-top:10px;">
+              Windows-Hinweis: Rechtsklick auf die <code>.ps1</code> &rarr;
+              „Mit PowerShell ausfuehren". Falls die Execution-Policy meckert,
+              eine PowerShell oeffnen und
+              <code>Set-ExecutionPolicy -Scope Process Bypass</code>, dann
+              <code>.\opncockpit-ssh-helper.ps1</code> starten.
+            </p>
+            <p class="form-hint">
+              Linux-Hinweis:
+              <code>chmod +x opncockpit-ssh-helper.sh &amp;&amp; ./opncockpit-ssh-helper.sh</code>.
+            </p>
+          </div>
+
+          <h3 class="modal-section-title">1. Key-Paar auf deinem Rechner erzeugen (manuell)</h3>
           <p class="form-hint">
             Ed25519 ist klein und sicher. Erzeuge das Paar mit deinem
             OS-Tool deiner Wahl:
@@ -727,6 +764,10 @@
             Ergebnis: zwei Dateien
             <code>opncockpit-safetynet</code> (Private-Key, geheim halten) und
             <code>opncockpit-safetynet.pub</code> (Public-Key).
+          </p>
+          <p class="form-hint">
+            (Wenn du den Schnellstart-Helper oben benutzt hast, ist dieser
+            Schritt bereits erledigt.)
           </p>
 
           <h3 class="modal-section-title">2. Public-Key auf der OPNsense hinterlegen</h3>
