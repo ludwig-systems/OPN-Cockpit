@@ -4,6 +4,97 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.8.0 — in Arbeit — CRUD-Erweiterung
 
+### Wartungsmodus pro Gerät
+
+Geräte können einzeln in den Wartungsmodus geschaltet werden (Checkbox im
+Edit-Dialog). Solange aktiv:
+
+- **Heartbeat** überspringt das Gerät — kein TCP-Probe, eigener neutraler
+  Status-Dot statt rot/grün, "Wartung"-Badge auf der Karte (visuell gedimmt).
+- **Scheduled Backups** überspringen das Gerät — kein Audit-Log-Spam mehr
+  bei planmäßig offline-Standorten (Hardware-Tausch, Mobile-Rack im Transit,
+  Stilllegung).
+- **Manuelle Aktionen** bleiben erlaubt: Test-Connection, Plan/Apply,
+  Backup-Download — der User entscheidet bewusst.
+
+Persistiert in `VaultDevice.maintenance` (Bool, Default `False`); existierende
+Tresore migrieren transparent.
+
+### DNS: drei Sub-Tabs (Host-Overrides, Domain-Overrides, Abfrage-Weiterleitungen)
+
+OPNsense kennt drei separate DNS-Subsysteme — alle drei werden jetzt im
+Geräte-DNS-Tab als eigene Sub-Tabs gerendert:
+
+- **Host-Overrides** (Hostname → IP-Override) — CRUD wie bisher.
+- **Domain-Overrides** (Domain → Resolver) — read-only via
+  `searchDomainOverride`.
+- **Abfrage-Weiterleitungen** / Query-Forwards (globale DoT/DoH-Forwarder)
+  — read-only via `searchForward`.
+
+Die Compare-Matrix bekommt entsprechend drei DNS-Subsysteme: **DNS-Hosts**,
+**DNS-Overrides**, **DNS-Weiterleitungen** (alle mit Drift-Erkennung).
+
+### DNS-Host-Override-Sync (Compare-Matrix)
+
+Master-→-Targets-Sync gibt es jetzt zusätzlich zu Aliasen auch für
+Unbound-Host-Overrides: in der Compare-Matrix-Subsystem-Spalte „DNS-Hosts"
+erscheint pro Drift-Zeile ein **Sync-Button**, der einen Plan
+(`add_unbound_host`) auf alle Target-Geräte erzeugt und direkt in die
+Plan-Vorschau springt. Identitäts-Matching via `display_name`
+(`"host.domain"`) gegen die Master-Konfig.
+
+Domain-Overrides + Query-Forwards bleiben read-only (kein CRUD-Adapter).
+
+### „Mein Konto" konsolidiert (Passwort + 2FA)
+
+Statt zwei Topbar-Icons (Passwort ändern + 2FA einrichten) gibt es jetzt nur
+noch **„Mein Konto"** mit beiden Sektionen im selben (breiteren) Modal.
+Passwort-Wechsel oben, TOTP-Einrichtung/Backup-Codes/Disable darunter,
+QR-Code mit Code-Eingabefeld nebeneinander statt untereinander.
+
+### Disk-Space-Widget in der Topbar (Server-Setup)
+
+Topbar zeigt einen schmalen Progress-Bar mit Prozent des belegten Speichers
+auf dem App-Data-Volume (Backups, Audit-Log, SQLite-DBs). Hover-Tooltip:
+Path + Free-GB / Total-GB. Schwellen: gelb ab 80 %, rot ab 92 % + einmaliger
+Toast.
+
+Auf Windows-Single-User-Loopback liefert das Backend `relevant=false` und das
+Widget bleibt versteckt — Admin sieht den Platz dort ohnehin im Explorer.
+Endpoint: `GET /api/system/disk` (Bearer-auth).
+
+### Vault-Settings: Trust-CA + Cockpit-HTTPS inline integriert
+
+Die zwei früheren Sub-Modals (Trust-CA hinzufügen, Server-TLS hochladen) sind
+ersatzlos entfallen — beide Bereiche klappen jetzt **direkt im
+Vault-Settings-Modal** auf. Jedes Feld hat einen primären Datei-Picker
+(File-Input) mit Filename-Anzeige plus eine PEM-Textarea als
+Copy&Paste-Fallback. Vault-Settings-Modal selbst wurde auf die Breite des
+Geräte-Modals umgestellt — vorher waren die integrierten Cert-Bereiche
+gequetscht.
+
+### SSH-Key-Anleitung im Add/Edit-Device-Modal
+
+Neben „Safety-Net via SSH aktivieren" erscheint ein **„Anleitung"-Link**, der
+ein eigenes Modal mit kompakter Schritt-für-Schritt-Anleitung öffnet:
+
+1. Key-Paar erzeugen (`ssh-keygen -t ed25519`-Befehle für Windows und
+   Linux/macOS, Hinweis „Passphrase leer lassen")
+2. Public-Key auf der OPNsense hinterlegen (UI-Pfad, authorized-keys-Feld,
+   SSH-Service aktivieren)
+3. Private-Key ins Cockpit kopieren (`Get-Content | Set-Clipboard` /
+   `cat | xclip/pbcopy`) + Sicherheits-Hinweise
+
+Für nicht-CLI-versierte Admins. Liegt per z-index über dem Add-Modal.
+
+### os-firewall: Doku-Klarstellung
+
+OPNsense hat das Plugin seit 23.7 in Core integriert (Tab **Firewall →
+Automation → Filter**). Doku in README, QUICKSTART, FEATURES und API-Error-
+Messages stellt das klar: Cockpit zeigt **nur Automation-Filter**; klassische
+„Firewall → Rules" (Legacy-XML-Editor) sind nicht API-zugänglich. Empty-State
+im UI verweist auf diese Trennung.
+
 ### Zwei-Faktor-Authentifizierung (TOTP, opt-in)
 
 Multi-User-Mode kennt jetzt TOTP nach RFC 6238 als optionale 2FA pro User:

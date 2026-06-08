@@ -107,11 +107,16 @@ OPNsense-Web-UI gesetzt werden.
 
 ---
 
-## Unbound-DNS Host-Overrides
+## Unbound-DNS (drei Sub-Tabs)
 
-**Live-Liste:** Karte → **DNS-Tab** → `POST /api/unbound/settings/searchHostOverride`.
-Pro Eintrag: `host.domain → server-IP`, optional Beschreibung,
-deaktiviert-Flag.
+OPNsense kennt drei separate Unbound-Subsysteme. Cockpit zeigt sie als
+drei Sub-Tabs im **DNS-Tab** des Geräte-Modals:
+
+### Sub-Tab: Host-Overrides
+
+**Live-Liste:** `POST /api/unbound/settings/searchHostOverride`. Pro
+Eintrag: `host.domain → server-IP`, optional Beschreibung,
+deaktiviert-Flag. **CRUD wird unterstützt.**
 
 **Anlegen:** Tab → **„Neuer Host-Override"**. Felder:
 
@@ -126,14 +131,38 @@ deaktiviert-Flag.
 **Identität = (host, domain).** Beim Edit sind beide gesperrt. Server-IP +
 Beschreibung + Aktiv-Flag sind editierbar. Identische Werte → SKIP.
 
+### Sub-Tab: Domain-Overrides
+
+Aus *Services → Unbound DNS → Overrides → Domain Overrides*: leiten
+DNS-Queries für eine bestimmte Domain an einen anderen Resolver weiter
+(typisch: AD-DNS für die interne AD-Zone). **Read-only** im Cockpit
+(`POST /api/unbound/settings/searchDomainOverride`) — CRUD wäre ein
+eigenes Subsystem.
+
+### Sub-Tab: Abfrage-Weiterleitungen (Query-Forwards)
+
+Aus *Services → Unbound DNS → Query Forwarding*: die **globalen**
+Forward-Server (oft DoT/DoH), an die Unbound *alle* nicht lokal
+auflösbaren DNS-Anfragen reicht. **Read-only** im Cockpit
+(`POST /api/unbound/settings/searchForward`).
+
+Pro Eintrag: Domain (leer = global), Resolver-IP, Port,
+Type (`forward`/`dot`/`doh`), Verify-Hostname, Beschreibung.
+
+> Falls dein OPNsense den Tab leer zeigt obwohl du Forwards eingerichtet
+> hast: ältere OPNsense-Versionen hatten leicht abweichende
+> XML-/API-Pfade. Wir decken die gängigen ab; bitte melden falls etwas
+> fehlt.
+
 ---
 
 ## Config-Compare zwischen Geräten
 
 Mindestens zwei Karten markieren → Selektions-Toolbar **„Vergleichen"**.
 
-**Tab-Strip** oben: *Aliase | Routen | Regeln | DNS*. Beim Wechsel wird
-die Matrix für das ausgewählte Subsystem neu geladen.
+**Tab-Strip** oben: *Aliase | Routen | Regeln | DNS-Hosts | DNS-Overrides
+| DNS-Weiterleitungen*. Beim Wechsel wird die Matrix für das ausgewählte
+Subsystem neu geladen.
 
 **Matrix-Aufbau:**
 - Spalten = Geräte. Die linkeste Spalte ist der **Master** (Olive-Border
@@ -142,7 +171,9 @@ die Matrix für das ausgewählte Subsystem neu geladen.
   - Aliase: Name
   - Routen: Netzwerk (Gateway in der Cell)
   - Regeln: Description (oder Fingerprint wenn leer)
-  - DNS: `host.domain`
+  - DNS-Hosts: `host.domain` (= Host-Overrides)
+  - DNS-Overrides: Domain (= Domain-Overrides / Forward pro Domain)
+  - DNS-Weiterleitungen: `domain → server:port` (= globale Query-Forwards)
 
 **Cells** zeigen Status + master-relative Drift-Marker:
 - 🟢 **Vorhanden + identisch** zum Master (gleicher Fingerprint)
@@ -154,10 +185,12 @@ die Matrix für das ausgewählte Subsystem neu geladen.
 pro Gerät (Aliase: Mitglieder; Routen: descr + disabled; Regeln:
 flow-string; DNS: server + descr).
 
-**Sync (nur Aliase):** in Drift-Zeilen erscheint **„Sync ←"** —
-erzeugt einen `add_alias`-Plan vom Master zu allen anderen Spalten,
-springt direkt in die Preview. Sync für Routen/Rules/DNS folgt
-in einer späteren Iteration.
+**Sync (Aliase + DNS-Host-Overrides):** in Drift-Zeilen erscheint
+**„Sync ←"** — erzeugt einen Plan vom Master zu allen anderen Spalten
+(`add_alias` bzw. `add_unbound_host`), springt direkt in die Preview.
+Vorhandene identische Einträge werden im Plan als SKIP markiert (keine
+Doppelanlage). Für Routen/Rules/DNS-Overrides/Weiterleitungen ist
+Sync derzeit nicht verfügbar — die brauchen einen eigenen CRUD-Adapter.
 
 **Rules-Quelle:** Cockpit liest Regeln für den Compare aus dem
 **Konfig-XML** (`download_backup`), nicht aus der os-firewall-API.
@@ -238,6 +271,12 @@ Backup zurück. Greift den Fall ab, dass ein Apply die eigene Cockpit-
 Sicht auf die Box kappt (Filter-Regel, Interface-Down, Routing-Fehler).
 
 ### Setup
+
+> 💡 **Schnellstart in der UI:** Im Geräte-Edit-Dialog erscheint neben
+> „Safety-Net via SSH aktivieren" ein **„Anleitung"-Link** — ein Modal
+> mit kompakter Schritt-für-Schritt-Doku (ssh-keygen-Befehle für
+> Windows + Linux, Clipboard-Snippets, OPNsense-UI-Pfad). Die längere
+> Variante mit allen Details bleibt hier in dieser Datei.
 
 Pro Gerät, das das Feature nutzen soll, in vier Schritten:
 
@@ -779,3 +818,52 @@ Self-Service neu einrichten.
 | `POST /api/auth/login` | Schritt 1; bei aktivem 2FA → `totp_required` |
 | `POST /api/auth/login/totp` | Schritt 2; Challenge + Code → Session-Token |
 | `POST /api/users/{id}/totp/disable` | Admin-Recovery-Reset |
+
+> Hinweis: Im UI sind „Passwort ändern" und „2FA verwalten" seit v0.8
+> im selben **„Mein Konto"-Modal** (Topbar → Person-Icon). Vorher
+> waren das zwei Einträge.
+
+---
+
+## Wartungsmodus pro Gerät
+
+Use-Case: Ein Standort ist planmäßig länger offline (Hardware-Tausch,
+Mobile-Rack im Transit, Stilllegung). Statt Heartbeat-Rot-Flackern und
+Backup-Failure-Audit-Spam:
+
+**Aktivieren:** Geräte-Karte → Edit → Checkbox **„Wartungsmodus
+(Polling deaktivieren)"** → Speichern.
+
+**Was passiert:**
+- **Heartbeat** überspringt das Gerät; Karte zeigt einen neutralen Dot
+  + „Wartung"-Badge, ist visuell gedimmt.
+- **Scheduled Backups** überspringen das Gerät — keine Failed-Backup-
+  Audit-Einträge.
+- **Drift-Check** läuft nicht (kein Background-Poll).
+
+**Was bleibt erlaubt:**
+- Test-Connection (manuell, User-Aktion).
+- Plan / Apply (User entscheidet bewusst).
+- Backup-Download / -Erzeugen (manuell).
+
+Persistiert in `VaultDevice.maintenance` (Bool); existierende Tresore
+migrieren transparent zu `false`.
+
+---
+
+## Disk-Space-Widget (Topbar)
+
+Auf Server-Setups (Linux, Multi-User-Windows-Server) zeigt die Topbar
+einen schmalen **Progress-Bar mit Prozentangabe** für den belegten
+Speicher auf dem App-Data-Volume (Backups, Audit-Log, SQLite-DBs).
+
+- **Hover:** Tooltip mit Pfad, Free-GB und Total-GB.
+- **Schwellen:** Anzeige wird **gelb** ab 80 % und **rot** ab 92 %.
+  Beim Erreichen von 92 % erscheint ein einmaliger Toast — danach
+  erst wieder, wenn der Status sich entspannt und neu kippt.
+
+Auf Single-User-Windows-Loopback liefert das Backend `relevant=false`
+und das Widget bleibt versteckt — dort sieht der Admin den Platz ohnehin
+im Explorer.
+
+Endpoint: `GET /api/system/disk` (Bearer-auth, jede Session).

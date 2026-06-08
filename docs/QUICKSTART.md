@@ -130,9 +130,10 @@ Klick auf eine Karte → Device-Modal mit sechs Tabs:
   OPNsense 23.7 in Core integriert (vorher als `os-firewall`-Plugin).
   Klassische „Firewall → Rules" (Legacy-XML) sind nicht API-zugänglich
   und werden nicht angezeigt
-- **DNS** — Live-Liste der Unbound Host-Overrides + Domain-Overrides
-  (Weiterleitungen) in getrennten Tabs, plus
-  „Neuer Host-Override" / Bearbeiten / Löschen
+- **DNS** — drei Sub-Tabs: **Host-Overrides** (CRUD, „Neuer
+  Host-Override" / Bearbeiten / Löschen), **Domain-Overrides**
+  (read-only) und **Abfrage-Weiterleitungen** (read-only — die
+  globalen Query-Forwards inkl. DoT/DoH)
 
 Bearbeiten/Löschen läuft immer durch den Plan/Apply-Flow:
 Vorschau → Bestätigen → Apply mit Pre-Apply-Backup + Audit-Eintrag.
@@ -144,14 +145,16 @@ Edit gesperrt, um aus einer Aktion zwei zu machen.
 Mindestens zwei Karten markieren → in der Selektions-Toolbar
 **„Vergleichen"** klicken.
 
-Tab-Strip oben: *Aliase | Routen | Regeln | DNS*. Tab-Klick lädt die
-jeweilige Matrix. Die linkeste Spalte ist der Master (per ◀ / ▶ / ★
-verschiebbar); andere Spalten werden master-relativ farbig markiert:
-grün = identisch, gelb = Drift, leer = fehlt, ? = unerreichbar. Jede
-Zeile ist per ▶-Icon aufklappbar und zeigt den vollen Inhalt pro Gerät.
+Tab-Strip oben: *Aliase | Routen | Regeln | DNS-Hosts | DNS-Overrides |
+DNS-Weiterleitungen*. Tab-Klick lädt die jeweilige Matrix. Die linkeste
+Spalte ist der Master (per ◀ / ▶ / ★ verschiebbar); andere Spalten
+werden master-relativ farbig markiert: grün = identisch, gelb = Drift,
+leer = fehlt, ? = unerreichbar. Jede Zeile ist per ▶-Icon aufklappbar
+und zeigt den vollen Inhalt pro Gerät.
 
-Beim Alias-Tab erscheint zusätzlich ein **„Sync ←"**-Button in Drift-
-Zeilen: Klick erzeugt einen `add_alias`-Plan vom Master zu allen anderen
+Bei **Aliase** und **DNS-Hosts** erscheint zusätzlich ein
+**„Sync ←"**-Button in Drift-Zeilen: Klick erzeugt einen Plan
+(`add_alias` bzw. `add_unbound_host`) vom Master zu allen anderen
 Spalten und springt direkt in die Preview.
 
 ## 12. Audit-Log einsehen + exportieren
@@ -188,8 +191,37 @@ ausfüllen). Beim Apply erscheint dann die Checkbox **„Mit
 Sicherheitsnetz ausrollen"** — nach Verify hat man X Sekunden zum
 Bestätigen, sonst SSH-Rollback auf das Pre-Apply-Backup.
 
-Schritt-für-Schritt + Troubleshooting:
+Im selben Edit-Dialog gibt es neben der Checkbox einen
+**„Anleitung"-Link** — ein Modal mit den `ssh-keygen`-Befehlen für
+Windows und Linux + dem OPNsense-UI-Pfad, falls du den Setup-Flow
+schnell brauchst. Längere Version inkl. Troubleshooting:
 [FEATURES.md → Safety-Net via SSH](FEATURES.md#safety-net-via-ssh).
+
+## 15. Wartungsmodus für planmäßig offline Geräte
+
+Wenn ein Standort längere Zeit aus ist (Hardware-Tausch, Mobile-Rack im
+Transit), Gerät → Bearbeiten → **„Wartungsmodus (Polling
+deaktivieren)"** anhaken. Heartbeat, Scheduled Backups und Drift-Check
+überspringen das Gerät; der Audit-Log bleibt sauber. Manuelle Aktionen
+(Test-Connection, Plan/Apply, Backup-Download) bleiben möglich.
+
+Die Karte zeigt dann einen neutralen Status-Dot + „Wartung"-Badge
+statt rot/grün.
+
+## 16. Mein Konto (Passwort + 2FA)
+
+Multi-User-Mode: Topbar → Person-Icon **„Mein Konto"**. Im selben
+Modal: Passwort ändern (oben) und Zwei-Faktor-Authentifizierung
+einrichten/verwalten (unten). TOTP-Details + Backup-Codes-Handhabung
+siehe [FEATURES.md → TOTP](FEATURES.md#zwei-faktor-authentifizierung-totp).
+
+## 17. Disk-Space im Auge behalten (Server)
+
+Auf Linux-Servern und Multi-User-Windows-Setups zeigt die Topbar einen
+schmalen **Progress-Bar mit Prozent** für den belegten Speicher auf
+dem App-Data-Volume (Backups, Audit-Log, SQLite-DBs). Hover-Tooltip
+zeigt Pfad + Free-GB. Gelb ab 80 %, rot ab 92 % (einmaliger Toast).
+Auf Single-User-Windows ist das Widget ausgeblendet.
 
 ## CLI als Alternative
 

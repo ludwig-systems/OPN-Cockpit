@@ -26,6 +26,10 @@ Konfiguration mehrerer Standorte über die OPNsense-REST-API:
   `https://cockpit.lab:9876` ohne Browser-Warnung erreichbar ist
 - **TOTP / 2FA** (Multi-User, opt-in) — pro User aktivierbar mit
   Authenticator-App + 8 Backup-Codes; Admin-Recovery-Reset
+- **Wartungsmodus pro Gerät** — geplant offline-Sites vom Polling
+  ausschließen, Audit-Log bleibt sauber
+- **Disk-Space-Widget** in der Topbar (Linux-Server) — Warnung bei ≥80 %,
+  einmaliger Toast bei ≥92 %
 
 Web-Frontend (Vanilla HTML/CSS/JS) auf einem FastAPI-Backend. Läuft als
 **Single-User-Desktop** unter Windows, als **Multi-User-Server** unter
@@ -124,6 +128,9 @@ minimalen Rechten.
 - **Regeln** — Live-Liste der Automation-Filter-Regeln (Firewall →
   Automation → Filter), Add/Edit/Delete. Klassische „Firewall → Rules"
   (Legacy-XML-Editor) sind nicht API-zugänglich und werden nicht angezeigt.
+- **DNS** mit drei Sub-Tabs: **Host-Overrides** (CRUD),
+  **Domain-Overrides** (read-only, `searchDomainOverride`),
+  **Abfrage-Weiterleitungen** (read-only, `searchForward` — DoT/DoH-Forwarder)
 - **DNS** — Live-Liste der Unbound-Host-Overrides, Add/Edit/Delete
 
 ### Plan/Apply-Flow
@@ -136,9 +143,12 @@ minimalen Rechten.
 
 ### Multi-Site-Tools
 - **Config-Compare-Matrix** über 2..N Geräte mit Tab-Strip
-  *Aliase | Routen | Regeln | DNS*. Master-Spalte links, Drift
-  master-relativ farbig markiert, Detail-Aufklapp pro Zeile.
-- **Alias-Sync (Master → Targets)** direkt aus der Compare-Matrix.
+  *Aliase | Routen | Regeln | DNS-Hosts | DNS-Overrides | DNS-Weiterleitungen*.
+  Master-Spalte links, Drift master-relativ farbig markiert,
+  Detail-Aufklapp pro Zeile.
+- **Master-→-Targets-Sync** direkt aus der Compare-Matrix für
+  **Aliase** und **DNS-Host-Overrides** — ein Klick erzeugt den Plan
+  und springt in die Vorschau.
 
 ### Safety-Nets
 - **Auto-Backup vor Apply** + **Post-Apply-Snapshot** als neue

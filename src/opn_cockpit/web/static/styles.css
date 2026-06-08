@@ -3527,28 +3527,70 @@ a.card-open-link { text-decoration: none; }
 }
 
 .ssh-guide-body {
-  max-height: 70vh;
+  max-height: 72vh;
   overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  padding-right: 6px;          /* etwas Luft zur Scrollbar */
+}
+
+/* Im SSH-Guide brauchen die Fliesstexte mehr Atemraum als die default
+   form-hints (die fuer Form-Felder dimensioniert sind). */
+.ssh-guide-body p.form-hint {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+  margin: 8px 0 14px;
+}
+
+.ssh-guide-body p.form-hint code {
+  font-size: 0.92em;
+}
+
+.ssh-guide-body .modal-section-title {
+  margin-top: 22px;
+  margin-bottom: 10px;
+  font-size: 15px;
+  text-transform: none;          /* lieber lesbar als uppercase */
+  letter-spacing: 0.01em;
+  color: var(--accent-strong);
+}
+
+.ssh-guide-body .modal-section-title:first-of-type {
+  margin-top: 4px;
+}
+
+.ssh-guide-body .totp-code-block {
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 10px 12px;
+  margin: 4px 0 14px;
 }
 
 .ssh-guide-os-title {
-  font-size: 0.85em;
+  font-size: 12.5px;
   font-weight: 600;
-  margin: 12px 0 4px;
+  margin: 14px 0 6px;
   color: var(--text-muted);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .ssh-guide-steps {
-  margin: 6px 0 12px 18px;
+  margin: 10px 0 16px 22px;
   padding: 0;
   color: var(--text);
 }
 
 .ssh-guide-steps li {
-  margin: 6px 0;
-  line-height: 1.45;
+  margin: 8px 0;
+  line-height: 1.6;
+  padding-left: 4px;
+}
+
+.ssh-guide-steps li code {
+  font-size: 0.92em;
 }
 
 #mu-totp-panel {
