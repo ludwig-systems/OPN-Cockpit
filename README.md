@@ -9,8 +9,10 @@ Konfiguration mehrerer Standorte über die OPNsense-REST-API:
 - **Plan/Apply-Vorschau** vor jedem Rollout, Read-back-Verifikation, parallel
   über N Geräte
 - **Config-Compare-Matrix** zeigt Drift zwischen 2–N Geräten pro Subsystem
-- **Safety-Net via SSH** (Cisco-Style commit-confirmed) — Apply mit
-  Countdown; ohne Bestätigung Auto-Rollback zum Pre-Apply-Backup via SSH
+- **Safety-Net via SSH** (On-Device Dead-Man's-Switch) — vor jedem Apply
+  läuft auf der OPNsense ein `daemon(8)`-Timer, der bei Cockpit-Lockout
+  von selbst zur Pre-Apply-Config zurück + reboot triggert. Test-Funktion
+  im Geräte-Modal für gefahrlose Probeläufe
 - **Auto-Backup** vor jedem Apply + Post-Apply-Snapshot als Drift-Baseline,
   Scheduled Backups, Config-Drift-Erkennung
 - **Auto-Retry-Queue** für Mobile-Racks — persistiert über Server-Restart,
@@ -137,8 +139,10 @@ minimalen Rechten.
 - Drei-Phasen-Modal: Eingabe → Vorschau → Result-Matrix
 - Diff pro Gerät (NEW/UPDATE/SKIP/DELETE) inklusive Inline-Hinweis
 - Confirm-Gate vor jedem Rollout
-- Optional: **„Mit Sicherheitsnetz ausrollen"** (sichtbar wenn Targets
-  SSH konfiguriert haben) — Cisco-Style commit-confirmed mit Countdown
+- Optional: **„Dead-Man-Switch via SSH aktivieren"** (sichtbar wenn
+  Targets SSH konfiguriert haben) — Pre-Apply-Backup wandert auf die
+  Box, `daemon(8)`-Timer dort startet, Cockpit disarmt nach Verify.
+  Bei Lockout feuert der Timer von selbst → Restore + Reboot
 - **Auto-Suggest** für Gateway- und Alias-Namen aus der laufenden OPNsense
 
 ### Multi-Site-Tools
@@ -244,9 +248,11 @@ minimalen Rechten.
   Audit-Chain-Secret. Signatur sichtbar im Footer + maschinell in
   PDF-Metadata (`OPN-COCKPIT-AUDIT-SIG-v1:<hex>`). Reproduzierbar via
   `audit.pdf_report.verify_pdf_signature`.
-- **Safety-Net SSH-Rollback** nutzt `paramiko` mit Private-Key-Auth
-  (Password-Auth bewusst nicht implementiert). Klartext-Key wird sofort
-  nach `connect()` freigegeben und nicht in Tracebacks geleakt.
+- **Safety-Net** (On-Device Dead-Man-Switch) nutzt `paramiko` mit
+  Private-Key-Auth (Password-Auth bewusst nicht implementiert). Vor
+  dem Apply wird der Daemon auf der OPNsense armed; bei Cockpit-
+  Lockout rollt die Box selbst zurück + rebootet. Klartext-Key wird
+  sofort nach `connect()` freigegeben und nicht in Tracebacks geleakt.
 - **TOTP / 2FA** (Multi-User-Mode, opt-in pro User): RFC 6238, 6-stellig,
   ±30s Clock-Skew. 8 SHA-256-gehashte Backup-Codes pro User; jeder
   Verbrauch wird automatisch entfernt. Self-Disable verlangt aktuelles

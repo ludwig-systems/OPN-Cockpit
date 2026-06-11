@@ -4331,33 +4331,47 @@
     }
   }
 
-  // -------------------- Safety-Net (Cisco-Style commit-confirmed) --------------------
+  // -------------------- Safety-Net (On-Device Dead-Man's-Switch) --------------------
 
   let safetyNetPollTimer = null;
-  let safetyNetCountdownTimer = null;
   let safetyNetCurrentPlanId = null;
+  let safetyNetLatestEntries = [];
 
   function showSafetyNetIfAvailable() {
     // Wird bei Plan-Preview gerufen: blendet die Checkbox ein wenn mind.
-    // ein Ziel-Geraet SSH konfiguriert hat. window-Wert kommt aus den
-    // VaultSettings (settingsCache.safety_net_window_s) wenn vorhanden.
+    // ein Ziel-Geraet SSH konfiguriert hat. Window-Wert kommt aus den
+    // VaultSettings; Default 300 s.
     const row = $('#pl-safety-net-row');
     const cb = $('#pl-safety-net');
     if (!row || !cb) return;
     cb.checked = false;
     const ids = Array.from(state.selectedDeviceIds);
-    const sshCount = state.devices
+    const sshDevices = state.devices
       .filter((d) => ids.includes(d.id))
-      .filter((d) => d.ssh_enabled && d.ssh_key_present)
-      .length;
-    if (sshCount === 0) {
+      .filter((d) => d.ssh_enabled && d.ssh_key_present);
+    const totalTargets = ids.length;
+    if (sshDevices.length === 0) {
       row.hidden = true;
       return;
     }
     row.hidden = false;
-    const wnd = (state.settings && state.settings.safety_net_window_s) || 120;
+    const wnd = (state.vaultSettings && state.vaultSettings.safety_net_window_s) || 300;
     const wndEl = $('#pl-safety-net-window');
     if (wndEl) wndEl.textContent = String(wnd);
+    // Pro-Geraet-Hinweis: wieviele der Ziele kriegen das Netz, wieviele nicht.
+    const coverageEl = $('#pl-safety-net-coverage');
+    if (coverageEl) {
+      if (sshDevices.length === totalTargets) {
+        coverageEl.textContent = `Greift auf alle ${totalTargets} Ziel-Geraete.`;
+        coverageEl.classList.remove('warn');
+      } else {
+        coverageEl.textContent = (
+          `Greift nur auf ${sshDevices.length} von ${totalTargets} Geraeten - `
+          + 'die ohne SSH-Konfiguration laufen ohne Netz.'
+        );
+        coverageEl.classList.add('warn');
+      }
+    }
   }
 
   async function startSafetyNetPolling(planId) {
@@ -4366,22 +4380,19 @@
     if (banner) banner.hidden = false;
     await pollSafetyNetOnce();
     if (safetyNetPollTimer) clearInterval(safetyNetPollTimer);
+    // 5s reicht - der Watcher tickt eh nur alle 30s, aber UI soll
+    // disarmed_late/fire_detected zuegig sehen.
     safetyNetPollTimer = setInterval(() => {
       pollSafetyNetOnce().catch(() => {});
-    }, 3000);
-    if (safetyNetCountdownTimer) clearInterval(safetyNetCountdownTimer);
-    safetyNetCountdownTimer = setInterval(updateSafetyNetCountdown, 250);
+    }, 5000);
   }
 
   function stopSafetyNetPolling() {
     if (safetyNetPollTimer) { clearInterval(safetyNetPollTimer); safetyNetPollTimer = null; }
-    if (safetyNetCountdownTimer) { clearInterval(safetyNetCountdownTimer); safetyNetCountdownTimer = null; }
     safetyNetCurrentPlanId = null;
     const banner = $('#pl-safety-net-banner');
     if (banner) banner.hidden = true;
   }
-
-  let safetyNetLatestEntries = [];
 
   async function pollSafetyNetOnce() {
     if (!safetyNetCurrentPlanId) return;
@@ -4393,90 +4404,138 @@
       const data = await r.json();
       safetyNetLatestEntries = data.entries || [];
       renderSafetyNetEntries();
-      const stillArmed = safetyNetLatestEntries.some((e) => !e.resolved);
-      if (!stillArmed) {
-        // Banner kurz stehen lassen damit User die Resolution sieht,
-        // dann ausblenden.
-        setTimeout(stopSafetyNetPolling, 4000);
+      const stillPending = safetyNetLatestEntries.some(
+        (e) => e.status === 'pending_disarm',
+      );
+      const allResolved = safetyNetLatestEntries.length > 0 && !stillPending;
+      const anyFire = safetyNetLatestEntries.some(
+        (e) => e.status === 'fire_detected',
+      );
+      // Wenn nur disarmed_late uebrig ist und kein fire: Banner kann
+      // verschwinden nach kurzer Sichtbarkeit. Bei fire_detected bleibt
+      // das Banner stehen bis der User acknowledged.
+      if (allResolved && !anyFire) {
+        setTimeout(() => {
+          // Re-check: wenn der User in der Zwischenzeit acknowledged
+          // hat, ist die Liste leer und wir koennen schliessen.
+          if (
+            safetyNetLatestEntries.length === 0
+            || safetyNetLatestEntries.every((e) => e.status === 'disarmed_late')
+          ) {
+            stopSafetyNetPolling();
+          }
+        }, 6000);
       }
     } catch (_) { /* ignoriert */ }
+  }
+
+  function _sfnLabelFor(status) {
+    switch (status) {
+      case 'pending_disarm':
+        return { text: 'Cleanup laeuft…', cls: 'sn-pending' };
+      case 'disarmed_late':
+        return { text: 'Safety-Net spaet disarmed', cls: 'sn-ok' };
+      case 'fire_detected':
+        return { text: 'ROLLBACK ausgeloest', cls: 'sn-fire' };
+      case 'expired_unresolved':
+        return { text: 'Window abgelaufen', cls: 'sn-warn' };
+      default:
+        return { text: status, cls: '' };
+    }
   }
 
   function renderSafetyNetEntries() {
     const box = $('#pl-safety-net-entries');
     if (!box) return;
     box.innerHTML = '';
+    if (safetyNetLatestEntries.length === 0) {
+      const row = document.createElement('div');
+      row.className = 'sn-entry sn-pending';
+      row.textContent = 'Alles disarmed - kein Eintrag offen.';
+      box.appendChild(row);
+      return;
+    }
     for (const e of safetyNetLatestEntries) {
       const row = document.createElement('div');
       row.className = 'sn-entry';
-      const label = e.device_name || e.device_id;
-      if (e.resolved) {
-        const resColor = e.resolution === 'confirmed' ? 'var(--ok, #2e8b57)' : 'var(--danger, #c0392b)';
-        row.innerHTML = `<span style="color:${resColor};font-weight:600;">${e.resolution}</span> · ${label} — ${e.resolution_summary || ''}`;
-      } else {
-        row.textContent = `armed · ${label}`;
+      const label = _sfnLabelFor(e.status);
+      const head = document.createElement('div');
+      head.className = `sn-entry-head ${label.cls}`;
+      head.innerHTML = `
+        <span class="sn-entry-status">${label.text}</span>
+        <span class="sn-entry-device">${e.device_name || e.device_id}</span>
+      `;
+      row.appendChild(head);
+      if (e.last_summary) {
+        const sub = document.createElement('div');
+        sub.className = 'sn-entry-summary';
+        sub.textContent = e.last_summary;
+        row.appendChild(sub);
+      }
+      if (e.status !== 'pending_disarm') {
+        const actions = document.createElement('div');
+        actions.className = 'sn-entry-actions';
+        const ackBtn = document.createElement('button');
+        ackBtn.className = 'btn-secondary btn-sm';
+        ackBtn.type = 'button';
+        ackBtn.textContent = 'Quittieren';
+        ackBtn.addEventListener('click', () => {
+          safetyNetAcknowledge(e.plan_id, e.device_id).catch(() => {});
+        });
+        actions.appendChild(ackBtn);
+        row.appendChild(actions);
       }
       box.appendChild(row);
     }
   }
 
-  function updateSafetyNetCountdown() {
-    const el = $('#pl-safety-net-countdown');
-    if (!el) return;
-    const armed = safetyNetLatestEntries.filter((e) => !e.resolved);
-    if (armed.length === 0) {
-      el.textContent = '—';
-      return;
-    }
-    const now = Date.now();
-    const minRemaining = Math.min(...armed.map((e) => e.deadline_ms - now));
-    if (minRemaining < 0) {
-      el.textContent = 'Rollback laeuft…';
-    } else {
-      el.textContent = `${Math.ceil(minRemaining / 1000)} s`;
-    }
-  }
-
-  async function safetyNetConfirmAll() {
-    if (!safetyNetCurrentPlanId) return;
+  async function safetyNetAcknowledge(planId, deviceId) {
     try {
       const r = await apiPost(
-        `/api/plans/${encodeURIComponent(safetyNetCurrentPlanId)}/safety-net/confirm`,
+        `/api/plans/${encodeURIComponent(planId)}`
+        + `/safety-net/acknowledge/${encodeURIComponent(deviceId)}`,
       );
       if (r.status === 401) { handleSessionLost(); return; }
       if (!r.ok && r.status !== 204) {
         const body = await r.json().catch(() => ({}));
-        showToast(body.detail || `Bestaetigung fehlgeschlagen (${r.status})`, true);
+        showToast(body.detail || `Quittieren fehlgeschlagen (${r.status})`, true);
         return;
       }
-      showToast('Safety-Net bestaetigt.');
       await pollSafetyNetOnce();
     } catch (err) {
       showToast(err.message, true);
     }
   }
 
-  async function safetyNetAbortAll() {
-    if (!safetyNetCurrentPlanId) return;
-    const ok = window.confirm(
-      'Sofortigen SSH-Rollback fuer alle armed Geraete ausloesen?\n\n'
-      + 'Damit wird der Apply rueckgaengig gemacht und die Pre-Apply-Konfig wiederhergestellt.',
-    );
-    if (!ok) return;
+  async function testSafetyNet(deviceId, btn) {
+    const originalLabel = btn ? btn.textContent : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Test laeuft…';
+    }
     try {
       const r = await apiPost(
-        `/api/plans/${encodeURIComponent(safetyNetCurrentPlanId)}/safety-net/abort`,
+        `/api/inventory/devices/${encodeURIComponent(deviceId)}/safety-net/test`,
       );
       if (r.status === 401) { handleSessionLost(); return; }
-      if (!r.ok && r.status !== 204) {
-        const body = await r.json().catch(() => ({}));
-        showToast(body.detail || `Abort fehlgeschlagen (${r.status})`, true);
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        showToast(body.detail || `Safety-Net-Test fehlgeschlagen (${r.status})`, true);
         return;
       }
-      showToast('Rollback ausgeloest.');
-      await pollSafetyNetOnce();
+      if (body.success) {
+        showToast(body.summary || 'Safety-Net-Test erfolgreich.');
+      } else {
+        const stepInfo = body.failed_step ? ` (Schritt: ${body.failed_step})` : '';
+        showToast(`Safety-Net-Test FEHLGESCHLAGEN${stepInfo}: ${body.summary || ''}`, true);
+      }
     } catch (err) {
       showToast(err.message, true);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalLabel || 'Safety-Net testen';
+      }
     }
   }
 
@@ -5265,6 +5324,7 @@
     $('#vs-retry-enabled').checked = true;
     $('#vs-retry-max-hours').value = '168';
     $('#vs-retry-interval-min').value = '5';
+    $('#vs-safety-net-window').value = '300';
     $('#vs-pw-current').value = '';
     $('#vs-pw-new1').value = '';
     $('#vs-pw-new2').value = '';
@@ -5313,6 +5373,9 @@
         if (typeof data.auto_retry_interval_minutes === 'number') {
           $('#vs-retry-interval-min').value = data.auto_retry_interval_minutes;
         }
+        if (typeof data.safety_net_window_s === 'number') {
+          $('#vs-safety-net-window').value = data.safety_net_window_s;
+        }
       }
     } catch (_e) { /* Modal kann auch mit leerem Feld bedient werden */ }
   }
@@ -5331,6 +5394,8 @@
     const retryEnabled = $('#vs-retry-enabled').checked;
     const retryMaxH = parseInt($('#vs-retry-max-hours').value, 10);
     const retryIntervalMin = parseInt($('#vs-retry-interval-min').value, 10);
+    const sfnWindowRaw = $('#vs-safety-net-window').value;
+    const sfnWindow = sfnWindowRaw === '' ? null : parseInt(sfnWindowRaw, 10);
     if (!Number.isFinite(retryMaxH) || retryMaxH < 1 || retryMaxH > 720) {
       errBox.textContent = 'Retry-Wartezeit muss zwischen 1 und 720 Stunden liegen.';
       errBox.hidden = false;
@@ -5338,6 +5403,11 @@
     }
     if (!Number.isFinite(retryIntervalMin) || retryIntervalMin < 1 || retryIntervalMin > 120) {
       errBox.textContent = 'Retry-Intervall muss zwischen 1 und 120 Minuten liegen.';
+      errBox.hidden = false;
+      return;
+    }
+    if (sfnWindow !== null && (!Number.isFinite(sfnWindow) || sfnWindow < 60 || sfnWindow > 3600)) {
+      errBox.textContent = 'Safety-Net-Window muss zwischen 60 und 3600 Sekunden liegen.';
       errBox.hidden = false;
       return;
     }
@@ -5375,6 +5445,7 @@
         auto_retry_enabled: retryEnabled,
         auto_retry_max_hours: retryMaxH,
         auto_retry_interval_minutes: retryIntervalMin,
+        safety_net_window_s: sfnWindow,
       });
       if (response.status === 401) { handleSessionLost(); return; }
       if (!response.ok) {
@@ -7393,14 +7464,23 @@
     if (unbConfirm) unbConfirm.addEventListener('click', () => {
       submitUnboundModal().catch((err) => showUnboundModalError(err.message));
     });
-    // Safety-Net Banner-Buttons
-    const snConfirm = $('#pl-safety-net-confirm-btn');
-    if (snConfirm) snConfirm.addEventListener('click', () => {
-      safetyNetConfirmAll().catch((err) => showToast(err.message, true));
+    // Safety-Net Banner-Close
+    const snBannerClose = $('#pl-safety-net-banner-close');
+    if (snBannerClose) snBannerClose.addEventListener('click', () => {
+      stopSafetyNetPolling();
     });
-    const snAbort = $('#pl-safety-net-abort-btn');
-    if (snAbort) snAbort.addEventListener('click', () => {
-      safetyNetAbortAll().catch((err) => showToast(err.message, true));
+    // Safety-Net Test-Button (Host-Modal)
+    const snTestBtn = $('#ad-safety-net-test');
+    if (snTestBtn) snTestBtn.addEventListener('click', () => {
+      const editingId = $('#ad-id').value;
+      if (!editingId) {
+        showToast(
+          'Erst Geraet speichern - der Test braucht die SSH-Konfig im Tresor.',
+          true,
+        );
+        return;
+      }
+      testSafetyNet(editingId, snTestBtn).catch((err) => showToast(err.message, true));
     });
     // Rule-Modal-Buttons
     const ruleCancel = $('#rule-modal-cancel');

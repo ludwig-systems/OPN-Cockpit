@@ -33,7 +33,9 @@ from opn_cockpit.backups import (
     BackupStoreError,
     append_backup,
     prune_backups,
+    read_backup_content,
 )
+from opn_cockpit.core import ssh_safety_net
 from opn_cockpit.core.device_info import download_backup
 from opn_cockpit.core.errors import (
     OpnCockpitError,
@@ -61,6 +63,7 @@ from opn_cockpit.inventory.model import Device
 from opn_cockpit.orchestration.planner import Plan, PlannedDeviceAction
 from opn_cockpit.security.masking import mask_dict
 from opn_cockpit.security.session import Session
+from opn_cockpit.vault.model import VaultDevice
 
 _log = logging.getLogger(__name__)
 
@@ -105,6 +108,29 @@ def group_by_device(plan: Plan) -> list[DevicePipeline]:
 
 
 @dataclass(slots=True)
+class SafetyNetContext:
+    """Pro-Apply Konfiguration des Dead-Man's-Switch.
+
+    ``active`` ist die User-Entscheidung im Confirm-Modal (Checkbox).
+    Wenn False, laeuft der Apply komplett ohne Safety-Net.
+
+    Wenn True, prueft der Executor pro Geraet:
+    - hat die VaultDevice SSH-Config? Falls nein: Apply normal,
+      ``safety_net_status=""`` im Result, kein Net.
+    - falls ja: Pre-Apply-XML auf die Box pushen, daemon-Timer starten,
+      apply, disarmen.
+
+    ``watcher`` ist die optionale ``SafetyNetWatcher``-Instanz (oder
+    None im CLI-Modus). Wenn der Executor disarm nicht hinkriegt,
+    bekommt der Watcher die pending-Aufgabe.
+    """
+
+    active: bool = False
+    window_s: int = 300
+    watcher: Any = None  # Forward-Decl statt zirkulaerem Import
+
+
+@dataclass(slots=True)
 class Executor:
     """Führt einen :class:`Plan` aus.
 
@@ -127,14 +153,23 @@ class Executor:
         adapter: ObjectAdapter[Any, Any],
         controller: SubsystemController,
         client: HttpClient,
+        safety_net: SafetyNetContext | None = None,
     ) -> RolloutReport:
         """Rollt ``plan`` aus und liefert einen aggregierten Report."""
         pipelines = group_by_device(plan)
+        sn = safety_net or SafetyNetContext()
         self.audit.append(
             AuditEventKind.APPLY_STARTED,
             action=plan.action,
             target_count=len(pipelines),
-            summary=f"Plan {plan.plan_id} wird auf {len(pipelines)} Gerät(e) ausgerollt.",
+            summary=(
+                f"Plan {plan.plan_id} wird auf {len(pipelines)} Gerät(e) ausgerollt"
+                + (
+                    f" (Safety-Net armed, Window={sn.window_s}s)."
+                    if sn.active
+                    else "."
+                )
+            ),
         )
 
         if not pipelines:
@@ -159,6 +194,7 @@ class Executor:
                     action_name=plan.action,
                     action_kind=plan.action_kind,
                     plan_id=plan.plan_id,
+                    safety_net=sn,
                 ): pipeline
                 for pipeline in pipelines
             }
@@ -192,6 +228,7 @@ class Executor:
         action_name: str,
         action_kind: ActionKind,
         plan_id: str,
+        safety_net: SafetyNetContext,
     ) -> Result:
         """Phasen-Pipeline für genau ein Gerät. Wirft NIE eine Exception."""
         start = time.monotonic()
@@ -205,6 +242,7 @@ class Executor:
                 plan_id=plan_id,
                 action_kind=action_kind,
                 start=start,
+                safety_net=safety_net,
             )
         except OpnCockpitError as exc:
             # Letzte Bastion: jeder durchgeschlüpfte Tool-Fehler wird zu FAILED.
@@ -238,6 +276,7 @@ class Executor:
         plan_id: str,
         action_kind: ActionKind,
         start: float,
+        safety_net: SafetyNetContext,
     ) -> Result:
         device = pipeline.device
         to_write = [a for a in pipeline.actions if a.diff.kind is not DiffKind.SKIP]
@@ -265,12 +304,19 @@ class Executor:
             )
         ctx = RequestContext(target=target, key=key, secret=secret)
         try:
-            # Pre-Apply-Backup (Safety-Net): wenn aktiv und Backup
-            # scheitert, wird der Apply auf diesem Geraet blockiert -
-            # erfolgreicher Apply braucht einen Rollback-Anker.
             settings = self.session.opened.data.settings
-            if settings.auto_backup_before_apply:
-                backup_failure = self._take_pre_apply_backup(
+            vault_device = self._lookup_vault_device(device.id)
+            # Pre-Apply-Backup ist die Grundlage fuer das Safety-Net
+            # (Restore-Anker). Wenn Safety-Net aktiv ist, erzwingen wir
+            # den Backup unabhaengig von ``auto_backup_before_apply`` -
+            # ohne Backup kein Rollback-Anker, dann ist der Dead-Man
+            # nutzlos.
+            need_backup = settings.auto_backup_before_apply or (
+                safety_net.active and self._device_has_ssh(vault_device)
+            )
+            pre_apply_record: BackupRecord | None = None
+            if need_backup:
+                backup_failure, pre_apply_record = self._take_pre_apply_backup(
                     client=client,
                     target=target,
                     key=key,
@@ -290,17 +336,75 @@ class Executor:
                         ),
                         start=start,
                     )
-            return self._write_activate_verify(
-                device=device,
-                adapter=adapter,
-                controller=controller,
-                client=client,
-                ctx=ctx,
-                to_write=to_write,
-                action_kind=action_kind,
-                plan_id=plan_id,
-                start=start,
-            )
+
+            # Safety-Net armen wenn aktiv und Geraet SSH-faehig.
+            armed_jobid = ""
+            if (
+                safety_net.active
+                and self._device_has_ssh(vault_device)
+                and pre_apply_record is not None
+                and vault_device is not None
+            ):
+                arm_failure = self._arm_safety_net(
+                    device=device,
+                    vault_device=vault_device,
+                    pre_apply_record=pre_apply_record,
+                    plan_id=plan_id,
+                    window_s=safety_net.window_s,
+                )
+                if arm_failure:
+                    return _make_failed(
+                        device=device,
+                        subsystem=adapter.subsystem,
+                        phase=Phase.WRITE,
+                        error_kind="safety_net_arm_failed",
+                        summary=(
+                            "Safety-Net konnte nicht aktiviert werden, Apply nicht "
+                            "durchgefuehrt: " + arm_failure
+                        ),
+                        start=start,
+                    )
+                armed_jobid = ssh_safety_net.make_jobid(plan_id, device.id)
+
+            try:
+                result = self._write_activate_verify(
+                    device=device,
+                    adapter=adapter,
+                    controller=controller,
+                    client=client,
+                    ctx=ctx,
+                    to_write=to_write,
+                    action_kind=action_kind,
+                    plan_id=plan_id,
+                    start=start,
+                )
+            except BaseException:
+                # Wenn _write_activate_verify aus einem Programmierfehler
+                # raus crashed, MUESSEN wir den daemon noch killen -
+                # sonst rebootet die Box ohne Grund. Best-Effort, ohne
+                # die Exception zu verschlucken.
+                if armed_jobid and vault_device is not None:
+                    self._best_effort_disarm(
+                        device=device,
+                        vault_device=vault_device,
+                        jobid=armed_jobid,
+                        plan_id=plan_id,
+                    )
+                raise
+
+            # Disarm-Phase (nur wenn wir armed waren).
+            if armed_jobid and vault_device is not None and pre_apply_record is not None:
+                result = self._disarm_safety_net(
+                    result=result,
+                    device=device,
+                    vault_device=vault_device,
+                    jobid=armed_jobid,
+                    plan_id=plan_id,
+                    pre_apply_record=pre_apply_record,
+                    window_s=safety_net.window_s,
+                    watcher=safety_net.watcher,
+                )
+            return result
         finally:
             # Klartext-Credentials sollen die Funktion nicht überleben.
             del secret
@@ -315,9 +419,12 @@ class Executor:
         secret: str,
         device: Device,
         plan_id: str,
-    ) -> str | None:
-        """Zieht ein Backup vor dem WRITE-Phase. Liefert None bei Erfolg,
-        sonst eine Fehlermeldung fuer das Result.
+    ) -> tuple[str | None, BackupRecord | None]:
+        """Zieht ein Backup vor dem WRITE-Phase.
+
+        Liefert ``(None, record)`` bei Erfolg, sonst ``(reason, None)``.
+        Der Record wird vom Safety-Net-Pfad als Restore-Anker
+        weiterverwendet.
 
         Reihenfolge:
         1. ``download_backup`` (XML-Bytes von der OPNsense).
@@ -342,7 +449,7 @@ class Executor:
                     f"(Plan {plan_id}): {reason}"
                 ),
             )
-            return reason
+            return reason, None
 
         try:
             record: BackupRecord = append_backup(
@@ -366,7 +473,7 @@ class Executor:
                     f"'{device.name}' (Plan {plan_id}): {reason}"
                 ),
             )
-            return reason
+            return reason, None
 
         self.audit.append(
             AuditEventKind.PRE_APPLY_BACKUP,
@@ -396,7 +503,7 @@ class Executor:
                     "Backup-Pruning fuer device_id=%s schlug fehl - Apply laeuft trotzdem.",
                     device.id,
                 )
-        return None
+        return None, record
 
     def _write_activate_verify(
         self,
@@ -613,6 +720,189 @@ class Executor:
                 retention_scheduled=settings.backup_retention_scheduled,
                 storage_root=self.backup_storage_root,
             )
+
+    # ----- Safety-Net (Dead-Man's-Switch) -----
+
+    def _lookup_vault_device(self, device_id: str) -> VaultDevice | None:
+        """Sucht das ``VaultDevice`` (mit SSH-Credentials) zum Device-ID.
+
+        Liefert None wenn Session schon gesperrt ist oder die ID nicht
+        passt. Aufrufer sollen None graceful behandeln.
+        """
+        try:
+            for d in self.session.opened.data.devices:
+                if d.id == device_id:
+                    return d
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
+    @staticmethod
+    def _device_has_ssh(vault_device: VaultDevice | None) -> bool:
+        if vault_device is None:
+            return False
+        if not vault_device.ssh_enabled:
+            return False
+        if not vault_device.ssh_private_key_pem.strip():
+            return False
+        if not vault_device.ssh_user.strip():
+            return False
+        return True
+
+    def _arm_safety_net(
+        self,
+        *,
+        device: Device,
+        vault_device: VaultDevice,
+        pre_apply_record: BackupRecord,
+        plan_id: str,
+        window_s: int,
+    ) -> str:
+        """Pushd Pre-Apply-XML auf die Box, startet daemon-Timer.
+
+        Liefert leeren String bei Erfolg, sonst eine Fehlermeldung. Bei
+        Fehler hat der Aufrufer keinen armed Zustand zu disarmen -
+        keine Aenderung blieb auf der Box.
+        """
+        try:
+            xml_bytes = read_backup_content(
+                device.id,
+                pre_apply_record.id,
+                storage_root=self.backup_storage_root,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return f"Pre-Apply-XML nicht lesbar: {exc}"
+
+        jobid = ssh_safety_net.make_jobid(plan_id, device.id)
+        arm_res = ssh_safety_net.arm(
+            vault_device,
+            jobid=jobid,
+            pre_apply_xml=xml_bytes,
+            window_s=window_s,
+        )
+        if not arm_res.success:
+            self.audit.append(
+                AuditEventKind.PRE_APPLY_BACKUP,
+                action="safety_net_arm_failed",
+                target_device_id=device.id,
+                target_device_name=device.name,
+                error_kind="safety_net_arm_failed",
+                summary=(
+                    f"Safety-Net konnte auf '{device.name}' nicht aktiviert "
+                    f"werden (Plan {plan_id}): {arm_res.summary}"
+                ),
+            )
+            return arm_res.summary
+        self.audit.append(
+            AuditEventKind.PRE_APPLY_BACKUP,
+            action="safety_net_armed",
+            target_device_id=device.id,
+            target_device_name=device.name,
+            summary=(
+                f"Safety-Net armed auf '{device.name}' (Plan {plan_id}, "
+                f"jobid={jobid}, window={window_s}s, pid={arm_res.pid})."
+            ),
+        )
+        return ""
+
+    def _disarm_safety_net(
+        self,
+        *,
+        result: Result,
+        device: Device,
+        vault_device: VaultDevice,
+        jobid: str,
+        plan_id: str,
+        pre_apply_record: BackupRecord,
+        window_s: int,
+        watcher: Any,
+    ) -> Result:
+        """3 Sofort-Retries fuer den Disarm; bei Failure an Watcher uebergeben.
+
+        Mutiert ``result`` (via ``dataclasses.replace``) um den
+        ``safety_net_status`` zu setzen.
+        """
+        import dataclasses as _dc  # noqa: PLC0415
+
+        last_summary = ""
+        for attempt in range(3):
+            disarm_res = ssh_safety_net.disarm(vault_device, jobid=jobid)
+            if disarm_res.success:
+                self.audit.append(
+                    AuditEventKind.PRE_APPLY_BACKUP,
+                    action="safety_net_disarmed",
+                    target_device_id=device.id,
+                    target_device_name=device.name,
+                    summary=(
+                        f"Safety-Net disarmed auf '{device.name}' "
+                        f"(Plan {plan_id}, jobid={jobid}, "
+                        f"Versuch {attempt + 1}/3)."
+                    ),
+                )
+                return _dc.replace(result, safety_net_status="disarmed")
+            last_summary = disarm_res.summary
+            if attempt < 2:
+                time.sleep(2.0)
+
+        # 3 Versuche gescheitert: dem Watcher uebergeben falls vorhanden.
+        if watcher is not None:
+            try:
+                watcher.enqueue_pending_disarm(
+                    plan_id=plan_id,
+                    device_id=device.id,
+                    device_name=device.name,
+                    jobid=jobid,
+                    pre_apply_backup_id=pre_apply_record.id,
+                    window_s=window_s,
+                )
+            except Exception:  # noqa: BLE001
+                _log.exception(
+                    "SafetyNetWatcher konnte pending-disarm fuer device_id=%s nicht annehmen.",
+                    device.id,
+                )
+        self.audit.append(
+            AuditEventKind.PRE_APPLY_BACKUP,
+            action="safety_net_disarm_pending",
+            target_device_id=device.id,
+            target_device_name=device.name,
+            error_kind="safety_net_disarm_pending",
+            summary=(
+                f"Safety-Net Disarm auf '{device.name}' (Plan {plan_id}, "
+                f"jobid={jobid}) nach 3 Versuchen fehlgeschlagen - "
+                f"Watcher uebernimmt: {last_summary}"
+            ),
+        )
+        return _dc.replace(result, safety_net_status="disarm_pending")
+
+    def _best_effort_disarm(
+        self,
+        *,
+        device: Device,
+        vault_device: VaultDevice,
+        jobid: str,
+        plan_id: str,
+    ) -> None:
+        """Einmaliger Disarm-Versuch waehrend Exception-Cleanup."""
+        try:
+            disarm_res = ssh_safety_net.disarm(vault_device, jobid=jobid)
+        except Exception:  # noqa: BLE001
+            _log.exception(
+                "Best-Effort-Disarm crashed fuer device_id=%s",
+                device.id,
+            )
+            return
+        action = "safety_net_disarmed" if disarm_res.success else "safety_net_disarm_failed"
+        self.audit.append(
+            AuditEventKind.PRE_APPLY_BACKUP,
+            action=action,
+            target_device_id=device.id,
+            target_device_name=device.name,
+            error_kind=None if disarm_res.success else "safety_net_disarm_failed",
+            summary=(
+                f"Best-Effort-Disarm waehrend Exception-Cleanup auf '{device.name}' "
+                f"(Plan {plan_id}, jobid={jobid}): {disarm_res.summary}"
+            ),
+        )
 
     # ----- Audit-Eintrag pro Geräte-Ergebnis -----
 

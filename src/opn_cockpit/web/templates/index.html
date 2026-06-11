@@ -648,9 +648,11 @@
                 <span>Safety-Net via SSH aktivieren</span>
               </label>
               <div class="form-hint">
-                Cisco-Style "commit-confirmed": nach Apply hat man X Sekunden zum
-                Bestaetigen, sonst rollt Cockpit per SSH zum Pre-Apply-Backup zurueck.
-                Voraussetzung: SSH-Zugang per Private-Key.
+                On-Device Dead-Man's-Switch: vor jedem Apply wird die aktuelle
+                Config auf die Box gepusht und ein Timer (Default 5 min) gestartet.
+                Wenn Cockpit nach dem Apply nicht mehr disarmen kann (Lockout),
+                faehrt die Box die alte Config wieder ein und rebootet.
+                Voraussetzung: SSH-Zugang per Private-Key (root-Account).
                 <a href="#" id="ad-ssh-guide-link" class="btn-link" style="margin-left:6px;">Anleitung</a>
               </div>
             </div>
@@ -676,6 +678,19 @@
               <div class="form-hint" id="ad-ssh-key-hint">
                 Akzeptierte Formate: Ed25519, ECDSA, RSA, DSA. Leer lassen beim
                 Bearbeiten = bestehenden Key nicht aendern.
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <button type="button" class="btn-secondary" id="ad-safety-net-test">
+                Safety-Net testen
+              </button>
+              <div class="form-hint">
+                End-to-End-Probelauf (~25 s) auf der Box: prueft ob
+                <code>daemon(8)</code> verfuegbar ist und die SSH-Permissions
+                reichen. Setzt einen Marker statt restore/reboot — gefahrlos
+                gegen Produktiv-Boxen. Geraet muss vorher gespeichert sein.
               </div>
             </div>
           </div>
@@ -707,9 +722,11 @@
         <div class="modal-body ssh-guide-body">
           <p class="form-hint">
             Cockpit braucht einen <strong>SSH-Private-Key</strong>, mit dem es
-            sich im Notfall (Apply hat die Firewall ausgesperrt) auf die OPNsense
-            einloggen und das Pre-Apply-Backup wiederherstellen kann. Drei
-            Schritte:
+            vor jedem Apply die aktuelle Config als Backup auf die OPNsense
+            schiebt und einen <code>daemon(8)</code>-Timer startet — den
+            <strong>Dead-Man's-Switch</strong>. Wenn Cockpit nach dem Apply
+            nicht mehr disarmen kann (Lockout), fahrt die Box von selbst die
+            alte Config wieder ein und rebootet. Drei Schritte:
           </p>
 
           <div class="ssh-guide-shortcut">
@@ -805,13 +822,38 @@
           <h4 class="ssh-guide-os-title">Linux / macOS</h4>
           <code class="totp-code-block">cat opncockpit-safetynet | (xclip -selection clipboard 2>/dev/null || pbcopy)</code>
           <p class="form-hint">
-            Im Modal "SSH-User" auf den OPNsense-User setzen (oft
-            <code>root</code>) und "SSH-Port" anpassen falls OPNsense nicht
-            auf 22 hoert. Danach "Test-Connection" im Info-Tab des Geraetes —
-            dort gibt es kein SSH-Probe, aber ein erfolgreicher API-Test
-            sagt zumindest dass Host erreichbar ist. Der erste echte
-            SSH-Login findet erst beim Safety-Net-Rollback statt.
+            Im Modal "SSH-User" auf den OPNsense-User setzen (typisch
+            <code>root</code> — Cockpit braucht Schreibrechte unter
+            <code>/conf/</code>, Zugriff auf <code>daemon(8)</code> und
+            <code>shutdown(8)</code>) und "SSH-Port" anpassen falls OPNsense
+            nicht auf 22 hoert. Danach <strong>im Geraete-Modal
+            "Safety-Net testen"</strong> klicken — der Test pusht eine
+            Dummy-Datei, startet einen 20-Sekunden-Timer (Marker statt
+            Reboot) und raeumt wieder auf. Wenn das gruen wird, weisst du
+            dass die Mechanik im Ernstfall funktionieren wuerde.
           </p>
+
+          <h3 class="modal-section-title">So funktioniert der Dead-Man-Switch</h3>
+          <ol class="ssh-guide-steps">
+            <li><strong>Vor dem Apply</strong> pusht Cockpit die aktuelle
+              <code>/conf/config.xml</code> als
+              <code>/conf/config.xml.cockpit-safety-&lt;id&gt;.xml</code>
+              auf die Box und startet einen detached <code>daemon(8)</code>-
+              Job: "warte X Sekunden, dann restore + reboot".</li>
+            <li><strong>Cockpit fuehrt den API-Apply aus</strong>.</li>
+            <li><strong>Nach dem Apply</strong> oeffnet Cockpit nochmal SSH,
+              killt den daemon und raeumt die Safety-Datei weg. Klappt das:
+              Apply bleibt, kein Reboot.</li>
+            <li><strong>Klappt es nicht</strong> (Cockpit selbst hat sich
+              durch den Apply ausgesperrt): der Daemon laeuft auf der Box
+              weiter, setzt nach Ablauf der Window-Sekunden einen Marker
+              <code>/var/log/cockpit-safety-&lt;id&gt;.fired</code>,
+              kopiert die Safety-Datei zurueck nach
+              <code>/conf/config.xml</code> und triggert
+              <code>shutdown -r now</code>. Box rebootet im Pre-Apply-
+              Zustand, Cockpit erkennt beim naechsten Reconnect den Marker
+              und zeigt im Plan-Banner "Apply zurueckgesetzt".</li>
+          </ol>
 
           <h3 class="modal-section-title">Sicherheits-Hinweise</h3>
           <ul class="ssh-guide-steps">
@@ -1590,6 +1632,22 @@
 
           <div class="form-divider"></div>
 
+          <!-- Sektion: Safety-Net (v0.9 #1) -->
+          <h3 class="modal-section-title">Safety-Net (Dead-Man-Switch)</h3>
+          <label class="form-label" for="vs-safety-net-window">
+            Window bis Auto-Rollback (Sekunden)
+          </label>
+          <input id="vs-safety-net-window" class="form-input" type="number"
+                 min="60" max="3600" step="30" />
+          <div class="form-hint">
+            Default-Wert fuer die Checkbox im Apply-Confirm. Pro Apply
+            ueberschreibbar. 60 s ... 3600 s; Default 300 s (5 min) - reicht
+            fuer Apply, Reconfigure und Read-back, mit Reserve.
+            Voraussetzung: Geraete muessen SSH-Config haben.
+          </div>
+
+          <div class="form-divider"></div>
+
           <!-- Sektion: Config-Drift-Erkennung (v0.7 #5) -->
           <h3 class="modal-section-title">Config-Drift erkennen</h3>
           <label class="form-checkbox">
@@ -2286,10 +2344,14 @@
             <label class="form-checkbox preview-confirm" id="pl-safety-net-row" hidden>
               <input id="pl-safety-net" type="checkbox" />
               <span>
-                <strong>Mit Sicherheitsnetz ausrollen</strong> — nach Apply hat man
-                <span id="pl-safety-net-window">120</span> s zum Bestaetigen; sonst
-                SSH-Rollback auf Pre-Apply-Backup. Nur sichtbar wenn die Ziel-
-                Geraete SSH konfiguriert haben.
+                <strong>Dead-Man-Switch via SSH aktivieren</strong> —
+                Cockpit schiebt die aktuelle Config vor dem Apply als Backup
+                auf die Box und startet einen Timer (<span id="pl-safety-net-window">300</span> s).
+                Wenn Cockpit nach dem Apply nicht mehr disarmen kann
+                (typischer Lockout-Fall), faehrt die Box den Backup-Stand
+                wieder ein und rebootet. Nur wenn die Ziel-Geraete SSH-Config
+                hinterlegt haben.
+                <em class="hint" id="pl-safety-net-coverage"></em>
               </span>
             </label>
             <div class="form-error" id="plan-preview-error" hidden></div>
@@ -2301,14 +2363,10 @@
             <div class="result-list" id="pl-result-list"></div>
             <div id="pl-safety-net-banner" class="safety-net-banner" hidden>
               <div class="safety-net-header">
-                <strong>Safety-Net aktiv — auf Bestaetigung warten</strong>
-                <span id="pl-safety-net-countdown" class="safety-net-countdown">--</span>
+                <strong>Safety-Net: Status pro Geraet</strong>
+                <button type="button" class="btn-link" id="pl-safety-net-banner-close">Ausblenden</button>
               </div>
               <div class="safety-net-entries" id="pl-safety-net-entries"></div>
-              <div class="safety-net-actions">
-                <button class="btn-primary" id="pl-safety-net-confirm-btn">Bestaetigen (alle)</button>
-                <button class="btn-danger" id="pl-safety-net-abort-btn">Sofort verwerfen (Rollback jetzt)</button>
-              </div>
             </div>
           </div>
 

@@ -265,10 +265,15 @@ Plan, vorausgewählt auf das eine Gerät — für manuelles Nachziehen.
 
 ## Safety-Net via SSH
 
-Cisco-Style commit-confirmed: nach einem Apply hat man X Sekunden
-zum **Bestätigen**, sonst rollt Cockpit per SSH auf das Pre-Apply-
-Backup zurück. Greift den Fall ab, dass ein Apply die eigene Cockpit-
-Sicht auf die Box kappt (Filter-Regel, Interface-Down, Routing-Fehler).
+**On-Device Dead-Man's-Switch.** Vor dem Apply pusht Cockpit die
+aktuelle Config per SFTP auf die OPNsense und startet dort einen
+`daemon(8)`-Timer: „warte N Sekunden, dann restore + reboot". Nach
+dem Apply disarmt Cockpit den Timer wieder. Klappt das nicht (Cockpit
+hat sich durch den Apply selbst ausgesperrt), feuert der Timer auf
+der Box von selbst und rollt zurück. Damit greift das Netz auch
+dann, wenn der vom Apply gekappte Pfad zwischen Cockpit und Firewall
+gerade *der* Pfad ist, über den ein nachgelagerter Rollback laufen
+müsste — der typische Lockout-Fall.
 
 ### Setup
 
@@ -300,11 +305,11 @@ Shell*:
 - **Listen Interfaces**: am besten ein MGMT-Interface, nicht WAN.
 - **Save** unten.
 
-Der SSH-User braucht Schreibrechte auf `/conf/config.xml` und darf
-`configctl` ausführen. **`root` erfüllt beides out of the box** und ist
-die einfachste Wahl. Wer einen separaten User will, muss
-ihm in *System → Access → Users* die Gruppe `wheel` zuweisen — sonst
-scheitert der Rollback an Rechtemangel.
+Der SSH-User braucht Schreibrechte auf `/conf/`, darf `daemon(8)`
+starten und `shutdown(8)` aufrufen. **`root` erfüllt all das out of
+the box** und ist die einfachste Wahl. Wer einen separaten User
+will, muss ihm die Gruppe `wheel` zuweisen — alles andere scheitert
+am Reboot-Trigger.
 
 #### Schritt 2: SSH-Key-Paar generieren
 
@@ -446,42 +451,79 @@ weiter — der Tresor-Master-Passwort-Schutz ist der einzige Gate.
 `paramiko` versucht der Reihe nach: **Ed25519, ECDSA, RSA, DSA**.
 Empfehlung: Ed25519 (klein, schnell, modern).
 
-### Apply mit Sicherheitsnetz
+### Safety-Net testen (empfohlen vor Produktiv-Apply)
+
+Im Geräte-Edit-Modal — unter den SSH-Feldern — gibt es einen Button
+**„Safety-Net testen"**. Klick startet einen End-to-End-Probelauf
+(~25 s) gegen die echte Box:
+
+1. SSH-Verbindung aufbauen, Dummy-XML per SFTP nach
+   `/conf/config.xml.cockpit-safety-cockpit-test.xml`.
+2. `daemon(8)` starten mit Window = 20 s **und Marker-only-Modus**:
+   statt restore+reboot macht der Daemon nur `touch
+   /var/log/cockpit-safety-cockpit-test.fired`.
+3. PID-Verify via `kill -0`.
+4. Cockpit wartet das Window + 5 s Reserve aus.
+5. Per SSH: Marker prüfen. Wenn da → Mechanik funktioniert.
+   Aufräumen.
+6. Toast mit Erfolg oder klarer Fehler-Schritt
+   (`arm`/`wait`/`marker`/`cleanup`).
+
+Kein echter Restore, kein Reboot — der Test ist gefahrlos gegen
+Produktiv-Boxen.
+
+### Apply mit Dead-Man-Switch
 
 1. Plan erzeugen (Route/Alias/Regel/DNS — egal welches Subsystem) →
    Vorschau.
-2. Direkt unter der Confirm-Checkbox erscheint die Box **„Mit
-   Sicherheitsnetz ausrollen"** — nur sichtbar wenn mindestens ein
-   Ziel-Gerät SSH konfiguriert hat. Häkchen setzen.
-3. „Aktivieren" — Apply läuft normal. Nach Verify zeigt das Modal
-   einen **roten Banner mit Countdown** (Default 120 s; per
-   `safety_net_window_s` in den Tresor-Einstellungen anpassbar).
-4. Zwei Knöpfe:
-   - **„Bestätigen (alle)"** — alle armed Entries auflösen, Apply
-     bleibt aktiv.
-   - **„Sofort verwerfen (Rollback jetzt)"** — sofortiger SSH-Rollback
-     ohne auf den Countdown zu warten.
-5. Ohne Klick: bei Deadline-Hit greift der Watcher von selbst.
+2. Direkt unter der Confirm-Checkbox erscheint **„Dead-Man-Switch
+   via SSH aktivieren"** — nur sichtbar wenn mindestens ein Ziel-
+   Gerät SSH-Config hat. Hinweis darunter sagt, auf wie viele der
+   Ziele das Netz greift (Geräte ohne SSH laufen ungesichert).
+3. Häkchen setzen → „Aktivieren". Cockpit:
+   - pusht pro SSH-fähigem Gerät die Pre-Apply-XML auf die Box
+   - startet den `daemon(8)`-Timer mit `safety_net_window_s` Sekunden
+   - verifiziert die PID per `kill -0`
+   - führt den API-Apply aus
+   - räumt nach erfolgreichem Verify den Daemon + Safety-Datei + PID-
+     File wieder weg (3 Sofort-Retries, dann Watcher)
+4. Im Result-Banner erscheinen pro Gerät klare Status-Chips:
+   - **CLEANUP LÄUFT…** — gelb-neutral, der Watcher arbeitet im
+     Hintergrund
+   - **SAFETY-NET SPÄT DISARMED** — grün, alles ok, der Watcher hat es
+     nachgezogen
+   - **ROLLBACK AUSGELÖST** — rot, der Daemon hat gefeuert, die Box
+     hat rebootet, Apply ist rückgängig
+   - **WINDOW ABGELAUFEN** — gelb-warn, die Box war im Window offline
+     und der Daemon ist mit ihr verschwunden, Apply steht trotzdem
 
-### Was beim Auto-Rollback passiert
+### Was bei einem Fire passiert
 
-1. `paramiko` verbindet sich per Private-Key auf SSH-Host/Port.
-2. Aktuelle `/conf/config.xml` wird nach
-   `/conf/config.xml.opncockpit-before-restore` kopiert (Forensik).
-3. Pre-Apply-XML wird per SFTP nach `/conf/config.xml` geschrieben.
-4. Reload-Sequenz: `configctl webgui restart renew; configctl filter
-   reload; configctl interface reconfigure; configctl service reload all`.
-5. Audit-Eintrag mit Trigger (`deadline` / `abort`) und Resultat.
+1. Apply lockt Cockpit aus der Box aus (Filter-Regel, Routing-Fehler,
+   Interface-Down).
+2. Cockpit-seitige Cleanup-Versuche schlagen fehl (3× sofort, dann
+   alle 30 s im Watcher).
+3. Auf der Box läuft der `daemon(8)`-Sleep ab.
+4. Daemon `touch`t `/var/log/cockpit-safety-<jobid>.fired` (für die
+   Forensik), `cp`'t die Safety-XML zurück nach `/conf/config.xml`
+   und triggert `/sbin/shutdown -r now`.
+5. Box rebootet und kommt im Pre-Apply-Zustand zurück.
+6. Cockpit-Watcher tickt alle 30 s; beim ersten erfolgreichen
+   SSH-Reconnect liest er den Marker, räumt ihn auf, schreibt einen
+   Audit-Eintrag `safety_net_fired` und flaggt den Entry für das UI.
+7. UI rendert im Plan-Banner: **„ROLLBACK AUSGELÖST"** mit „Quittieren"-
+   Button. Klick entfernt den Eintrag.
 
 ### Troubleshooting
 
 | Symptom | Wahrscheinliche Ursache |
 |---|---|
-| Checkbox „Mit Sicherheitsnetz" nicht sichtbar | Kein Ziel-Gerät hat `ssh_enabled` UND einen Private-Key im Tresor |
-| Rollback meldet „Authentifizierung fehlgeschlagen" | Public-Key nicht in `~/.ssh/authorized_keys` des SSH-Users / falscher User-Name in Cockpit |
-| Rollback meldet „SSH-Private-Key nicht lesbar" | Format nicht erkannt — Ed25519/ECDSA/RSA/DSA als PEM erwartet, keine PuTTY-PPKs |
-| `Remote-Befehl fehlgeschlagen (rc=N)` | SSH-User hat keine Schreibrechte auf `/conf/config.xml` oder darf `configctl` nicht ausführen — meist nur `root` reicht |
-| Rollback startet nicht obwohl Deadline überschritten | SafetyNetWatcher ist nicht persistent — bei Server-Restart fallen armed Entries aus. Bestätigen oder neu starten |
+| Checkbox „Dead-Man-Switch" nicht sichtbar | Kein Ziel-Gerät hat `ssh_enabled` UND einen Private-Key im Tresor |
+| Test meldet failed_step=`arm` mit „daemon: not found" | `daemon(8)` ist nicht im PATH des SSH-Users — bei OPNsense-Standard-Setup mit `root` ein No-Op; bei custom Builds checken |
+| Test meldet failed_step=`wait` (kein Marker) | SSH-User hat keine Schreibrechte auf `/var/log/` |
+| `Authentifizierung fehlgeschlagen` | Public-Key nicht in `~/.ssh/authorized_keys` des SSH-Users / falscher User-Name in Cockpit |
+| `SSH-Private-Key nicht lesbar` | Format nicht erkannt — Ed25519/ECDSA/RSA/DSA als PEM erwartet, keine PuTTY-PPKs |
+| Box bootet ohne Grund | Cockpit hat den Daemon nicht disarmen können (z. B. wegen kurzer Netzwerk-Latenz). Check Audit-Log auf `safety_net_disarm_pending` und ob der Watcher es nachholt — wenn nicht, ist Apply tatsächlich kaputt gegangen |
 
 ### Sicherheitshinweise
 

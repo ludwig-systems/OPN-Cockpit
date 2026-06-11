@@ -7,6 +7,8 @@ Der Plan-Store ist derselbe wie bei der CLI (``%APPDATA%/OPN-Cockpit/plans/``)
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from opn_cockpit.audit.backend import get_audit_backend
@@ -32,7 +34,7 @@ from opn_cockpit.core.validation import (
 )
 from opn_cockpit.inventory.model import Device
 from opn_cockpit.orchestration.backend import PlanStoreBackend, get_plan_store_backend
-from opn_cockpit.orchestration.executor import Executor
+from opn_cockpit.orchestration.executor import Executor, SafetyNetContext
 from opn_cockpit.orchestration.plan_store import PlanStoreError
 from opn_cockpit.orchestration.planner import Plan, PlannedDeviceAction, Planner
 from opn_cockpit.orchestration.registry import get_binding
@@ -758,17 +760,18 @@ def apply_plan(
     Drei Optionen am Body:
 
     * ``device_ids`` - Retry-Pfad fuer fehlgeschlagene Geraete.
-    * ``safety_net`` - Cisco-Style Commit-Confirmed. Nach Verify wird
-      der SafetyNetWatcher fuer jedes VERIFIED-Geraet armed; der User
-      hat ``safety_net_window_s`` Zeit (oder Tresor-Default) zu
-      bestaetigen, sonst SSH-Rollback auf Pre-Apply-Backup.
+    * ``safety_net`` - On-Device-Dead-Man's-Switch. Pro Ziel mit SSH-
+      Config wird vor dem Apply die Pre-Apply-XML auf die Box gepushed
+      und ein ``daemon(8)``-Timer mit ``safety_net_window_s`` armed.
+      Nach erfolgreichem Apply disarmt Cockpit; bei Cleanup-Fehler
+      uebernimmt der SafetyNetWatcher (Cleanup-Retry + Fire-Detection).
     * Mobile-Rack-Auto-Retry: wenn ``auto_retry_enabled`` an ist,
       werden FAILED-Geraete automatisch in den RetryWatcher eingequeued.
     """
     session, token = pair
     require_plan_role(session)
     body_device_ids = payload.device_ids if payload is not None else None
-    safety_net = bool(payload.safety_net) if payload is not None else False
+    safety_net_active = bool(payload.safety_net) if payload is not None else False
     safety_net_window_override = (
         payload.safety_net_window_s if payload is not None else None
     )
@@ -777,8 +780,20 @@ def apply_plan(
     require_device_ids_accessible(
         target_ids, session.opened.data.devices, session,
     )
+
+    from opn_cockpit.web.safety_net_watcher import SafetyNetWatcher  # noqa: PLC0415
+    watcher = getattr(request.app.state, "safety_net_watcher", None)
+    if not isinstance(watcher, SafetyNetWatcher):
+        watcher = None
+
     try:
-        plan, full_report = run_apply(session, plan_id, device_ids=body_device_ids)
+        plan, full_report = run_apply(
+            session, plan_id,
+            device_ids=body_device_ids,
+            safety_net_active=safety_net_active,
+            safety_net_window_s=safety_net_window_override,
+            safety_net_watcher=watcher,
+        )
     except PlanStoreError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -790,14 +805,6 @@ def apply_plan(
             detail=str(exc),
         ) from exc
 
-    # Safety-Net: armed Watchdog pro erfolgreichem Geraet.
-    if safety_net:
-        _arm_safety_net(
-            request=request, session=session,
-            plan_id=plan_id, report=full_report,
-            window_override_s=safety_net_window_override,
-        )
-
     # Auto-Retry-Queue fuer Failed-Devices (v0.7 Mobile-Rack-Feature).
     _auto_arm_retry_for_failures(
         request=request, session=session, token=token,
@@ -805,85 +812,6 @@ def apply_plan(
     )
 
     return _report_to_response(plan, full_report)
-
-
-def _arm_safety_net(
-    *,
-    request: Request,
-    session: Session,
-    plan_id: str,
-    report: RolloutReport,
-    window_override_s: int | None,
-) -> None:
-    """Armed den SafetyNetWatcher fuer alle VERIFIED-Geraete im Report.
-
-    Geraete ohne SSH-Konfiguration werden uebersprungen (kein Rollback-
-    Pfad). Pro Geraet wird das juengste pre-apply-Backup gesucht und
-    als Rollback-Anker mit in den Entry geschrieben.
-    """
-    from opn_cockpit.backups import list_backups  # noqa: PLC0415
-    from opn_cockpit.web.safety_net_watcher import (  # noqa: PLC0415
-        DEFAULT_WINDOW_S,
-        SafetyNetWatcher,
-    )
-
-    watcher = getattr(request.app.state, "safety_net_watcher", None)
-    if not isinstance(watcher, SafetyNetWatcher):
-        return
-    settings = session.opened.data.settings
-    window_s = window_override_s or settings.safety_net_window_s or DEFAULT_WINDOW_S
-    devices_by_id = {d.id: d for d in session.opened.data.devices}
-    actor = audit_actor_for_session(session)
-    for r in report.results:
-        if r.status != Status.VERIFIED:
-            continue
-        vd = devices_by_id.get(r.device_id)
-        if vd is None:
-            continue
-        if not vd.ssh_enabled or not vd.ssh_user or not vd.ssh_private_key_pem:
-            continue
-        # Juengstes Pre-Apply-Backup fuer dieses Plan/Device finden
-        try:
-            backups = list_backups(vd.id)
-        except Exception:  # noqa: BLE001
-            continue
-        pre_apply = next(
-            (b for b in backups
-             if b.trigger == "pre-apply" and b.related_plan_id == plan_id),
-            None,
-        )
-        if pre_apply is None:
-            continue
-        device_id = vd.id
-        watcher.arm(
-            plan_id=plan_id,
-            device_id=device_id,
-            device_name=vd.name,
-            pre_apply_backup_id=pre_apply.id,
-            window_s=window_s,
-            actor=actor,
-            device_lookup=_make_device_lookup(session, device_id),
-        )
-
-
-def _make_device_lookup(session: Session, device_id: str):  # type: ignore[no-untyped-def]
-    """Closure: re-resolves den VaultDevice beim Rollback-Trigger.
-
-    Wir greifen *nicht* die VaultDevice-Instanz ab, sondern erneut die
-    Liste - so kriegt der Watcher beim Auto-Rollback die letzten
-    SSH-Credentials wenn der User sie zwischenzeitlich aktualisiert
-    haben sollte. Wenn der Tresor gesperrt ist (Inaktivitaet), liefert
-    die Closure None und der Watcher meldet "rollback_failed".
-    """
-    def _get():
-        try:
-            for d in session.opened.data.devices:
-                if d.id == device_id:
-                    return d
-        except Exception:  # noqa: BLE001
-            return None
-        return None
-    return _get
 
 
 def audit_actor_for_session(session: Session) -> str:
@@ -895,7 +823,7 @@ def audit_actor_for_session(session: Session) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Safety-Net Endpoints (Confirm / Abort / Status)
+# Safety-Net Endpoints (Status + Acknowledge)
 # ---------------------------------------------------------------------------
 
 
@@ -908,7 +836,12 @@ def safety_net_status(
     request: Request,
     session: Session = Depends(require_session),
 ) -> SafetyNetStatusResponse:
-    """Liefert die armed/resolved Safety-Net-Entries eines Plans."""
+    """Liefert die pending / resolved Safety-Net-Entries eines Plans.
+
+    Pro Entry wird der ``status`` durchgereicht (``pending_disarm``,
+    ``disarmed_late``, ``fire_detected``, ``expired_unresolved``).
+    Das UI rendert daraus den Banner.
+    """
     session.touch()
     from opn_cockpit.web.safety_net_watcher import SafetyNetWatcher  # noqa: PLC0415
     watcher = getattr(request.app.state, "safety_net_watcher", None)
@@ -919,11 +852,12 @@ def safety_net_status(
             plan_id=e.plan_id,
             device_id=e.device_id,
             device_name=e.device_name,
+            jobid=e.jobid,
             armed_at_ms=e.armed_at_ms,
-            deadline_ms=e.deadline_ms,
-            resolved=e.resolved,
-            resolution=e.resolution,
-            resolution_summary=e.resolution_summary,
+            window_s=e.window_s,
+            status=e.status,
+            last_summary=e.last_summary,
+            resolved_at_ms=e.resolved_at_ms,
         )
         for e in watcher.stats_for_plan(plan_id)
     ]
@@ -931,47 +865,28 @@ def safety_net_status(
 
 
 @router.post(
-    "/{plan_id}/safety-net/confirm",
+    "/{plan_id}/safety-net/acknowledge/{device_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-def safety_net_confirm(
+def safety_net_acknowledge(
     plan_id: str,
+    device_id: str,
     request: Request,
     session: Session = Depends(require_session),
 ) -> None:
-    """Bestaetigt alle armed Safety-Net-Entries des Plans (verhindert Auto-Rollback)."""
+    """User-Acknowledge eines resolved Entry (entfernt ihn aus der Liste).
+
+    Nur fuer ``fire_detected`` / ``expired_unresolved`` / ``disarmed_late``
+    erlaubt; ``pending_disarm`` darf nicht weggeklickt werden, sonst
+    weiss niemand mehr ob die Box gleich rebootet.
+    """
     session.touch()
     require_plan_role(session)
     from opn_cockpit.web.safety_net_watcher import SafetyNetWatcher  # noqa: PLC0415
     watcher = getattr(request.app.state, "safety_net_watcher", None)
     if not isinstance(watcher, SafetyNetWatcher):
         return
-    actor = audit_actor_for_session(session)
-    for e in watcher.stats_for_plan(plan_id):
-        if not e.resolved:
-            watcher.confirm(plan_id, e.device_id, actor)
-
-
-@router.post(
-    "/{plan_id}/safety-net/abort",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def safety_net_abort(
-    plan_id: str,
-    request: Request,
-    session: Session = Depends(require_session),
-) -> None:
-    """Triggert sofortigen SSH-Rollback fuer alle armed Entries des Plans."""
-    session.touch()
-    require_plan_role(session)
-    from opn_cockpit.web.safety_net_watcher import SafetyNetWatcher  # noqa: PLC0415
-    watcher = getattr(request.app.state, "safety_net_watcher", None)
-    if not isinstance(watcher, SafetyNetWatcher):
-        return
-    actor = audit_actor_for_session(session)
-    for e in watcher.stats_for_plan(plan_id):
-        if not e.resolved:
-            watcher.abort(plan_id, e.device_id, actor)
+    watcher.acknowledge(plan_id, device_id)
 
 
 def _auto_arm_retry_for_failures(
@@ -1029,12 +944,21 @@ def run_apply(
     plan_id: str,
     *,
     device_ids: list[str] | None = None,
+    safety_net_active: bool = False,
+    safety_net_window_s: int | None = None,
+    safety_net_watcher: Any = None,
 ) -> tuple[Plan, RolloutReport]:
     """Wendet ``plan_id`` an, optional gefiltert auf ``device_ids``.
 
     Liefert ``(applied_plan, merged_report)``. Der gemergte Report wird
     bereits persistiert. Wird von ``apply_plan`` (HTTP-Endpoint) und vom
     Auto-Retry-Watcher gleichermassen aufgerufen.
+
+    ``safety_net_active`` aktiviert den On-Device-Dead-Man's-Switch.
+    Wenn aktiv, wird pro Geraet mit SSH-Config vor dem Apply der Timer
+    auf der Box armed und nach dem Apply disarmt. ``safety_net_watcher``
+    bekommt pending-disarm-Faelle uebergeben (None = kein Watcher,
+    CLI-Modus).
 
     Wirft ``PlanStoreError`` wenn der Plan nicht existiert, und
     ``_NoMatchingDevices`` wenn ein device_ids-Filter alle Aktionen rausfiltert.
@@ -1060,12 +984,20 @@ def run_apply(
         audit=audit,
         max_workers=session.opened.data.settings.max_workers,
     )
+    settings = session.opened.data.settings
+    window_s = safety_net_window_s or settings.safety_net_window_s or 300
+    safety_net_ctx = SafetyNetContext(
+        active=bool(safety_net_active),
+        window_s=int(window_s),
+        watcher=safety_net_watcher,
+    )
     with HttpClient(targets=targets, tuning=tuning) as client:
         report = executor.apply(
             plan,
             adapter=binding.adapter,
             controller=binding.controller,
             client=client,
+            safety_net=safety_net_ctx,
         )
 
     if device_ids:

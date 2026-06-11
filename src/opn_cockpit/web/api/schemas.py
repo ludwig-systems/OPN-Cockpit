@@ -250,11 +250,12 @@ class VaultSettingsResponse(BaseModel):
     auto_retry_enabled: bool = True
     auto_retry_max_hours: int = 168
     auto_retry_interval_minutes: int = 5
-    # v0.8 #8: Safety-Net SSH (Window-Sekunden) + v0.8 #12: Custom CAs.
-    # safety_net_enabled wird im VaultDevice pro Geraet konfiguriert,
-    # window_s ist global.
+    # v0.9 #1: Safety-Net via On-Device-Dead-Man's-Switch (Window-Sekunden).
+    # safety_net_enabled steuert ob die Checkbox im Confirm-Modal
+    # ueberhaupt vorgeschlagen wird; window_s ist der Default-Wert,
+    # pro Apply ueberschreibbar.
     safety_net_enabled: bool = False
-    safety_net_window_s: int = 120
+    safety_net_window_s: int = 300
     # Custom-Root-CAs: nur Anzahl + Metadaten ausliefern (siehe
     # /api/settings/trusted-cas fuer Details). Der PEM-Inhalt selber
     # ist nicht "secret" - das sind oeffentliche Zertifikate - aber
@@ -351,6 +352,10 @@ class VaultSettingsUpdateRequest(BaseModel):
     auto_retry_max_hours: int | None = Field(None, ge=1, le=720)
     """1h..30d. Defaults 168h (7 Tage)."""
     auto_retry_interval_minutes: int | None = Field(None, ge=1, le=120)
+    # v0.9 #1: Safety-Net Window (Sekunden bis daemon(8) auf der Box feuert).
+    # 60s..3600s; Default 300s (5min) - genug fuer mehrere Subsysteme +
+    # Reconfigure-Reserve.
+    safety_net_window_s: int | None = Field(None, ge=60, le=3600)
 
 
 # F5a: Master-Passwort des aktiven Tresors aendern
@@ -1098,29 +1103,49 @@ class ApplyRequest(BaseModel):
     Wird beim Retry-Pfad genutzt - User schickt die fehlgeschlagenen
     device_ids und der Server wiederholt den Plan nur fuer die.
 
-    ``safety_net`` aktiviert den Cisco-Style-Commit-Confirmed-Pfad:
-    nach erfolgreichem Apply hat der User ``window_s`` Zeit zu
-    bestaetigen, sonst SSH-Rollback auf Pre-Apply-Backup.
+    ``safety_net`` aktiviert den On-Device-Dead-Man's-Switch:
+    Cockpit pushed vor dem Apply die Pre-Apply-XML auf die Box und
+    startet einen daemon(8)-Timer. Nach erfolgreichem Apply disarmt
+    Cockpit den Timer; wenn das nicht klappt (Lockout), feuert der
+    Timer von selbst und die Box rollt zurueck + rebootet.
     """
 
     device_ids: list[str] | None = None
     safety_net: bool = False
-    safety_net_window_s: int | None = Field(None, ge=10, le=3600)
+    safety_net_window_s: int | None = Field(None, ge=60, le=3600)
 
 
 class SafetyNetEntryResponse(BaseModel):
+    """Ein Eintrag aus dem SafetyNetWatcher (Pending-Disarm / Fire-Detection).
+
+    ``status`` ist eine der folgenden Strings:
+    - ``pending_disarm`` - Cockpit versucht weiterhin SSH-Cleanup
+    - ``disarmed_late`` - Watcher hat im Hintergrund disarmt
+    - ``fire_detected`` - Dead-Man hat auf der Box ausgeloest
+    - ``expired_unresolved`` - Window vorbei, kein Marker gefunden
+    """
+
     plan_id: str
     device_id: str
     device_name: str
+    jobid: str
     armed_at_ms: int
-    deadline_ms: int
-    resolved: bool
-    resolution: str
-    resolution_summary: str
+    window_s: int
+    status: str
+    last_summary: str
+    resolved_at_ms: int = 0
 
 
 class SafetyNetStatusResponse(BaseModel):
     entries: list[SafetyNetEntryResponse]
+
+
+class SafetyNetTestResponse(BaseModel):
+    """Resultat eines Safety-Net-Tests vom Host-Modal."""
+
+    success: bool
+    summary: str
+    failed_step: str = ""
 
 
 class OutstandingDeviceEntry(BaseModel):

@@ -96,12 +96,22 @@ def create_app() -> FastAPI:
         session_manager, server_state=app.state.server_state,
     )
     app.state.backup_scheduler.start()
-    # SafetyNetWatcher: bewusst in-memory (kein Persistenz), weil ein
-    # armed Apply nur waehrend der User-Session sinnvoll laeuft.
-    # AuditBackend wird im Watcher gebraucht damit Auto-Rollback im
-    # Hintergrund-Thread auditbar bleibt.
+    # SafetyNetWatcher v2: Cleanup-Retry + Fire-Marker-Detection.
+    # Persistent in <app_data>/state/safety-net-pending.json damit ein
+    # Server-Restart waehrend eines pending-disarm die Detection nicht
+    # killt. SessionManager fuer Vault-Adoption beim Pending-Tick;
+    # AuditBackend fuer Hintergrund-Audit-Events (disarmed_late,
+    # fire_detected, expired_unresolved).
     from opn_cockpit.audit.backend import get_audit_backend  # noqa: PLC0415
-    app.state.safety_net_watcher = SafetyNetWatcher(get_audit_backend())
+    from opn_cockpit.web.safety_net_watcher import (  # noqa: PLC0415
+        QUEUE_FILE_NAME as SAFETY_NET_QUEUE_FILE_NAME,
+    )
+    safety_net_queue_path = get_app_data_dir() / "state" / SAFETY_NET_QUEUE_FILE_NAME
+    app.state.safety_net_watcher = SafetyNetWatcher(
+        session_manager,
+        get_audit_backend(),
+        queue_path=safety_net_queue_path,
+    )
     app.state.safety_net_watcher.start()
     app.state.login_rate_limiter = RateLimiter()
     app.state.bootstrap_rate_limiter = RateLimiter(

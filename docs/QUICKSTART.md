@@ -79,10 +79,13 @@ Der Plan/Apply-Flow:
    Gateway/Alias-Namen.
 3. **Vorschau prüfen** — Liste pro Gerät: NEW / UPDATE / SKIP / DELETE
    mit Diff-Summary. Hier ist noch nichts ausgerollt.
-4. **Optional: „Mit Sicherheitsnetz ausrollen"** — wird angeboten wenn
-   mindestens ein Ziel-Gerät SSH konfiguriert hat. Nach Verify hat man
-   X Sekunden zu bestätigen, sonst SSH-Rollback auf Pre-Apply-Backup.
-   Siehe [FEATURES.md → Safety-Net](FEATURES.md#safety-net-via-ssh).
+4. **Optional: „Dead-Man-Switch via SSH aktivieren"** — wird angeboten
+   wenn mindestens ein Ziel-Gerät SSH konfiguriert hat. Vor dem Apply
+   wird die aktuelle Config auf die Box gepusht und ein `daemon(8)`-
+   Timer (Default 5 min) gestartet; nach dem Apply disarmt Cockpit den
+   Timer wieder. Bei Lockout fährt die Box von selbst die alte Config
+   ein und rebootet. Siehe
+   [FEATURES.md → Safety-Net](FEATURES.md#safety-net-via-ssh).
 5. **Bestätigen + Aktivieren** — Confirm-Checkbox, dann „Aktivieren".
    Parallel-Rollout über alle Geräte mit Write → Reconfigure → Read-back.
 6. **Result-Matrix** — pro Gerät Status (Verifiziert/Fehlgeschlagen/
@@ -183,23 +186,35 @@ Schritt-für-Schritt mit step-ca / OpenSSL / AD-CS-Beispielen in
 [FEATURES.md → Interne CAs vertrauen](FEATURES.md#interne-cas-vertrauen)
 und [FEATURES.md → HTTPS für Cockpit selbst](FEATURES.md#https-fuer-cockpit-selbst).
 
-## 14. Safety-Net via SSH
+## 14. Safety-Net via SSH (On-Device Dead-Man's-Switch)
 
 Optional pro Gerät: SSH-Zugang mit Private-Key in den Tresor legen
 (Gerät → Bearbeiten → unten „Safety-Net via SSH aktivieren" + Felder
-ausfüllen). Beim Apply erscheint dann die Checkbox **„Mit
-Sicherheitsnetz ausrollen"** — nach Verify hat man X Sekunden zum
-Bestätigen, sonst SSH-Rollback auf das Pre-Apply-Backup.
+ausfüllen). Beim Apply erscheint dann die Checkbox **„Dead-Man-Switch
+via SSH aktivieren"**.
 
-Im selben Edit-Dialog gibt es neben der Checkbox einen
-**„Anleitung"-Link** — ein Modal mit den `ssh-keygen`-Befehlen für
-Windows und Linux + dem OPNsense-UI-Pfad, falls du den Setup-Flow
-schnell brauchst. Im Modal oben gibt es zusätzlich
-**Helper-Scripts zum Download** (PowerShell für Windows, Bash für
-Linux/macOS), die das Key-Paar in einem Schritt erzeugen, den
-Public-Key in die Zwischenablage legen und beide Keys im Editor öffnen
-— bequemer Pfad ohne manuelle CLI-Befehle. Längere Version inkl.
-Troubleshooting:
+Mechanik: vor dem Apply pusht Cockpit die aktuelle Config auf die Box
+und startet dort einen `daemon(8)`-Timer (Default 5 min,
+konfigurierbar in den Vault-Settings). Nach dem Apply disarmt Cockpit
+den Timer. Schafft Cockpit das nicht (Lockout), feuert der Timer auf
+der Box von selbst, rollt zurück und triggert einen Reboot. Beim
+nächsten Reconnect erkennt Cockpit den Marker und zeigt im Plan-
+Banner „ROLLBACK AUSGELÖST". Damit greift das Netz auch dann, wenn
+der Apply gerade *Cockpit selbst* aus der Box aussperrt.
+
+Im Edit-Dialog gibt es:
+- Den **„Anleitung"-Link** neben der Safety-Net-Checkbox — ein Modal
+  mit den `ssh-keygen`-Befehlen für Windows und Linux + dem
+  OPNsense-UI-Pfad.
+- **Helper-Scripts zum Download** im Anleitung-Modal (PowerShell für
+  Windows, Bash für Linux/macOS), die das Key-Paar in einem Schritt
+  erzeugen, den Public-Key in die Zwischenablage legen und beide Keys
+  im Editor öffnen.
+- Den **„Safety-Net testen"-Button** unter den SSH-Feldern — ~25 s
+  End-to-End-Probelauf auf der echten Box, mit Marker statt
+  Reboot. Gefahrlos gegen Produktiv-Boxen.
+
+Längere Version inkl. Troubleshooting:
 [FEATURES.md → Safety-Net via SSH](FEATURES.md#safety-net-via-ssh).
 
 ## 15. Wartungsmodus für planmäßig offline Geräte

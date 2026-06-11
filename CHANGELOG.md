@@ -2,7 +2,89 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.8.0 — in Arbeit — CRUD-Erweiterung
+## v0.9.0 — in Arbeit — Safety-Net v2: On-Device Dead-Man's-Switch
+
+### Safety-Net komplett umgebaut
+
+Das alte v0.7-Safety-Net (Cisco-Style commit-confirmed mit Cockpit-seitigem
+SSH-Rollback nach Verify) hatte eine Lücke: wenn der Apply genau **Cockpit**
+aus der Box aussperrte — der eigentliche Schutzfall — kam auch der Rollback-
+SSH-Pfad nicht mehr durch. Die Firewall blieb im kaputten Zustand.
+
+Der neue Mechanismus verlegt den Timer **auf die OPNsense selbst**:
+
+1. **Vor dem Apply** pusht Cockpit die aktuelle `/conf/config.xml` per SFTP
+   als `/conf/config.xml.cockpit-safety-<jobid>.xml` und startet einen
+   detached `daemon(8)`-Job: `sleep N; touch <marker>; cp safety.xml config.xml; shutdown -r now`.
+2. **Cockpit applied via API** — wie gehabt.
+3. **Nach dem Apply** baut Cockpit erneut SSH auf, killt den daemon, räumt
+   die Safety-Datei und das PID-File auf. Klappt das: Apply bleibt, kein
+   Reboot.
+4. **Klappt es nicht** (Lockout, Cockpit kommt nicht mehr durch): der
+   daemon feuert von selbst, setzt einen Marker, restored die alte XML
+   und triggert einen Reboot. Box kommt im Pre-Apply-Zustand zurück.
+5. **Beim nächsten Reconnect** liest der `SafetyNetWatcher` per SSH den
+   Marker `/var/log/cockpit-safety-<jobid>.fired`, räumt ihn auf und
+   zeigt im UI einen klaren Banner: „Apply auf X wurde rückgängig
+   gemacht — die Config hat die Firewall aus Cockpit-Sicht ausgesperrt."
+
+### Per-Apply Opt-In via Checkbox
+
+Die Safety-Net-Checkbox erscheint im Confirm-Modal nur, wenn mindestens ein
+Ziel-Gerät SSH-Config hat. Ein zusätzlicher Hinweis macht klar, auf wie
+viele der Ziele das Netz greift (Geräte ohne SSH laufen ungesichert).
+
+Default: **aus**. Für reine Alias-Pflege braucht man keinen Reboot-Schutz;
+für Routing- und Firewall-Regel-Änderungen ein Klick auf die Checkbox vor
+dem Apply.
+
+### Window konfigurierbar
+
+In den Vault-Settings: **Window bis Auto-Rollback** in Sekunden (60–3600,
+Default 300 = 5 min). Pro Apply via Body-Override editierbar. Genug für
+Apply + Reconfigure + Read-back mit Reserve.
+
+### „Safety-Net testen"-Button im Geräte-Modal
+
+Direkt unter den SSH-Feldern. End-to-End-Probelauf (~25 s) auf der echten
+Box: arm mit Window = 20 s im **Dry-Marker-Modus** (statt restore+reboot
+nur `touch marker`), wait, Marker-Check, cleanup. Wenn der Test grün wird,
+weiss der Operator dass `daemon(8)` da ist, die SSH-Permissions reichen
+und die Mechanik im Ernstfall arbeiten würde. **Ohne Reboot-Risiko**,
+deshalb gefahrlos gegen Produktiv-Boxen.
+
+### SafetyNetWatcher: persistent + Marker-Detection
+
+Aus dem In-Memory-Watchdog wurde ein persistenter Cleanup-Retry + Fire-
+Detector. Wenn der direkte Disarm nach dem Apply scheitert (drei Sofort-
+Versuche im Executor), übernimmt der Watcher: alle 30 s wird SSH probiert,
+bis der Disarm gelingt oder der Marker erscheint. Zustand liegt in
+`<app_data>/state/safety-net-pending.json` — Cockpit-Restart killt die
+Detection nicht. Vault-Adoption analog `retry_watcher.py`.
+
+### Neue Status-Strings im UI
+
+Statt einem einzigen "armed/resolved" gibt es jetzt vier klare Stati:
+`pending_disarm` (Cleanup läuft im Hintergrund), `disarmed_late` (Watcher
+hat es nachgezogen — grün), `fire_detected` (Dead-Man hat ausgelöst —
+rot) und `expired_unresolved` (Window vorbei, kein Marker — gelb).
+
+### Weggefallen
+
+- `POST /api/plans/{id}/safety-net/confirm` — kein User-Eingriff mehr
+  nötig, der Daemon auf der Box entscheidet.
+- `POST /api/plans/{id}/safety-net/abort` — kein "jetzt rollback"-Button
+  mehr; wer sofort zurück will, restored manuell aus der Backup-Liste.
+- Countdown im Result-Banner — Daemon zählt, nicht das UI.
+
+### Audit-Events (neu)
+
+`safety_net_armed`, `safety_net_arm_failed`, `safety_net_disarmed`,
+`safety_net_disarmed_late`, `safety_net_disarm_pending`,
+`safety_net_fired`, `safety_net_expired_unresolved`,
+`safety_net_test_ok`, `safety_net_test_failed`.
+
+## v0.8.0 — CRUD-Erweiterung
 
 ### Wartungsmodus pro Gerät
 

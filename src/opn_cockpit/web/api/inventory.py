@@ -120,6 +120,7 @@ from opn_cockpit.web.api.schemas import (
     DeviceUnboundHostsResponse,
     RouteEntryResponse,
     RuleEntryResponse,
+    SafetyNetTestResponse,
     SyncAliasRequest,
     SyncAliasResponse,
     SyncUnboundHostRequest,
@@ -2134,6 +2135,69 @@ def _record_to_response(record: BackupRecord) -> BackupResponse:
         sha256=record.sha256,
         related_plan_id=record.related_plan_id,
         device_name_at_creation=record.device_name_at_creation,
+    )
+
+
+@router.post(
+    "/devices/{device_id}/safety-net/test",
+    response_model=SafetyNetTestResponse,
+)
+def test_safety_net(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> SafetyNetTestResponse:
+    """Fuehrt den Safety-Net-Test-Loop auf einer Box aus.
+
+    End-to-End-Test im ``dry_marker_only``-Modus: Cockpit pusht eine
+    Dummy-Datei, startet einen daemon mit Window=20s, der **statt
+    restore+reboot nur einen Marker setzt**. Cockpit wartet, prueft
+    den Marker, raeumt auf. Damit kann der User vor dem Ernstfall
+    pruefen ob seine Box den Mechanismus unterstuetzt.
+
+    BLOCKIERT die Request bis der Test fertig ist (~25-30 s). Das ist
+    bewusst - die UI rendert einen Spinner und der User sieht direkt
+    Erfolg/Misserfolg.
+    """
+    from opn_cockpit.core import ssh_safety_net  # noqa: PLC0415
+
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+    if not vault_device.ssh_enabled or not vault_device.ssh_user or not vault_device.ssh_private_key_pem:
+        return SafetyNetTestResponse(
+            success=False,
+            summary=(
+                "SSH-Safety-Net auf diesem Geraet nicht konfiguriert. "
+                "Im Geraete-Modal SSH-User + SSH-Key + Safety-Net-Schalter setzen."
+            ),
+            failed_step="ssh_config",
+        )
+
+    result = ssh_safety_net.run_test_loop(vault_device)
+    action = "safety_net_test_ok" if result.success else "safety_net_test_failed"
+    get_audit_backend().append(
+        AuditEventKind.PRE_APPLY_BACKUP,
+        actor=audit_actor(session),
+        action=action,
+        target_device_id=device_id,
+        target_device_name=vault_device.name,
+        error_kind=None if result.success else "safety_net_test_failed",
+        summary=(
+            f"Safety-Net-Test auf '{vault_device.name}': {result.summary}"
+            + (f" (failed_step={result.failed_step})" if result.failed_step else "")
+        ),
+    )
+    session.touch()
+    return SafetyNetTestResponse(
+        success=result.success,
+        summary=result.summary,
+        failed_step=result.failed_step,
     )
 
 

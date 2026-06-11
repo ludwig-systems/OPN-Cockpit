@@ -88,6 +88,16 @@ class Result:
 
     Eine Instanz repräsentiert das, was im Audit-Log und in der GUI-Result-
     Matrix erscheint. Pflichtfelder reichen für die aggregierte Übersicht.
+
+    ``safety_net_status`` markiert pro Gerät den Zustand des Dead-Man's-
+    Switch:
+
+    * ``""`` — Safety-Net nicht aktiv (Default, kein UI-Hinweis).
+    * ``"armed"`` — Apply hat den Daemon armed, Disarm liegt noch vor uns.
+      Kommt eigentlich nur als Übergangszustand vor.
+    * ``"disarmed"`` — Cleanup direkt nach Verify gelungen (Happy Path).
+    * ``"disarm_pending"`` — Cleanup hat im Executor versagt; der Watcher
+      hat die Aufgabe übernommen und versucht weiter. UI zeigt Banner.
     """
 
     device_id: str
@@ -99,6 +109,7 @@ class Result:
     duration_ms: int = 0
     add_outcome: AddOutcome | None = None
     verify_outcome: VerifyOutcome | None = None
+    safety_net_status: str = ""
 
     def is_success(self) -> bool:
         return self.status in SUCCESS_STATUSES

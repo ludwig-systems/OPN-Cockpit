@@ -379,13 +379,17 @@ body {
 .ca-preview .ca-entry { margin-bottom: 4px; }
 .ca-preview-error { color: var(--danger, #c0392b); }
 
-/* Safety-Net Banner (Phase 3 im Plan-Modal) */
+/* Safety-Net Banner (Phase 3 im Plan-Modal) - v0.9: Dead-Man-Switch.
+ * Banner faerbt sich neutral (info) bei pending-disarm; rot bei fire-detected;
+ * warn-gelb bei expired_unresolved; gruen bei disarmed_late. Header bleibt
+ * gleich, die einzelnen Entries tragen die semantischen Status-Klassen.
+ */
 .safety-net-banner {
   margin-top: 14px;
   padding: 12px 14px;
   border-radius: 8px;
-  border: 1px solid var(--danger, #c0392b);
-  background: var(--danger-bg, rgba(229, 113, 100, 0.10));
+  border: 1px solid var(--border-strong, #999);
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.05));
 }
 .safety-net-header {
   display: flex;
@@ -393,27 +397,76 @@ body {
   align-items: baseline;
   margin-bottom: 8px;
 }
-.safety-net-countdown {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  font-size: 18px;
-  color: var(--danger, #c0392b);
-}
 .safety-net-entries {
-  font-size: 12px;
-  margin-bottom: 10px;
-  max-height: 180px;
+  font-size: 12.5px;
+  max-height: 220px;
   overflow-y: auto;
 }
 .safety-net-entries .sn-entry {
-  padding: 4px 0;
+  padding: 8px 0;
   border-bottom: 1px dashed var(--border-soft, #ccc);
 }
 .safety-net-entries .sn-entry:last-child { border-bottom: none; }
-.safety-net-actions {
+.sn-entry-head {
   display: flex;
   gap: 10px;
-  justify-content: flex-end;
+  align-items: baseline;
+}
+.sn-entry-status {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-elevated, rgba(0,0,0,0.05));
+}
+.sn-entry-head.sn-pending .sn-entry-status {
+  color: var(--accent, #3a6e7e);
+  border: 1px solid var(--accent, #3a6e7e);
+}
+.sn-entry-head.sn-ok .sn-entry-status {
+  color: var(--ok, #2e8b57);
+  border: 1px solid var(--ok, #2e8b57);
+}
+.sn-entry-head.sn-warn .sn-entry-status {
+  color: var(--warn, #b9770e);
+  border: 1px solid var(--warn, #b9770e);
+}
+.sn-entry-head.sn-fire .sn-entry-status {
+  color: var(--danger, #c0392b);
+  border: 1px solid var(--danger, #c0392b);
+  background: var(--danger-bg, rgba(229, 113, 100, 0.12));
+}
+.sn-entry-device {
+  font-weight: 600;
+  color: var(--text, inherit);
+}
+.sn-entry-summary {
+  margin-top: 4px;
+  color: var(--text-muted, #888);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.sn-entry-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+}
+.sn-entry-actions .btn-sm {
+  font-size: 11.5px;
+  padding: 4px 10px;
+}
+/* Coverage-Hint unter der Safety-Net-Checkbox */
+.preview-confirm .hint {
+  display: block;
+  margin-top: 4px;
+  font-style: italic;
+  font-size: 11.5px;
+  color: var(--text-muted, #888);
+}
+.preview-confirm .hint.warn {
+  color: var(--warn, #b9770e);
 }
 
 /* Inline-Validierung: rote Border + Mini-Hint unter dem Input.

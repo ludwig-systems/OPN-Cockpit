@@ -113,14 +113,22 @@ class VaultSettings:
     auto_retry_max_hours: int = 168     # 7 Tage - mobile Racks koennen lang offline sein
     auto_retry_interval_minutes: int = 5
 
-    # v0.8 #8 Safety-Net via SSH. Default AUS - braucht SSH-Zugang
-    # auf den Boxen. Wenn aktiv: User kann "Apply mit Sicherheitsnetz"
-    # waehlen; nach erfolgreichem Apply hat er die hier konfigurierten
-    # Sekunden Zeit zu bestaetigen. Tut er das nicht (z. B. weil die
-    # Box nach dem Apply unerreichbar ist), rollt der SafetyNetWatcher
-    # via SSH auf das Pre-Apply-Backup zurueck.
+    # v0.9 #1 Safety-Net via SSH (On-Device Dead-Man's-Switch).
+    # Pro Apply optional aktivierbar im Confirm-Modal - nur sichtbar
+    # wenn mindestens ein Zielgeraet SSH-Config hat. Wenn aktiv: Cockpit
+    # SCPed die Pre-Apply-XML vor dem API-Apply auf die Box und startet
+    # einen detached daemon(8)-Timer. Nach erfolgreichem Apply disarm't
+    # Cockpit den Timer per SSH. Schafft Cockpit das nicht (klassischer
+    # Lockout-Fall), feuert der Timer von selbst, schreibt einen
+    # Marker, restored die Pre-Apply-XML und rebootet. Beim Reconnect
+    # erkennt der Cockpit-Watcher den Marker und zeigt ein "Apply
+    # zurueckgesetzt"-Banner.
+    #
+    # Window-Default 300 s (5 min) - genug fuer mehrere Subsysteme
+    # hintereinander; konfigurierbar in den Vault-Settings, pro Apply
+    # ueberschreibbar via Body-Feld.
     safety_net_enabled: bool = False
-    safety_net_window_s: int = 120
+    safety_net_window_s: int = 300
 
     # v0.8 #12 Custom Root-CAs fuer interne PKI.
     # Liste von PEM-codierten Root-Zertifikaten. Werden zusaetzlich zum

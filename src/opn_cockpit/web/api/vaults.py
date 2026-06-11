@@ -478,11 +478,17 @@ def update_vault_settings(
             if payload.auto_retry_interval_minutes is not None
             else old_settings.auto_retry_interval_minutes
         ),
-        # Safety-Net + Custom-CAs durchreichen damit ein Settings-Save
-        # diese Felder NICHT verliert. Beide werden ueber eigene
-        # Endpoints/UI gepflegt, nicht ueber den globalen Settings-PATCH.
+        # Custom-CAs durchreichen damit ein Settings-Save sie nicht
+        # verliert; werden ueber eigene Endpoints gepflegt.
+        # Safety-Net: window_s ist via Settings-PATCH editierbar (UI hat
+        # ein Feld dafuer); enabled bleibt False bis ein Geraet SSH-Config
+        # bekommt - das schaltet die Checkbox im Confirm-Modal frei.
         safety_net_enabled=old_settings.safety_net_enabled,
-        safety_net_window_s=old_settings.safety_net_window_s,
+        safety_net_window_s=(
+            payload.safety_net_window_s
+            if payload.safety_net_window_s is not None
+            else old_settings.safety_net_window_s
+        ),
         trusted_ca_pems=list(old_settings.trusted_ca_pems),
     )
     session.opened.data.settings = new_settings
