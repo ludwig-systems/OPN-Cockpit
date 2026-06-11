@@ -194,7 +194,12 @@ Bestätigen, sonst SSH-Rollback auf das Pre-Apply-Backup.
 Im selben Edit-Dialog gibt es neben der Checkbox einen
 **„Anleitung"-Link** — ein Modal mit den `ssh-keygen`-Befehlen für
 Windows und Linux + dem OPNsense-UI-Pfad, falls du den Setup-Flow
-schnell brauchst. Längere Version inkl. Troubleshooting:
+schnell brauchst. Im Modal oben gibt es zusätzlich
+**Helper-Scripts zum Download** (PowerShell für Windows, Bash für
+Linux/macOS), die das Key-Paar in einem Schritt erzeugen, den
+Public-Key in die Zwischenablage legen und beide Keys im Editor öffnen
+— bequemer Pfad ohne manuelle CLI-Befehle. Längere Version inkl.
+Troubleshooting:
 [FEATURES.md → Safety-Net via SSH](FEATURES.md#safety-net-via-ssh).
 
 ## 15. Wartungsmodus für planmäßig offline Geräte

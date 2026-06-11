@@ -225,6 +225,18 @@ systemctl start opn-cockpit
 Wichtig: das sind Vault + User-DB + Audit-DB + Plan-Reports + Backups.
 Komplette Datei → komplettes Restore.
 
+### Speicherplatz im Auge behalten
+
+Cockpit zeigt seit v0.8 ein **Disk-Space-Widget in der Topbar** — ein
+schmaler Progress-Bar mit Prozent für den belegten Speicher auf dem
+`OPNCOCKPIT_DATA_DIR`-Volume. Hover-Tooltip zeigt Pfad + Free-GB.
+Schwellen: gelb ab 80 %, rot ab 92 % (einmaliger Toast).
+
+Auf Linux ist das Widget immer sichtbar. Backup-Storage wächst pro
+Gerät × Retention × scheduled-Intervall — bei 25 Boxen, 90-Backups-
+Scheduled-Retention und alle 24 h kannst du grob mit
+`~25 × 90 × ø-Backup-Größe-MB` rechnen.
+
 ## Sicherheit auf Linux
 
 - Service läuft als unprivilegierter User `opncockpit`

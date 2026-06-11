@@ -277,6 +277,12 @@ Sicht auf die Box kappt (Filter-Regel, Interface-Down, Routing-Fehler).
 > mit kompakter Schritt-für-Schritt-Doku (ssh-keygen-Befehle für
 > Windows + Linux, Clipboard-Snippets, OPNsense-UI-Pfad). Die längere
 > Variante mit allen Details bleibt hier in dieser Datei.
+>
+> Im selben Modal oben gibt es zusätzlich **Helper-Scripts zum
+> Download** (`opncockpit-ssh-helper.ps1` für Windows, `.sh` für
+> Linux/macOS), die das Key-Paar automatisch erzeugen, den Public-Key in
+> die Zwischenablage legen und beide Keys im Editor öffnen.
+> **Empfohlener Pfad für nicht-CLI-fitte Admins.**
 
 Pro Gerät, das das Feature nutzen soll, in vier Schritten:
 

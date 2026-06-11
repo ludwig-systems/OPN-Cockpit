@@ -85,7 +85,11 @@ ein eigenes Modal mit kompakter Schritt-für-Schritt-Anleitung öffnet:
 3. Private-Key ins Cockpit kopieren (`Get-Content | Set-Clipboard` /
    `cat | xclip/pbcopy`) + Sicherheits-Hinweise
 
-Für nicht-CLI-versierte Admins. Liegt per z-index über dem Add-Modal.
+Plus **Helper-Scripts zum Download** für nicht-CLI-fitte Admins
+(`opncockpit-ssh-helper.ps1` für Windows, `.sh` für Linux/macOS): erzeugen
+das Key-Paar, legen den Public-Key in die Zwischenablage, öffnen beide
+Keys im Editor und drucken eine farbige Console-Anleitung. Liegen unter
+`/static/scripts/`. Der manuelle Pfad bleibt im Modal komplett erhalten.
 
 ### os-firewall: Doku-Klarstellung
 
