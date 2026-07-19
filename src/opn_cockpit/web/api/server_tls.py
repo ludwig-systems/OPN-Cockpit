@@ -28,6 +28,11 @@ from opn_cockpit.audit.backend import audit_actor, get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.config import AppSettings, get_app_data_dir, get_settings_path
 from opn_cockpit.core.trust_store import parse_cert
+from opn_cockpit.security.self_signed import (
+    AutoCertPaths,
+    generate_self_signed,
+    read_fingerprint,
+)
 from opn_cockpit.security.session import Session
 from opn_cockpit.web.api.schemas import (
     ServerTlsStatusResponse,
@@ -51,44 +56,127 @@ def get_server_tls(
 
     Admin-only - das ist eine app-weite Setting, nicht pro Tresor. Im
     Single-User-Mode ist der eingeloggte User implizit admin.
+
+    Priorisierung fuer ``cert_*``-Felder: Custom-Cert wenn konfiguriert,
+    sonst Auto-Cert. ``auto_cert_available``/``auto_cert_fingerprint``
+    zeigen zusaetzlich den Auto-Cert-Zustand auch wenn ein Custom-Cert
+    aktiv ist (Recovery-Info fuer den User).
     """
     session.touch()
     app_settings = AppSettings.load()
     cert_path = app_settings.server_tls_cert_path
     key_path = app_settings.server_tls_key_path
     resolved = app_settings.resolved_tls_paths()
+
+    # Auto-Cert-Zustand immer mitlesen.
+    auto_paths = AutoCertPaths.from_dir(app_settings.auto_cert_directory())
+    auto_fp = read_fingerprint(auto_paths) if auto_paths.cert.exists() else ""
+
     response = ServerTlsStatusResponse(
-        enabled=resolved is not None,
+        enabled=(resolved is not None) or auto_paths.cert.exists(),
         cert_path=cert_path or "",
         key_path=key_path or "",
         cert_subject_cn="",
         cert_not_after_iso="",
         cert_days_until_expiry=None,
         warnings=[],
+        cert_type="none",
+        fingerprint_sha256="",
+        auto_cert_available=auto_paths.cert.exists(),
+        auto_cert_fingerprint=auto_fp,
     )
-    if resolved is None:
-        if cert_path or key_path:
+
+    if resolved is None and cert_path and key_path:
+        # Custom konfiguriert aber Files fehlen - klarer Warn-Hint.
+        response.warnings.append(
+            "Eingetragene Custom-Cert-Pfade existieren nicht. "
+            "Cockpit faehrt aktuell auf Auto-Cert (Self-Signed).",
+        )
+
+    if resolved is not None:
+        # Custom-Cert aktiv
+        cert_file, _key_file = resolved
+        try:
+            meta = parse_cert(cert_file.read_text(encoding="ascii"))
+        except (OSError, ValueError) as exc:
+            response.warnings.append(f"Custom-Cert nicht lesbar/parsbar: {exc}")
+            return response
+        response.cert_type = "custom"
+        response.cert_subject_cn = meta.subject_cn
+        response.cert_not_after_iso = meta.not_after_iso
+        response.cert_days_until_expiry = meta.days_until_expiry
+        response.fingerprint_sha256 = meta.fingerprint_sha256
+        if meta.days_until_expiry is not None and meta.days_until_expiry < 0:
+            response.warnings.append("Custom-Cert ist ABGELAUFEN!")
+        elif meta.days_until_expiry is not None and meta.days_until_expiry < 14:
             response.warnings.append(
-                "Eingetragene Pfade existieren nicht oder sind unvollstaendig. "
-                "Cockpit faehrt deshalb mit HTTP.",
+                f"Custom-Cert laeuft in {meta.days_until_expiry} Tagen ab.",
             )
         return response
-    cert_file, _key_file = resolved
-    try:
-        meta = parse_cert(cert_file.read_text(encoding="ascii"))
-    except (OSError, ValueError) as exc:
-        response.warnings.append(f"Cert nicht lesbar/parsbar: {exc}")
+
+    if auto_paths.cert.exists():
+        # Auto-Cert ist aktiv (kein Custom).
+        try:
+            meta = parse_cert(auto_paths.cert.read_text(encoding="ascii"))
+        except (OSError, ValueError) as exc:
+            response.warnings.append(f"Auto-Cert nicht lesbar/parsbar: {exc}")
+            return response
+        response.cert_type = "auto"
+        response.cert_subject_cn = meta.subject_cn
+        response.cert_not_after_iso = meta.not_after_iso
+        response.cert_days_until_expiry = meta.days_until_expiry
+        response.fingerprint_sha256 = meta.fingerprint_sha256
+        response.cert_path = str(auto_paths.cert)
+        response.key_path = str(auto_paths.key)
+        if meta.days_until_expiry is not None and meta.days_until_expiry < 0:
+            response.warnings.append(
+                "Auto-Cert ist ABGELAUFEN! Server-Restart empfohlen.",
+            )
+        elif meta.days_until_expiry is not None and meta.days_until_expiry < 30:
+            response.warnings.append(
+                f"Auto-Cert laeuft in {meta.days_until_expiry} Tagen ab. "
+                "Cockpit rotiert das im Hintergrund - ein Server-Restart "
+                "aktiviert das frische Cert.",
+            )
         return response
-    response.cert_subject_cn = meta.subject_cn
-    response.cert_not_after_iso = meta.not_after_iso
-    response.cert_days_until_expiry = meta.days_until_expiry
-    if meta.days_until_expiry is not None and meta.days_until_expiry < 0:
-        response.warnings.append("Server-Zertifikat ist ABGELAUFEN!")
-    elif meta.days_until_expiry is not None and meta.days_until_expiry < 14:
-        response.warnings.append(
-            f"Server-Zertifikat laeuft in {meta.days_until_expiry} Tagen ab.",
-        )
+
+    # Kein Cert - HTTP-Fallback.
+    response.enabled = False
     return response
+
+
+@router.post("/tls/regenerate-auto", response_model=ServerTlsStatusResponse)
+def regenerate_auto_cert(
+    session: Session = Depends(require_session),
+) -> ServerTlsStatusResponse:
+    """Erzeugt das Auto-Cert neu (frischer Fingerprint, +397 Tage).
+
+    Wird aktiv nach dem naechsten Server-Restart. Wenn ein Custom-Cert
+    aktiv ist, laeuft das Auto-Cert weiter im Hintergrund und wird
+    aktiv sobald der Custom entfernt wird.
+    """
+    require_admin_role(session)
+    session.touch()
+    app_settings = AppSettings.load()
+    auto_paths = AutoCertPaths.from_dir(app_settings.auto_cert_directory())
+    try:
+        gc = generate_self_signed(auto_paths)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Auto-Cert-Generation fehlgeschlagen: {exc}",
+        ) from exc
+    get_audit_backend().append(
+        AuditEventKind.TLS_CERT_ROTATED,
+        actor=audit_actor(session),
+        action="tls_cert_regen_manual",
+        summary=(
+            f"Auto-Cert manuell neu generiert (Admin). "
+            f"Neuer Fingerprint: SHA-256:{gc.fingerprint_sha256}, "
+            f"gueltig bis {gc.not_after_iso}. Server-Restart aktiviert es."
+        ),
+    )
+    return get_server_tls(session)
 
 
 @router.post("/tls", response_model=ServerTlsStatusResponse)

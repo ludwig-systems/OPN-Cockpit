@@ -409,6 +409,27 @@
         </div>
       </div>
 
+      <!-- TLS-Cert-Ablauf-Banner (v0.10). Wird per pollTlsState() gefuellt. -->
+      <div class="tls-banner" id="tls-banner" data-severity="ok" hidden>
+        <div class="tls-banner-inner">
+          <span class="tls-banner-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="6" width="8" height="6" rx="1"/>
+              <path d="M5 6V4a2 2 0 1 1 4 0v2"/>
+            </svg>
+          </span>
+          <span class="tls-banner-text" id="tls-banner-text">TLS-Cert-Status</span>
+          <button class="btn-secondary btn-sm" id="tls-banner-details">Details</button>
+          <button class="btn-danger btn-sm" id="tls-banner-restart" hidden>Server neu starten</button>
+          <button class="update-banner-dismiss" id="tls-banner-dismiss" aria-label="Hinweis ausblenden">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="2.5" y1="2.5" x2="9.5" y2="9.5"/>
+              <line x1="9.5" y1="2.5" x2="2.5" y2="9.5"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
       <div class="main-layout">
         <aside class="sidebar">
           <section class="sidebar-section">
@@ -1722,15 +1743,20 @@
           <h3 class="modal-section-title">Cockpit HTTPS-Zertifikat</h3>
           <div class="form-hint" style="margin-bottom:12px;">
             App-weite Einstellung (NICHT im Tresor — liegt in
-            <code>settings.json</code>). Damit User auf
-            <code>https://cockpit.lab:9876</code> ohne Browser-Warnung
-            zugreifen. Nach Save ist ein <strong>Cockpit-Neustart erforderlich</strong> —
-            uvicorn liest TLS nur beim Boot.
+            <code>settings.json</code>). Cockpit laeuft ab v0.10 immer HTTPS.
+            Ohne eigenes Zertifikat wird ein Self-Signed generiert
+            (Browser zeigt Warnung); ein hier hinterlegtes Custom-Cert
+            (Let's Encrypt, interne CA) ist der empfohlene Endzustand.
+            Nach Aenderung ist ein <strong>Cockpit-Neustart erforderlich</strong>.
           </div>
-          <div id="vs-srv-tls-status" class="form-hint" style="margin-bottom:8px;">Lade…</div>
+          <div id="vs-srv-tls-status" class="form-hint tls-status-box" style="margin-bottom:8px;">Lade…</div>
           <div class="form-row" style="margin-top:8px;">
-            <button class="btn-secondary" id="vs-srv-tls-upload-btn" type="button">Server-Zertifikat hinterlegen…</button>
-            <button class="btn-link btn-danger-text" id="vs-srv-tls-clear-btn" type="button" hidden>Entfernen (zu HTTP zurueck)</button>
+            <button class="btn-secondary" id="vs-srv-tls-upload-btn" type="button">Custom-Zertifikat hinterlegen…</button>
+            <button class="btn-secondary" id="vs-srv-tls-regen-btn" type="button">Auto-Cert neu generieren</button>
+            <button class="btn-link btn-danger-text" id="vs-srv-tls-clear-btn" type="button" hidden>Custom entfernen (zurueck zu Auto)</button>
+          </div>
+          <div class="form-row" style="margin-top:6px;">
+            <button class="btn-primary" id="vs-srv-tls-restart-btn" type="button" hidden>Server jetzt neu starten</button>
           </div>
           <div class="form-error" id="vs-srv-tls-error" hidden></div>
 

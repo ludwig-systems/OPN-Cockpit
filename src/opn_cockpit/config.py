@@ -40,6 +40,15 @@ STORAGE_BACKEND_ENV = "OPNCOCKPIT_STORAGE_BACKEND"
 UPDATE_CHECK_ENABLED_ENV = "OPNCOCKPIT_UPDATE_CHECK_ENABLED"
 UPDATE_CHECK_INTERVAL_ENV = "OPNCOCKPIT_UPDATE_CHECK_INTERVAL_HOURS"
 
+# v0.10: HTTPS by default. Wenn kein Custom-Cert konfiguriert ist,
+# generiert Cockpit ein Self-Signed und laeuft trotzdem HTTPS.
+# ``OPNCOCKPIT_ALLOW_HTTP=1`` schaltet HTTP als Notausgang frei.
+ALLOW_HTTP_ENV = "OPNCOCKPIT_ALLOW_HTTP"
+
+# Auto-Cert-Verzeichnis: liegt neben dem Custom-Cert-Ordner, damit
+# beide gleichzeitig existieren koennen (Custom hat Vorrang beim Boot).
+AUTO_CERT_SUBDIR = "server_tls"
+
 
 def get_app_data_dir() -> Path:
     """Ermittelt das App-Daten-Verzeichnis plattformabhaengig.
@@ -103,12 +112,23 @@ class AppSettings:
     # v0.8 #12: Eigenes Server-Zertifikat fuer den Cockpit-eigenen HTTPS-
     # Port. Pfade zu PEM-codiertem Cert (Fullchain) und Private-Key auf
     # der Cockpit-Maschine. Wenn beide gesetzt sind UND beide existieren,
-    # startet uvicorn auf HTTPS statt HTTP. Andernfalls bleibt das alte
-    # HTTP-Verhalten (Loopback Single-User; Reverse-Proxy Multi-User).
+    # startet uvicorn auf HTTPS statt HTTP. Andernfalls greift ab v0.10
+    # das Auto-Cert (siehe unten).
     # Schluesselsicherheit: die Dateien gehoeren mit 0600 dem Service-
     # User; Cockpit liest sie nur lesend.
     server_tls_cert_path: str | None = None
     server_tls_key_path: str | None = None
+
+    # v0.10: HTTPS by default. Wenn beim Boot kein Custom-Cert konfiguriert
+    # ist, generiert Cockpit ein Self-Signed und legt es unter
+    # ``<app_data>/server_tls/auto-cert.pem`` ab. Der Wert hier ist der
+    # Verzeichnispfad; wenn None, wird der Default ``<app_data>/server_tls/``
+    # genommen. Env-Override waere Overkill.
+    auto_cert_dir: str | None = None
+    # Notausgang: erlaubt reinen HTTP-Betrieb (fuer Reverse-Proxy-Setups
+    # wo TLS vor Cockpit terminiert wird). Default False - Cockpit macht
+    # von sich aus HTTPS. Ueberschreibbar via OPNCOCKPIT_ALLOW_HTTP=1.
+    allow_http_fallback: bool = False
 
     # ----- Persistenz -----
 
@@ -160,6 +180,11 @@ class AppSettings:
                 interval = -1
             if interval > 0:
                 self.update_check_interval_hours = interval
+        allow_http = os.environ.get(ALLOW_HTTP_ENV, "").strip().lower()
+        if allow_http in {"1", "true", "yes", "on"}:
+            self.allow_http_fallback = True
+        elif allow_http in {"0", "false", "no", "off"}:
+            self.allow_http_fallback = False
 
     def save(self, path: Path | None = None) -> None:
         """Schreibt Settings nach ``path`` oder Default-Pfad (atomar)."""
@@ -173,9 +198,12 @@ class AppSettings:
         os.replace(tmp, resolved)
 
     def resolved_tls_paths(self) -> tuple[Path, Path] | None:
-        """Liefert ``(cert_path, key_path)`` wenn beide Dateien existieren,
-        sonst ``None``. Aufrufer (Server-Bootstrap) interpretiert das als
-        "HTTPS einschalten" / "HTTP weiter".
+        """Liefert ``(cert_path, key_path)`` wenn beide Custom-Cert-Dateien
+        existieren, sonst ``None``.
+
+        **Nur Custom-Cert.** Fuer die vollstaendige Fallback-Kette
+        (Custom -> Auto -> HTTP) siehe
+        :func:`opn_cockpit.web.settings.WebSettings.from_env`.
         """
         if not self.server_tls_cert_path or not self.server_tls_key_path:
             return None
@@ -184,6 +212,16 @@ class AppSettings:
         if not cert.is_file() or not key.is_file():
             return None
         return cert, key
+
+    def auto_cert_directory(self) -> Path:
+        """Verzeichnis fuer das Auto-Cert (Self-Signed).
+
+        Aus ``auto_cert_dir`` falls gesetzt, sonst
+        ``<app_data>/server_tls/``. Wird bei Bedarf angelegt.
+        """
+        if self.auto_cert_dir:
+            return Path(self.auto_cert_dir).expanduser()
+        return get_app_data_dir() / AUTO_CERT_SUBDIR
 
     # ----- Recent-Vaults-Liste -----
 
@@ -240,6 +278,14 @@ class AppSettings:
         cert_path = str(cert_raw) if isinstance(cert_raw, str) and cert_raw.strip() else None
         key_raw = raw.get("server_tls_key_path")
         key_path = str(key_raw) if isinstance(key_raw, str) and key_raw.strip() else None
+        auto_dir_raw = raw.get("auto_cert_dir")
+        auto_dir = (
+            str(auto_dir_raw)
+            if isinstance(auto_dir_raw, str) and auto_dir_raw.strip()
+            else None
+        )
+        allow_http_raw = raw.get("allow_http_fallback", False)
+        allow_http = bool(allow_http_raw) if isinstance(allow_http_raw, bool) else False
         return cls(
             recent_vaults=recent[:limit],
             default_vault=default_str,
@@ -251,4 +297,6 @@ class AppSettings:
             update_check_interval_hours=interval,
             server_tls_cert_path=cert_path,
             server_tls_key_path=key_path,
+            auto_cert_dir=auto_dir,
+            allow_http_fallback=allow_http,
         )

@@ -20,6 +20,8 @@ nicht verloren gehen und der Admin bei Problemen was zu lesen hat.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import logging
 import os
 import sys
 import threading
@@ -30,11 +32,23 @@ import uvicorn
 
 from opn_cockpit.migrations import MigrationError, run_pending_migrations
 from opn_cockpit.web.server import create_app
-from opn_cockpit.web.settings import WebSettings
+from opn_cockpit.web.settings import (
+    TLS_SOURCE_AUTO,
+    TLS_SOURCE_CUSTOM,
+    TLS_SOURCE_ENV,
+    TLS_SOURCE_NONE,
+    WebSettings,
+)
+
+_log = logging.getLogger(__name__)
 
 _BROWSER_OPEN_DELAY_S = 0.7
 _LOG_FILE_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB Rotation-Schwelle
 _LOG_FILENAME = "opn-cockpit.log"
+
+# Wenn ein Cert im Boot ≤ dieser Schwelle vom Ablauf steht, regeneriert
+# der Boot es sofort - der Reboot ist Gelegenheit ohnehin.
+_BOOT_REGEN_THRESHOLD_DAYS = 14
 
 
 def _redirect_stdio_if_windowless() -> None:
@@ -93,6 +107,10 @@ def run(settings: WebSettings | None = None) -> int:
     der Standard-Browser auf die Server-URL gerichtet. Die Verzoegerung
     verhindert, dass der Browser eine "Connection refused"-Seite sieht,
     falls der Server noch im Startup ist.
+
+    **HTTPS-by-default**: wenn weder Env-Cert noch Custom-Cert noch
+    ``OPNCOCKPIT_ALLOW_HTTP=1`` gesetzt sind, generiert der Boot ein
+    Self-Signed-Cert und startet mit dem.
     """
     _redirect_stdio_if_windowless()
     settings = settings or WebSettings.from_env()
@@ -116,7 +134,11 @@ def run(settings: WebSettings | None = None) -> int:
             sys.stderr.write(f"  Backup: {result.backup.path}\n")
         sys.stderr.flush()
 
+    # HTTPS-Fallback-Kette: Env-Cert -> Custom-Cert -> Auto-Cert -> HTTP.
+    settings = _ensure_tls_or_http(settings)
+
     app = create_app()
+    app.state.web_settings = settings   # damit Endpoints das lesen koennen
 
     if settings.auto_open_browser:
         _schedule_browser_open(settings.base_url)
@@ -131,6 +153,101 @@ def run(settings: WebSettings | None = None) -> int:
         ssl_keyfile=settings.tls_key,
     )
     return 0
+
+
+def _ensure_tls_or_http(settings: WebSettings) -> WebSettings:
+    """Aktiviert HTTPS by default und generiert Auto-Cert bei Bedarf.
+
+    Vier Endzustaende:
+
+    * ``tls_source=env`` oder ``tls_source=custom``: WebSettings hat
+      schon Cert+Key gesetzt (durch ``from_env``). Wir loggen die Wahl
+      und lassen alles wie es ist.
+    * ``allow_http_fallback=True``: kein TLS aktivieren. Sichtbare
+      Warnung in stderr.
+    * Auto-Cert existiert und ist frisch: benutzen.
+    * Auto-Cert fehlt oder laeuft in <= ``_BOOT_REGEN_THRESHOLD_DAYS``
+      ab: generieren + benutzen. Fingerprint prominent nach stderr.
+    """
+    if settings.tls_cert and settings.tls_key:
+        sys.stderr.write(
+            f"[opn-cockpit] HTTPS aktiv (Cert-Quelle: {settings.tls_source})\n"
+            f"  Cert: {settings.tls_cert}\n"
+        )
+        sys.stderr.flush()
+        return settings
+
+    if settings.allow_http_fallback:
+        sys.stderr.write(
+            "[opn-cockpit] ACHTUNG: HTTP-Fallback aktiv (OPNCOCKPIT_ALLOW_HTTP=1).\n"
+            "  Cockpit laeuft ohne TLS. Nur nutzen wenn ein Reverse-Proxy\n"
+            "  vor Cockpit TLS terminiert.\n",
+        )
+        sys.stderr.flush()
+        return settings
+
+    # Auto-Cert-Pfad: prueft, generiert bei Bedarf.
+    try:
+        from opn_cockpit.config import AppSettings  # noqa: PLC0415
+        from opn_cockpit.security.self_signed import (  # noqa: PLC0415
+            AutoCertPaths,
+            generate_self_signed,
+            needs_regeneration,
+            read_fingerprint,
+        )
+    except ImportError as exc:
+        sys.stderr.write(
+            f"[opn-cockpit] Auto-Cert nicht verfuegbar (Import: {exc}).\n"
+            "  Cockpit faellt auf HTTP zurueck. Setze OPNCOCKPIT_ALLOW_HTTP=1\n"
+            "  um das explizit zu machen, oder installier 'cryptography'.\n",
+        )
+        sys.stderr.flush()
+        return settings
+
+    app_settings = AppSettings.load()
+    auto_paths = AutoCertPaths.from_dir(app_settings.auto_cert_directory())
+    regenerated = False
+    if needs_regeneration(auto_paths.cert, threshold_days=_BOOT_REGEN_THRESHOLD_DAYS):
+        try:
+            gc = generate_self_signed(auto_paths)
+            regenerated = True
+            sys.stderr.write(
+                "\n[opn-cockpit] Neues Self-Signed-Cert generiert (HTTPS-Default):\n"
+                f"  Subject:      CN={gc.subject_cn}\n"
+                f"  Gueltig bis:  {gc.not_after_iso}\n"
+                f"  Fingerprint:  SHA-256:{gc.fingerprint_sha256}\n"
+                f"  Cert-Datei:   {gc.cert_path}\n"
+                f"  Key-Datei:    {gc.key_path}\n"
+                "  Beim ersten Browser-Aufruf akzeptierst du die Warnung und\n"
+                "  vergleichst den Fingerprint aus diesem Log mit dem im Browser.\n"
+                "  Fuer ein produktives Cert bitte im Server-TLS-Modal hochladen.\n\n",
+            )
+            sys.stderr.flush()
+        except Exception as exc:  # noqa: BLE001
+            _log.exception("Auto-Cert-Generation crashed")
+            sys.stderr.write(
+                f"[opn-cockpit] Auto-Cert-Generation FEHLGESCHLAGEN: {exc}\n"
+                "  Cockpit faellt auf HTTP zurueck. Bitte manuell TLS aufsetzen.\n",
+            )
+            sys.stderr.flush()
+            return settings
+
+    if not regenerated:
+        # Kein Regen noetig - Fingerprint aus dem Cache nachlogen.
+        fp = read_fingerprint(auto_paths)
+        if fp:
+            sys.stderr.write(
+                f"[opn-cockpit] HTTPS aktiv (Cert-Quelle: auto)\n"
+                f"  Fingerprint: SHA-256:{fp}\n",
+            )
+            sys.stderr.flush()
+
+    return dataclasses.replace(
+        settings,
+        tls_cert=str(auto_paths.cert),
+        tls_key=str(auto_paths.key),
+        tls_source=TLS_SOURCE_AUTO,
+    )
 
 
 def _schedule_browser_open(url: str) -> None:

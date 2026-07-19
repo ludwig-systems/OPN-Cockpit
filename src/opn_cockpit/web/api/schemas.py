@@ -303,7 +303,13 @@ class TrustedCaCreateRequest(BaseModel):
 
 
 class ServerTlsStatusResponse(BaseModel):
-    """Status des Server-eigenen HTTPS-Zertifikats (App-weit)."""
+    """Status des Server-eigenen HTTPS-Zertifikats (App-weit).
+
+    ``cert_type`` unterscheidet:
+    - ``custom``: vom User importiertes Cert (Let's Encrypt, interne CA).
+    - ``auto``: automatisch von Cockpit generiertes Self-Signed.
+    - ``none``: kein Cert aktiv (HTTP-Fallback via OPNCOCKPIT_ALLOW_HTTP=1).
+    """
 
     enabled: bool
     cert_path: str
@@ -313,6 +319,11 @@ class ServerTlsStatusResponse(BaseModel):
     cert_days_until_expiry: int | None
     requires_restart: bool = False
     warnings: list[str] = Field(default_factory=list)
+    # v0.10 HTTPS-by-default
+    cert_type: str = "none"          # "custom" | "auto" | "none"
+    fingerprint_sha256: str = ""
+    auto_cert_available: bool = False
+    auto_cert_fingerprint: str = ""
 
 
 class ServerTlsUploadRequest(BaseModel):
@@ -324,6 +335,32 @@ class ServerTlsUploadRequest(BaseModel):
 
     key_pem: str = Field(..., min_length=1, max_length=200000)
     """Privater Server-Key. PKCS#1, PKCS#8, EC, beides PEM."""
+
+
+class TlsExpiryStateResponse(BaseModel):
+    """Zustand des aktiven Server-Certs fuer UI-Banner-Polling.
+
+    ``status`` ist einer von: ``ok``, ``warn`` (≤30 d), ``critical``
+    (≤7 d), ``expired`` (≤0 d). Wenn kein Cert aktiv ist (HTTP-Fallback),
+    ist ``cert_type=none`` und ``status=ok`` (kein Banner).
+    """
+
+    status: str = "ok"
+    cert_type: str = "none"
+    days_left: int | None = None
+    not_after_iso: str = ""
+    fingerprint_sha256: str = ""
+    subject_cn: str = ""
+    last_checked_iso: str = ""
+    auto_restart_scheduled: bool = False
+
+
+class ServerRestartResponse(BaseModel):
+    """Antwort auf POST /api/server/restart."""
+
+    status: str = "scheduled"
+    mode: str = "dev"
+    message: str = ""
 
 
 class TrustedCaInspectResponse(BaseModel):

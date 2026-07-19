@@ -24,7 +24,11 @@ uv sync                              # erzeugt .venv\ + installiert Runtime + De
 uv run python -m opn_cockpit
 ```
 
-- Startet den lokalen FastAPI-Server auf `http://127.0.0.1:9876`
+- Startet den lokalen FastAPI-Server auf `https://127.0.0.1:9876`.
+  Beim allerersten Start generiert Cockpit ein Self-Signed-Zertifikat;
+  der Browser zeigt die übliche „nicht vertrauenswürdig"-Warnung, die
+  einmal akzeptiert werden muss. Fingerprint zum Vergleich steht im
+  Boot-Log (siehe [FEATURES.md → HTTPS für Cockpit selbst](FEATURES.md#https-fuer-cockpit-selbst))
 - Öffnet automatisch den Browser
 
 Beim allerersten Start klickst du im Login-Screen **„Neuen Tresor anlegen…"**

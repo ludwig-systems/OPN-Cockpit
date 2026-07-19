@@ -16,11 +16,12 @@ from __future__ import annotations
 import shutil
 import sys
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from opn_cockpit.config import get_app_data_dir
 from opn_cockpit.security.session import Session
+from opn_cockpit.web.api.schemas import TlsExpiryStateResponse
 from opn_cockpit.web.auth.dependencies import require_session
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -101,6 +102,34 @@ def get_disk_usage(
         free_bytes=usage.free,
         used_percent=round(used_percent, 1),
         severity=_classify(used_percent),
+    )
+
+
+@router.get("/tls-state", response_model=TlsExpiryStateResponse)
+def get_tls_state(
+    request: Request,
+    session: Session = Depends(require_session),
+) -> TlsExpiryStateResponse:
+    """Liefert den TLS-Cert-Status fuer das UI-Banner-Polling.
+
+    Der eigentliche Zustand kommt vom TlsWatcher-Hintergrund-Thread
+    (``app.state.tls_watcher``). Wenn der Watcher noch nicht getickt
+    hat (die ersten Sekunden nach Boot), gibt es Defaults zurueck.
+    """
+    session.touch()
+    watcher = getattr(request.app.state, "tls_watcher", None)
+    if watcher is None:
+        return TlsExpiryStateResponse()
+    state = watcher.state()
+    return TlsExpiryStateResponse(
+        status=str(state.get("status", "ok")),
+        cert_type=str(state.get("cert_type", "none")),
+        days_left=state.get("days_left"),
+        not_after_iso=str(state.get("not_after_iso", "")),
+        fingerprint_sha256=str(state.get("fingerprint_sha256", "")),
+        subject_cn=str(state.get("subject_cn", "")),
+        last_checked_iso=str(state.get("last_checked_iso", "")),
+        auto_restart_scheduled=bool(state.get("auto_restart_scheduled", False)),
     )
 
 

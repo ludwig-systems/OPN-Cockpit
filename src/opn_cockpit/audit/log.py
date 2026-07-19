@@ -70,6 +70,12 @@ class AuditEventKind(StrEnum):
     API_KEY_REVEALED = "api_key_revealed"
     PRE_APPLY_BACKUP = "pre_apply_backup"
     SCHEDULED_BACKUP = "scheduled_backup"
+    # v0.10 HTTPS by default
+    TLS_CERT_GENERATED = "tls_cert_generated"
+    TLS_CERT_ROTATED = "tls_cert_rotated"
+    TLS_CERT_EXPIRY_WARNING = "tls_cert_expiry_warning"
+    TLS_CERT_EXPIRY_CRITICAL = "tls_cert_expiry_critical"
+    SERVER_RESTARTED = "server_restarted"
 
 
 # ---------------------------------------------------------------------------

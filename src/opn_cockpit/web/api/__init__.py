@@ -21,6 +21,7 @@ from opn_cockpit.web.api import inventory as inventory_routes
 from opn_cockpit.web.api import plans as plans_routes
 from opn_cockpit.web.api import profiles as profiles_routes
 from opn_cockpit.web.api import retry as retry_routes
+from opn_cockpit.web.api import server_control as server_control_routes
 from opn_cockpit.web.api import server_tls as server_tls_routes
 from opn_cockpit.web.api import system as system_routes
 from opn_cockpit.web.api import updates as updates_routes
@@ -50,6 +51,7 @@ def register_api_routes(app: FastAPI) -> None:
     app.include_router(profiles_routes.router)
     app.include_router(imports_routes.router)
     app.include_router(retry_routes.router)
+    app.include_router(server_control_routes.router)
     app.include_router(server_tls_routes.router)
     app.include_router(system_routes.router)
     app.include_router(updates_routes.router)

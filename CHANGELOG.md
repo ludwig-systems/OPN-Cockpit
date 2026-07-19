@@ -2,7 +2,82 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.9.0 — in Arbeit — Safety-Net v2: On-Device Dead-Man's-Switch
+## v0.10.0 — in Arbeit — HTTPS by default (Self-Signed + Auto-Rotation)
+
+### Cockpit läuft ab jetzt immer HTTPS
+
+Auch beim ersten Boot ohne User-Konfig — Cockpit generiert sich beim Boot
+selbst ein Zertifikat (EC P-256, 397 Tage, moderne Suite), das SANs für
+`localhost`, `127.0.0.1`, `::1`, den Hostname des Servers und dessen
+`.local`-mDNS-Variante enthält. URL ist ab Version 0.10 also
+`https://localhost:9876` statt `http://…`; Browser zeigt die übliche
+Self-Signed-Warnung, der Fingerprint zum Vergleich steht im Boot-Log
+(stderr; unter Linux via `journalctl -u opn-cockpit`).
+
+**Custom-Cert** (Let's Encrypt, interne CA) bleibt der empfohlene Endzustand
+und wird wie gehabt im Server-TLS-Modal hochgeladen. Solange ein Custom-Cert
+aktiv ist, bleibt das Auto-Cert im Hintergrund liegen und übernimmt
+automatisch, sobald der Custom-Cert-Eintrag entfernt wird.
+
+### Notausgang: HTTP nur explizit
+
+Ein Reverse-Proxy-Setup, bei dem TLS vor Cockpit terminiert wird, aktiviert
+den HTTP-Modus via **`OPNCOCKPIT_ALLOW_HTTP=1`** (Env) oder Setting
+`allow_http_fallback: true` in `settings.json`. Ohne diesen Schalter läuft
+Cockpit hart HTTPS-only — keine Redirect-Ports, kein Downgrade.
+
+### TlsWatcher: Auto-Rotation ohne Reboot
+
+Ein Hintergrund-Thread prüft alle 6 Stunden das aktive Server-Cert:
+
+- **≤30 Tage Restlaufzeit** — Info-Banner im UI, Audit-Event
+  `TLS_CERT_EXPIRY_WARNING`. Wenn das aktive Cert das **Auto-Cert** ist,
+  wird sofort ein frisches generiert (liegt bereit für den nächsten
+  Restart), Audit-Event `TLS_CERT_ROTATED`.
+- **≤7 Tage** — Roter Banner mit „Server jetzt neu starten"-Button, Audit
+  `TLS_CERT_EXPIRY_CRITICAL`.
+- **≤0 Tage** — Auto-Cert wird regeneriert und Cockpit triggert sich
+  selbst einen Prozess-Restart (Windows via `nssm restart <name>`, Linux
+  via `systemctl restart opn-cockpit`). Custom-Cert-Ablauf löst **keinen**
+  Auto-Restart aus — der User entscheidet das bewusst.
+
+### Neuer POST `/api/server/restart` + polkit-Regel
+
+Admin-only. Antwortet 202 mit 2-Sekunden-Delay, damit die HTTP-Antwort noch
+durchgeht, dann Prozess-Restart via NSSM/systemd. Dev-Mode (kein Service
+erkannt) liefert 501 mit klarer Meldung. Die Linux-Installation legt
+`/etc/polkit-1/rules.d/50-opn-cockpit.rules` an, damit der `opncockpit`-
+Service-User sich selbst restarten darf ohne sudo/Passwort.
+
+### Neue Endpoints + UI-Elemente
+
+- `POST /api/server/tls/regenerate-auto` — manueller Cert-Refresh (Admin).
+- `GET /api/system/tls-state` — 60-s-Polling für den UI-Banner.
+- Neuer **TLS-Banner** zwischen Topbar und Main-Layout (Amber/Rot je
+  nach Severity, „Server neu starten"-Button bei critical/expired).
+- Server-TLS-Modal erweitert: zeigt Cert-Typ (Custom/Auto), Fingerprint,
+  Auto-Cert-Fingerprint separat, neue Buttons „Auto-Cert neu generieren"
+  und „Server jetzt neu starten".
+- Vault-Settings-Modal: bestehende Einstellung `safety_net_window_s` bleibt;
+  Beschreibung des HTTPS-Bereichs komplett neu (kein „HTTP → HTTPS umstellen"
+  mehr, jetzt „Custom-Cert hochladen").
+
+### Audit-Events (neu)
+
+`TLS_CERT_GENERATED`, `TLS_CERT_ROTATED`, `TLS_CERT_EXPIRY_WARNING`,
+`TLS_CERT_EXPIRY_CRITICAL`, `SERVER_RESTARTED`.
+
+### Breaking Changes
+
+- **URL**: Cockpit läuft ab Update auf **`https://…:9876`** statt `http://…`.
+  Der Installer aktualisiert die Windows-Desktop-Verknüpfung und den
+  Startmenü-Eintrag. Bestehende Bookmarks brechen und müssen manuell
+  angepasst werden.
+- **Zwischen zwei laufenden Cockpit-Instanzen im gleichen App-Data-Ordner**
+  (was ohnehin nie unterstützt war): das Auto-Cert wird auf Disk geteilt.
+  Kein Blocker im Alltag, aber im Doc-Text erwähnt.
+
+## v0.9.0 — Safety-Net v2: On-Device Dead-Man's-Switch
 
 ### Safety-Net komplett umgebaut
 

@@ -128,7 +128,7 @@ Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeNameW}"; \
   Parameters: "{#MyAppExeArgs}"; WorkingDir: "{app}\python"; \
   Tasks: desktopicon; Components: single
 ; Service-Mode: kein Desktop-Shortcut, dafuer Browser-Verknuepfung zum lokalen Port.
-Name: "{group}\{#MyAppName} (Web-UI oeffnen)"; Filename: "http://localhost:9876"; Components: service
+Name: "{group}\{#MyAppName} (Web-UI oeffnen)"; Filename: "https://localhost:9876"; Components: service
 
 [Run]
 ; Service-Mode: Dienst registrieren + starten.
@@ -151,7 +151,7 @@ Filename: "{app}\{#MyAppExeNameW}"; \
   Flags: nowait postinstall skipifsilent; Components: single
 
 ; Service-Mode: Browser zum lokalen Server oeffnen.
-Filename: "http://localhost:9876"; \
+Filename: "https://localhost:9876"; \
   Description: "OPN-Cockpit im Browser oeffnen"; \
   Flags: postinstall skipifsilent shellexec; Components: service
 

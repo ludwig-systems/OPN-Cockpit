@@ -676,24 +676,60 @@ sie sind im System-CA-Bundle drin oder nutzen eine andere hinterlegte CA).
 
 ## HTTPS für Cockpit selbst
 
-Damit User auf `https://cockpit.lab:9876` ohne Browser-Warnung
-zugreifen, kann Cockpit ein **eigenes Server-Zertifikat** laden — z. B.
-ausgestellt von derselben internen CA, die auch deine OPNsense-Boxen
-zertifiziert.
+**Ab v0.10 läuft Cockpit immer HTTPS.** Auch beim allerersten Boot, ohne
+User-Konfig. Der Boot prüft:
 
-### Was läuft im Hintergrund
+1. **Env-Overrides** `OPNCOCKPIT_TLS_CERT` / `OPNCOCKPIT_TLS_KEY` — für
+   Service-Setups mit Cert-Bundle aus dem Deployment-Tooling.
+2. **Custom-Cert** aus `settings.json` (Upload-Weg unten). Der empfohlene
+   Endzustand mit „echtem" Zertifikat.
+3. **Auto-Cert**: wenn nichts konfiguriert ist, generiert Cockpit ein
+   Self-Signed unter `<app_data>/server_tls/auto-cert.pem`. Browser zeigt
+   die übliche „nicht vertrauenswürdig"-Warnung, aber der Traffic ist
+   TLS. Cert-Details: EC P-256, SHA-256, 397 Tage, SAN mit `localhost`,
+   `127.0.0.1`, `::1`, Hostname des Servers und dessen `.local`-mDNS.
 
-- Pfade liegen in `AppSettings` (`%APPDATA%/OPN-Cockpit/settings.json`),
-  **nicht** im Tresor. Grund: der Server muss vor dem Vault-Unlock
-  hochkommen können.
-- Cert + Key landen unter `<app_data>/server_tls/` mit `0600` für den
-  Key.
-- `WebSettings.from_env()` zieht die Pfade automatisch, wenn nicht via
-  Env-Vars `OPNCOCKPIT_TLS_CERT` / `_KEY` überschrieben.
-- `uvicorn` liest die Pfade beim Boot — **eine Cockpit-Restart-Aktion
-  ist nach jeder Änderung Pflicht**.
+### Erstboot: Fingerprint aus dem Log akzeptieren
 
-### Schritt 1: Server-Cert vorbereiten
+Beim ersten Boot schreibt Cockpit in **stderr** (bzw. `journalctl -u
+opn-cockpit` auf Linux, `<app_data>/logs/opn-cockpit.log` bei
+Windowless-Windows) den Fingerprint:
+
+```
+[opn-cockpit] Neues Self-Signed-Cert generiert (HTTPS-Default):
+  Subject:      CN=opn-cockpit
+  Gueltig bis:  2027-08-19T…
+  Fingerprint:  SHA-256:AB:CD:…
+  Cert-Datei:   /var/lib/opn-cockpit/server_tls/auto-cert.pem
+  Key-Datei:    /var/lib/opn-cockpit/server_tls/auto-cert.key.pem
+```
+
+Diesen Fingerprint mit der Anzeige im Browser vergleichen (Chrome:
+Schloss-Symbol → Verbindung sicher → Zertifikat), dann Warnung
+akzeptieren. Der Vergleich einmal machen; solange Cockpit läuft ohne
+Rotation, ändert sich der Fingerprint nicht.
+
+### HTTP-Notausgang
+
+Für Reverse-Proxy-Setups (nginx/traefik terminieren TLS): `OPNCOCKPIT_ALLOW_HTTP=1`
+setzen. Cockpit läuft dann auf `http://…` und schreibt eine deutliche
+Warnung ins Boot-Log.
+
+### Auto-Rotation ohne Reboot
+
+Ein Hintergrund-Watcher tickt alle 6 Stunden gegen das aktive Cert:
+
+- **≤30 Tage**: Amber-Banner mit Restlaufzeit + Fingerprint. Wenn das
+  aktive Cert das Auto-Cert ist, wird sofort ein frisches generiert
+  (liegt bereit für den Restart).
+- **≤7 Tage**: Roter Banner mit „Server jetzt neu starten"-Button.
+- **≤0 Tage** (Auto-Cert): Cockpit regeneriert und triggert sich selbst
+  einen Restart (Windows via NSSM, Linux via systemd + polkit). Custom-
+  Cert-Ablauf löst **keinen** Auto-Restart aus.
+
+### Custom-Cert hochladen (empfohlen)
+
+#### Schritt 1: Server-Cert vorbereiten
 
 Auf deinem Cockpit-Host (Linux/Container) oder am PAW (Windows-Single-
 User-Install) brauchst du:
@@ -720,7 +756,7 @@ openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
   -addext "subjectAltName=DNS:cockpit.lab"
 ```
 
-### Schritt 2: In Cockpit hochladen
+#### Schritt 2: In Cockpit hochladen
 
 1. Topbar → **Tresor-Einstellungen** → scrollen zu
    *Cockpit HTTPS-Zertifikat*.
@@ -732,34 +768,30 @@ openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
    `settings.json`.
 5. Toast „Server-TLS gespeichert. Neustart erforderlich."
 
-### Schritt 3: Cockpit neu starten
+#### Schritt 3: Server neu starten
 
-Service-Mode (Linux systemd / Windows NSSM):
-```bash
-sudo systemctl restart opn-cockpit     # Linux
-nssm restart "OPN-Cockpit Server"      # Windows-Service
-```
+- **Aus dem UI** (Empfohlen): Server-TLS-Modal zeigt nach Upload den
+  Button „Server jetzt neu starten". Klick → HTTP 202 + Auto-Reload
+  nach 5 s.
+- **CLI** (Fallback ohne UI): `sudo systemctl restart opn-cockpit` /
+  `nssm restart "OPN-Cockpit"`.
 
-Single-User-Windows-Install: Tray-Icon → Beenden → erneut starten
-(oder einfach Cockpit aus dem Startmenü neu öffnen).
-
-Nach dem Restart läuft Cockpit auf `https://<host>:9876` statt `http://`.
-Beim Aufruf prüft der Browser das Cert deiner internen CA — wenn er die
-Root-CA installiert hat, ohne Warnung; sonst „nicht vertrauenswürdig"
-wie gehabt.
+Nach dem Restart läuft Cockpit mit dem hochgeladenen Cert. Das Auto-
+Cert bleibt liegen und wird wieder aktiv, sobald du das Custom-Cert
+im Modal entfernst.
 
 ### Status + Entfernen
 
 Im Settings-Modal zeigt der Status-Block oberhalb des Upload-Buttons:
 
-- *HTTP aktiv (kein Server-Zertifikat hinterlegt)* — Default
-- *HTTPS AKTIV — Cert CN=cockpit.lab, gültig bis 2027-01-01 (180 Tage)* —
-  Cert geladen, alles ok
-- *Server-Zertifikat läuft in 7 Tagen ab.* — Warn-Hinweis bei kurzer
-  Restlaufzeit
-- *Server-Zertifikat ist ABGELAUFEN!* — Hochrot, sofort handeln
+- **Aktiv: Auto-generiertes Self-Signed** — Default nach Erst-Boot.
+  Fingerprint kopierbar für Log-Vergleich.
+- **Aktiv: Custom-Zertifikat (…)** — nach Upload. Auto-Cert-Fingerprint
+  wird zusätzlich angezeigt als „liegt bereit" (nach Klick auf „Custom
+  entfernen" springt Cockpit beim nächsten Restart wieder aufs Auto-Cert).
+- **Warnhinweise** bei ≤30 / ≤7 / ≤0 Tagen Restlaufzeit.
 
-Mit **„Entfernen (zu HTTP zurück)"** löschst du die Pfade aus
+Mit **„Custom entfernen (zurück zu Auto)"** löschst du die Pfade aus
 `settings.json` (Cert/Key bleiben auf Disk für Forensik). Nach Restart
 ist Cockpit wieder auf HTTP.
 

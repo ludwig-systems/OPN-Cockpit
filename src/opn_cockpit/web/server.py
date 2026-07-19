@@ -113,6 +113,20 @@ def create_app() -> FastAPI:
         queue_path=safety_net_queue_path,
     )
     app.state.safety_net_watcher.start()
+
+    # TlsWatcher: prueft alle 6h das aktive Server-Cert (Custom oder
+    # Auto) auf Ablauf. Bei ≤30/≤7/0 Tagen entstehen Audit-Events;
+    # abgelaufenes Auto-Cert loest Regen + Restart aus (via
+    # restart_callback aus server_control).
+    from opn_cockpit.web.api.server_control import (  # noqa: PLC0415
+        get_restart_callback,
+    )
+    from opn_cockpit.web.tls_watcher import TlsWatcher  # noqa: PLC0415
+    app.state.tls_watcher = TlsWatcher(
+        get_audit_backend(),
+        restart_callback=get_restart_callback(),
+    )
+    app.state.tls_watcher.start()
     app.state.login_rate_limiter = RateLimiter()
     app.state.bootstrap_rate_limiter = RateLimiter(
         # Bootstrap ist seltener als Login — strenger limitieren.

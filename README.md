@@ -24,8 +24,11 @@ Konfiguration mehrerer Standorte über die OPNsense-REST-API:
 - **Frontend-Inline-Validierung** beim Tippen (CIDR, Host, Aliase, Ports)
 - **Interne CAs unterstützen** — Custom-Root-Zertifikate im Tresor, damit
   OPNsense-Boxen mit interner-CA-Cert mit aktiver TLS-Prüfung verwaltet werden
-- **Cockpit-eigenes HTTPS** — Server-Zertifikat hinterlegen, damit
-  `https://cockpit.lab:9876` ohne Browser-Warnung erreichbar ist
+- **HTTPS by default** — Cockpit startet immer HTTPS, auch beim ersten
+  Boot. Ohne Konfig wird ein Self-Signed generiert (EC P-256, 397 Tage,
+  Fingerprint im Boot-Log); Custom-Cert (Let's Encrypt/interne CA) im
+  Server-TLS-Modal hochladbar. Auto-Rotation 30 Tage vor Ablauf mit
+  „Server neu starten"-Button im UI
 - **TOTP / 2FA** (Multi-User, opt-in) — pro User aktivierbar mit
   Authenticator-App + 8 Backup-Codes; Admin-Recovery-Reset
 - **Wartungsmodus pro Gerät** — geplant offline-Sites vom Polling

@@ -111,6 +111,19 @@ cp "$INSTALL_DIR/installer/linux/opn-cockpit.service" /etc/systemd/system/
 # DATA_DIR im Service-File anpassen (Default ist /var/lib/opn-cockpit).
 sed -i "s|/var/lib/opn-cockpit|$DATA_DIR|g" /etc/systemd/system/opn-cockpit.service
 
+# polkit-Regel: erlaubt dem Service-User self-restart via
+# POST /api/server/restart (TLS-Cert-Rotation ohne SSH).
+if [[ -d /etc/polkit-1/rules.d ]]; then
+    log "polkit-Regel fuer Self-Restart installieren..."
+    cp "$INSTALL_DIR/installer/linux/50-opn-cockpit.rules" \
+       /etc/polkit-1/rules.d/50-opn-cockpit.rules
+    chmod 644 /etc/polkit-1/rules.d/50-opn-cockpit.rules
+    # polkit auf Debian: kein Reload noetig, Rules werden bei Zugriff neu gelesen.
+else
+    log "polkit nicht installiert - 'Server neu starten'-Button (UI) wird 403 zurueckgeben."
+    log "  Als Workaround: sudoers-Zeile 'opncockpit ALL=(root) NOPASSWD: /bin/systemctl restart opn-cockpit'"
+fi
+
 systemctl daemon-reload
 systemctl enable --now opn-cockpit.service
 
@@ -123,7 +136,8 @@ if systemctl is-active --quiet opn-cockpit.service; then
     echo
     log "Installation fertig. Service laeuft."
     echo
-    echo "  URL:           http://${HOST_IP}:9876"
+    echo "  URL:           https://${HOST_IP}:9876"
+    echo "                 (Self-Signed-Cert - Browser-Warnung akzeptieren; Fingerprint via 'journalctl -u opn-cockpit -n 200')"
     echo "  Default-Login: admin / OPN-Cockpit!  (Pflicht-PW-Wechsel beim Erst-Login)"
     echo
     echo "  Logs:          journalctl -u opn-cockpit -f"

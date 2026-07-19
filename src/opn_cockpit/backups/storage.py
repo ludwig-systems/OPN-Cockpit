@@ -125,7 +125,17 @@ def _write_index(device_dir: Path, records: list[BackupRecord]) -> None:
 
 
 def _sort_records_desc(records: list[BackupRecord]) -> list[BackupRecord]:
-    return sorted(records, key=lambda r: r.timestamp_utc, reverse=True)
+    # Sekundaersort nach urspruenglicher Index-Position: bei gleichem
+    # timestamp_utc gilt "spaeter im Index gespeichert kommt zuerst".
+    # Windows' datetime.now() hat ~15 ms Aufloesung; zwei Appends im gleichen
+    # Tick landen sonst mit identischem timestamp_utc und die Reihenfolge ist
+    # plattform-abhaengig unbestimmt. append_backup haengt neue Records an
+    # das Ende der Index-Liste, daher spiegelt der urspruengliche Position-
+    # Index die Insertion-Reihenfolge und gibt einen deterministischen
+    # "juengster zuerst"-Tiebreaker.
+    indexed = list(enumerate(records))
+    indexed.sort(key=lambda pair: (pair[1].timestamp_utc, pair[0]), reverse=True)
+    return [record for _pos, record in indexed]
 
 
 def append_backup(

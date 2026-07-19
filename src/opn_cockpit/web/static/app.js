@@ -962,6 +962,7 @@
     startSessionTicker();
     startRetryPolling();
     checkForUpdate();
+    startTlsPolling();
   }
 
   function applyMultiUserVisibility() {
@@ -5475,6 +5476,7 @@
     const statusEl = $('#vs-srv-tls-status');
     const errEl = $('#vs-srv-tls-error');
     const clearBtn = $('#vs-srv-tls-clear-btn');
+    const restartBtn = $('#vs-srv-tls-restart-btn');
     if (errEl) errEl.hidden = true;
     if (statusEl) statusEl.textContent = 'Lade…';
     try {
@@ -5490,27 +5492,71 @@
         return;
       }
       const data = await r.json();
+      const days = data.cert_days_until_expiry;
+      const daysLabel = days === null || days === undefined
+        ? ''
+        : (days < 0 ? ` (ABGELAUFEN!)` : ` (${days} Tage Restlaufzeit)`);
+      const fpLabel = data.fingerprint_sha256
+        ? `\nFingerprint: SHA-256:${data.fingerprint_sha256}`
+        : '';
       let summary;
-      if (data.enabled) {
-        const days = data.cert_days_until_expiry;
-        const daysLabel = days === null || days === undefined
-          ? ''
-          : (days < 0 ? ` (ABGELAUFEN!)` : ` (${days} Tage)`);
-        summary = `HTTPS AKTIV — Cert ${data.cert_subject_cn || '(unbekannt)'}, gueltig bis ${data.cert_not_after_iso.substring(0,10)}${daysLabel}`;
+      if (data.cert_type === 'custom') {
+        summary = `Aktiv: Custom-Zertifikat (${data.cert_subject_cn || 'unbekannt'})`;
+        summary += `\nGueltig bis: ${(data.cert_not_after_iso || '').substring(0,10)}${daysLabel}`;
+        summary += fpLabel;
+        if (data.auto_cert_available && data.auto_cert_fingerprint) {
+          summary += `\n\nAuto-Cert liegt bereit (Fingerprint: SHA-256:${data.auto_cert_fingerprint}).`;
+          summary += '\nGreift nach Klick auf "Custom entfernen".';
+        }
         if (clearBtn) clearBtn.hidden = false;
+      } else if (data.cert_type === 'auto') {
+        summary = `Aktiv: Auto-generiertes Self-Signed (${data.cert_subject_cn || 'opn-cockpit'})`;
+        summary += `\nGueltig bis: ${(data.cert_not_after_iso || '').substring(0,10)}${daysLabel}`;
+        summary += fpLabel;
+        summary += '\n\nFuer produktive Nutzung: eigenes Zertifikat (Let\'s Encrypt / interne CA) hochladen.';
+        if (clearBtn) clearBtn.hidden = true;
       } else {
-        summary = 'HTTP aktiv (kein Server-Zertifikat hinterlegt).';
+        summary = 'HTTP-Fallback aktiv (OPNCOCKPIT_ALLOW_HTTP=1).';
+        summary += '\nKein Server-Zertifikat aktiv. Nur nutzen wenn ein Reverse-Proxy TLS vor Cockpit terminiert.';
         if (clearBtn) clearBtn.hidden = true;
       }
       if (data.warnings && data.warnings.length) {
-        summary += '\n⚠ ' + data.warnings.join('\n⚠ ');
+        summary += '\n\n⚠ ' + data.warnings.join('\n⚠ ');
       }
       if (statusEl) {
         statusEl.textContent = summary;
         statusEl.style.whiteSpace = 'pre-line';
       }
+      // Restart-Button: sichtbar wenn Cert bald ablaeuft oder Custom-Cert
+      // gerade hochgeladen wurde (requires_restart).
+      if (restartBtn) {
+        const cd = data.cert_days_until_expiry;
+        const soon = cd != null && cd <= 7;
+        restartBtn.hidden = !(soon || data.requires_restart);
+      }
     } catch (e) {
       if (statusEl) statusEl.textContent = e.message;
+    }
+  }
+
+  async function regenerateAutoCert() {
+    if (!window.confirm('Auto-Zertifikat neu generieren?\n\nDer Server muss danach neu gestartet werden.')) {
+      return;
+    }
+    try {
+      const r = await apiPost('/api/server/tls/regenerate-auto');
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Regeneration fehlgeschlagen (${r.status})`, true);
+        return;
+      }
+      showToast('Neues Auto-Zertifikat erzeugt. Server-Restart erforderlich.');
+      await loadServerTlsStatus();
+      const restartBtn = $('#vs-srv-tls-restart-btn');
+      if (restartBtn) restartBtn.hidden = false;
+    } catch (err) {
+      showToast(err.message, true);
     }
   }
 
@@ -6712,6 +6758,127 @@
     banner.hidden = true;
   }
 
+  // -------------------- TLS-Cert-Ablauf-Banner (v0.10) --------------------
+
+  const TLS_DISMISS_KEY = 'opn-cockpit-tls-dismissed-fp';
+  let tlsPollTimer = null;
+
+  function startTlsPolling() {
+    if (tlsPollTimer) return;
+    pollTlsState().catch(() => {});
+    tlsPollTimer = setInterval(() => {
+      pollTlsState().catch(() => {});
+    }, 60000);
+  }
+
+  function stopTlsPolling() {
+    if (tlsPollTimer) {
+      clearInterval(tlsPollTimer);
+      tlsPollTimer = null;
+    }
+  }
+
+  async function pollTlsState() {
+    const banner = $('#tls-banner');
+    if (!banner) return;
+    let data;
+    try {
+      const r = await apiGet('/api/system/tls-state');
+      if (!r.ok) return;
+      data = await r.json();
+    } catch (_) {
+      return;
+    }
+    renderTlsBanner(data);
+  }
+
+  function renderTlsBanner(state) {
+    const banner = $('#tls-banner');
+    const textEl = $('#tls-banner-text');
+    const restartBtn = $('#tls-banner-restart');
+    if (!banner || !textEl) return;
+
+    // Bei "ok" oder ohne Cert (HTTP-Fallback): kein Banner.
+    if (state.status === 'ok' || state.cert_type === 'none') {
+      banner.hidden = true;
+      return;
+    }
+
+    // User hat diesen Fingerprint schon weggeklickt und der Status ist warn?
+    // Dann Banner ausblenden bis Fingerprint sich aendert oder Status
+    // eskaliert.
+    let dismissedFp = null;
+    try { dismissedFp = sessionStorage.getItem(TLS_DISMISS_KEY); } catch (_e) {}
+    if (state.status === 'warn' && dismissedFp === state.fingerprint_sha256) {
+      banner.hidden = true;
+      return;
+    }
+
+    let msg = '';
+    if (state.status === 'warn') {
+      const days = state.days_left != null ? state.days_left : '?';
+      msg = `TLS-Cert läuft in ${days} Tagen ab (${state.cert_type}). `;
+      if (state.cert_type === 'auto') {
+        msg += 'Cockpit rotiert automatisch; ein Server-Restart aktiviert das frische Cert.';
+      } else {
+        msg += 'Bitte ein neues Custom-Zertifikat hochladen.';
+      }
+    } else if (state.status === 'critical') {
+      const days = state.days_left != null ? state.days_left : '?';
+      msg = `TLS-Cert läuft in ${days} Tagen ab — Server jetzt neu starten empfohlen.`;
+    } else if (state.status === 'expired') {
+      if (state.auto_restart_scheduled) {
+        msg = 'TLS-Cert abgelaufen — Auto-Restart mit neuem Cert eingeleitet.';
+      } else {
+        msg = 'TLS-Cert ist ABGELAUFEN. Bitte Server neu starten oder Custom-Cert hochladen.';
+      }
+    }
+
+    textEl.textContent = msg;
+    banner.dataset.severity = state.status;
+    banner.dataset.fingerprint = state.fingerprint_sha256 || '';
+    if (restartBtn) {
+      restartBtn.hidden = state.status !== 'critical' && state.status !== 'expired';
+    }
+    banner.hidden = false;
+  }
+
+  function dismissTlsBanner() {
+    const banner = $('#tls-banner');
+    if (!banner) return;
+    // Nur warn kann dismissed werden - critical/expired bleiben stehen.
+    if (banner.dataset.severity && banner.dataset.severity !== 'warn') return;
+    const fp = banner.dataset.fingerprint;
+    if (fp) {
+      try { sessionStorage.setItem(TLS_DISMISS_KEY, fp); } catch (_e) {}
+    }
+    banner.hidden = true;
+  }
+
+  async function triggerServerRestart() {
+    if (!window.confirm('Server jetzt neu starten? Cockpit ist ~5 Sekunden nicht erreichbar.')) {
+      return;
+    }
+    try {
+      const r = await apiPost('/api/server/restart');
+      if (r.status === 501) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || 'Restart im Dev-Mode nicht verfuegbar.', true);
+        return;
+      }
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Restart fehlgeschlagen (${r.status})`, true);
+        return;
+      }
+      showToast('Server-Restart eingeleitet. Seite wird neu geladen…');
+      setTimeout(() => { window.location.reload(); }, 5000);
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
   // -------------------- About-Modal --------------------
 
   let aboutLoaded = false;
@@ -7185,6 +7352,29 @@
     // Update-Banner-Dismiss
     const updateDismiss = $('#update-banner-dismiss');
     if (updateDismiss) updateDismiss.addEventListener('click', dismissUpdateBanner);
+
+    // TLS-Banner (v0.10): Details -> Server-TLS-Modal oeffnen; Dismiss;
+    // Restart-Button
+    const tlsBannerDetails = $('#tls-banner-details');
+    if (tlsBannerDetails) tlsBannerDetails.addEventListener('click', () => {
+      openVaultSettingsModal().catch(() => {});
+      // Direkt zum TLS-Status scrollen wenn im DOM
+      setTimeout(() => {
+        const el = $('#vs-srv-tls-status');
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 200);
+    });
+    const tlsBannerDismiss = $('#tls-banner-dismiss');
+    if (tlsBannerDismiss) tlsBannerDismiss.addEventListener('click', dismissTlsBanner);
+    const tlsBannerRestart = $('#tls-banner-restart');
+    if (tlsBannerRestart) tlsBannerRestart.addEventListener('click', triggerServerRestart);
+    // Server-TLS-Modal-Buttons (Regen + Restart)
+    const tlsRegenBtn = $('#vs-srv-tls-regen-btn');
+    if (tlsRegenBtn) tlsRegenBtn.addEventListener('click', regenerateAutoCert);
+    const tlsRestartBtn = $('#vs-srv-tls-restart-btn');
+    if (tlsRestartBtn) tlsRestartBtn.addEventListener('click', triggerServerRestart);
 
     // Folder-Picker (native primary, web fallback)
     const fbBtn = $('#new-vault-browse-btn');

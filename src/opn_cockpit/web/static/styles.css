@@ -3205,6 +3205,77 @@ a.card-open-link { text-decoration: none; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ===== TLS-Cert-Ablauf-Banner (v0.10) — reused Update-Banner-Struktur ===== */
+
+.tls-banner {
+  margin: 8px 28px 0;
+  padding: 0;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  overflow: hidden;
+  animation: update-banner-in 0.25s ease;
+  /* Default (warn): Amber. Wird per data-severity ueberschrieben. */
+  background: linear-gradient(
+    100deg,
+    rgba(213, 155, 45, 0.14),
+    rgba(213, 155, 45, 0.05) 60%,
+    transparent
+  );
+  border: 1px solid var(--warn, #d59b2d);
+}
+.tls-banner[hidden] { display: none !important; }
+.tls-banner[data-severity="critical"],
+.tls-banner[data-severity="expired"] {
+  background: linear-gradient(
+    100deg,
+    rgba(192, 57, 43, 0.16),
+    rgba(192, 57, 43, 0.05) 60%,
+    transparent
+  );
+  border-color: var(--danger, #c0392b);
+}
+.tls-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.tls-banner-icon {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--warn, #d59b2d);
+  flex-shrink: 0;
+}
+.tls-banner[data-severity="critical"] .tls-banner-icon,
+.tls-banner[data-severity="expired"] .tls-banner-icon {
+  color: var(--danger, #c0392b);
+}
+.tls-banner-text {
+  flex-grow: 1;
+  letter-spacing: -0.005em;
+}
+.tls-banner .btn-sm {
+  font-size: 11.5px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+}
+
+/* Status-Box im Server-TLS-Modal (Multi-Line-Text) */
+.tls-status-box {
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated, rgba(0, 0, 0, 0.03));
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* ===== About-Modal ===== */
 
 .about-body {

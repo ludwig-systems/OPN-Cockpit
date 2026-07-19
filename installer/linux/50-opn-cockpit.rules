@@ -1,0 +1,21 @@
+// polkit-Rule: erlaubt dem 'opncockpit'-Service-User, sich selbst per
+// 'systemctl restart opn-cockpit' neu zu starten, ohne Passwort.
+// Wird von Cockpit's POST /api/server/restart genutzt, damit ein Admin
+// nach TLS-Cert-Rotation ohne SSH-Zugriff neu starten kann.
+//
+// Installation: kopieren nach /etc/polkit-1/rules.d/50-opn-cockpit.rules
+//
+// Falls du polkit NICHT einsetzen willst (z. B. Alpine): nutze stattdessen
+// eine sudoers-Zeile
+//   opncockpit ALL=(root) NOPASSWD: /bin/systemctl restart opn-cockpit
+// und passe das Cockpit-Restart-Kommando entsprechend an.
+
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "opn-cockpit.service" &&
+        (action.lookup("verb") == "restart" ||
+         action.lookup("verb") == "start") &&
+        subject.user == "opncockpit") {
+        return polkit.Result.YES;
+    }
+});
