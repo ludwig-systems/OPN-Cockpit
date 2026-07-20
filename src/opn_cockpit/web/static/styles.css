@@ -4408,6 +4408,38 @@ a.card-open-link { text-decoration: none; }
   color: #4a75a5;
 }
 
+/* v0.12 V2: Wartungsfenster - paused-State ist wie scheduled Info-Farbe
+   aber mit Puls-Animation damit man's im Auge behaelt. */
+.fw-rollout-banner[data-state="paused"] {
+  background: linear-gradient(
+    100deg,
+    rgba(155, 130, 55, 0.10),
+    rgba(155, 130, 55, 0.02) 70%
+  );
+  border-color: rgba(155, 130, 55, 0.4);
+}
+.fw-rollout-banner[data-state="paused"] .fw-rollout-banner-icon {
+  background: rgba(155, 130, 55, 0.18);
+  color: #8a6f30;
+}
+
+.fw-window-inputs {
+  display: grid;
+  grid-template-columns: max-content 1fr max-content 1fr;
+  gap: 6px 10px;
+  align-items: center;
+  margin-top: 4px;
+}
+.fw-window-inputs .form-label {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+.fw-window-inputs .form-input {
+  padding: 4px 6px;
+  max-width: 130px;
+}
+
 /* ===== Interfaces-Tab (v0.11 Device-Modal) ===== */
 
 .ifm-row {

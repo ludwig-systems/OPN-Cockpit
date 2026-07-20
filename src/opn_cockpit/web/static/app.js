@@ -5073,6 +5073,11 @@
     // fuer den Fall dass User "Geplant zu…" waehlt.
     const suggested = _rolloutDefaultScheduleTonight();
     $('#fw-schedule-at').value = suggested;
+    // Wartungsfenster (v0.12) — Default aus
+    const winCb = $('#fw-window-enabled');
+    if (winCb) winCb.checked = false;
+    const winRow = $('#fw-window-row');
+    if (winRow) winRow.hidden = true;
 
     // Tag-Filter befuellen aus state.devices
     const filter = $('#fw-rollout-tag-filter');
@@ -5253,6 +5258,19 @@
     const mode = $('#fw-rollout-mode').value;
     const continueOnError = $('#fw-rollout-continue').checked;
     const scheduledMs = _readScheduledStartMs();
+    const windowEnabled = $('#fw-window-enabled').checked;
+    const windowStart = windowEnabled ? ($('#fw-window-start').value || '') : '';
+    const windowEnd = windowEnabled ? ($('#fw-window-end').value || '') : '';
+    if (windowEnabled && (!windowStart || !windowEnd)) {
+      box.textContent = 'Wartungsfenster: Start und Ende beide angeben (HH:MM).';
+      box.hidden = false;
+      return;
+    }
+    if (windowEnabled && windowStart === windowEnd) {
+      box.textContent = 'Wartungsfenster: Start und Ende duerfen nicht identisch sein.';
+      box.hidden = false;
+      return;
+    }
 
     // Nochmal Confirm mit Zusammenfassung
     const modeLabel = mode === 'upgrade' ? 'Major-Upgrade (mit Reboot!)' : 'Package-Update';
@@ -5264,12 +5282,16 @@
       const when = new Date(scheduledMs);
       scheduleLabel = `Geplant zu ${when.toLocaleString()}`;
     }
+    const windowLabel = windowEnabled
+      ? `${windowStart}–${windowEnd} (pausiert ausserhalb, resumiert am naechsten Fenster)`
+      : 'kein Fenster (24/7)';
     const prompt =
       `Firmware-Rollout starten?\n\n`
       + `Modus:         ${modeLabel}\n`
       + `Geraete:       ${ids.length}\n`
       + `Fehlerpolitik: ${contLabel}\n`
-      + `Startzeit:     ${scheduleLabel}\n\n`
+      + `Startzeit:     ${scheduleLabel}\n`
+      + `Wartungsfenster: ${windowLabel}\n\n`
       + `Der Rollout laeuft sequenziell (eine Box zur Zeit). Bei Major-\n`
       + `Upgrade wartet Cockpit pro Box einen Reboot ab (bis 15 min).\n\n`
       + `OK = ${scheduledMs > 0 ? 'planen' : 'starten'}, Abbrechen = zurueck.`;
@@ -5285,6 +5307,10 @@
         continue_on_error: continueOnError,
       };
       if (scheduledMs > 0) payload.scheduled_start_at_ms = scheduledMs;
+      if (windowEnabled) {
+        payload.window_start_hhmm = windowStart;
+        payload.window_end_hhmm = windowEnd;
+      }
       const response = await apiPost('/api/firmware/rollout', payload);
       if (response.status === 401) { handleSessionLost(); return; }
       if (!response.ok) {
@@ -5352,9 +5378,13 @@
       const modeText = data.mode === 'upgrade'
         ? 'Major-Upgrade'
         : 'Package-Update';
-      title.textContent = data.state === 'scheduled'
-        ? `Firmware-Rollout geplant: ${modeText}`
-        : `Firmware-Rollout: ${modeText}`;
+      if (data.state === 'scheduled') {
+        title.textContent = `Firmware-Rollout geplant: ${modeText}`;
+      } else if (data.state === 'paused') {
+        title.textContent = `Firmware-Rollout pausiert: ${modeText}`;
+      } else {
+        title.textContent = `Firmware-Rollout: ${modeText}`;
+      }
     }
 
     const progress = $('#fw-rollout-banner-progress');
@@ -5369,9 +5399,27 @@
         const ms = data.scheduled_start_at_ms - Date.now();
         progress.textContent =
           `Startet ${when.toLocaleString()} · ${_fmtCountdown(ms)} · ${total} Ziel(e)`;
-      } else if (data.state === 'running') {
+      } else if (data.state === 'paused') {
+        const wp = data.paused_until_ms
+          ? new Date(data.paused_until_ms)
+          : null;
+        const wpMs = data.paused_until_ms
+          ? (data.paused_until_ms - Date.now())
+          : 0;
+        const winLabel = data.window_start_hhmm && data.window_end_hhmm
+          ? ` [Fenster ${data.window_start_hhmm}–${data.window_end_hhmm}]`
+          : '';
+        const waitLabel = wp
+          ? `Wartet bis ${wp.toLocaleString()} · ${_fmtCountdown(wpMs)}`
+          : 'Wartet auf naechstes Wartungsfenster';
         progress.textContent =
-          `${done}/${total} fertig · ${inProgress} aktiv/wartend · ${failed} Fehler`;
+          `${done}/${total} fertig · ${waitLabel}${winLabel}`;
+      } else if (data.state === 'running') {
+        const winLabel = data.window_start_hhmm && data.window_end_hhmm
+          ? ` [Fenster ${data.window_start_hhmm}–${data.window_end_hhmm}]`
+          : '';
+        progress.textContent =
+          `${done}/${total} fertig · ${inProgress} aktiv/wartend · ${failed} Fehler${winLabel}`;
       } else {
         progress.textContent =
           `Beendet: ${done} ok · ${failed} Fehler · ${skipped} uebersprungen (${data.state})`;
@@ -5394,8 +5442,9 @@
 
     const cancelBtn = $('#fw-rollout-banner-cancel');
     const clearBtn = $('#fw-rollout-banner-clear');
-    // Cancel ist auch im scheduled-State erlaubt (dann verhindert er den Start).
-    if (data.state === 'running' || data.state === 'scheduled') {
+    // Cancel ist auch im scheduled-/paused-State erlaubt (dann verhindert er
+    // den weiteren Ablauf und terminiert sofort).
+    if (data.state === 'running' || data.state === 'scheduled' || data.state === 'paused') {
       if (cancelBtn) {
         cancelBtn.hidden = data.cancel_requested === true;
         cancelBtn.disabled = data.cancel_requested === true;
@@ -9455,6 +9504,14 @@
     for (const r of fwScheduleRadios) {
       r.addEventListener('change', () => {
         $('#fw-schedule-custom-row').hidden = (r.value !== 'custom' || !r.checked);
+      });
+    }
+    // Wartungsfenster: Toggle blendet Zeit-Inputs ein/aus.
+    const fwWindowCb = $('#fw-window-enabled');
+    if (fwWindowCb) {
+      fwWindowCb.addEventListener('change', () => {
+        const row = $('#fw-window-row');
+        if (row) row.hidden = !fwWindowCb.checked;
       });
     }
     const fwRolloutTagFilter = $('#fw-rollout-tag-filter');

@@ -2857,6 +2857,33 @@
 
           <div class="form-row">
             <div class="form-col">
+              <label class="form-checkbox">
+                <input type="checkbox" id="fw-window-enabled" />
+                <span>Nur im Wartungsfenster arbeiten</span>
+              </label>
+              <div class="fw-schedule-custom" id="fw-window-row" hidden>
+                <div class="fw-window-inputs">
+                  <label class="form-label" for="fw-window-start">Fenster-Start</label>
+                  <input type="time" id="fw-window-start" class="form-input" value="22:00" />
+                  <label class="form-label" for="fw-window-end">Fenster-Ende</label>
+                  <input type="time" id="fw-window-end" class="form-input" value="06:00" />
+                </div>
+                <div class="form-hint">
+                  Zeiten in Cockpit-Server-Zeitzone. Overnight-Fenster
+                  (Start &gt; Ende, z.B. 22:00–06:00) werden ueber
+                  Mitternacht behandelt. Ausserhalb des Fensters
+                  pausiert der Rollout in einem paused-State und laeuft
+                  am naechsten Fenster-Beginn weiter — so kannst du
+                  einen 12-Boxen-Rollout auf mehrere Naechte verteilen
+                  ohne dass eine Box mitten am Tag rebootet.
+                  Die 6-h-Total-Cap ist bei aktivem Fenster deaktiviert.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
               <label class="form-label">Ziel-Geraete</label>
               <div class="fw-rollout-toolbar">
                 <button class="btn-link" id="fw-rollout-select-all" type="button">Alle markieren</button>

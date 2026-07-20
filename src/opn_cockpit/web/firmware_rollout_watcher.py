@@ -33,10 +33,11 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time as dt_time, timedelta
 from pathlib import Path
 from threading import RLock, Thread
 
@@ -89,6 +90,7 @@ _DEVICE_TERMINAL_STATES = {DEV_STATE_DONE, DEV_STATE_FAILED, DEV_STATE_SKIPPED}
 # Rollout-States
 ROLLOUT_STATE_SCHEDULED = "scheduled"   # wartet auf scheduled_start_at_ms
 ROLLOUT_STATE_RUNNING = "running"
+ROLLOUT_STATE_PAUSED = "paused"          # wartet auf naechstes Wartungsfenster
 ROLLOUT_STATE_DONE = "done"
 ROLLOUT_STATE_FAILED = "failed"
 ROLLOUT_STATE_CANCELLED = "cancelled"
@@ -96,7 +98,11 @@ ROLLOUT_STATE_CANCELLED = "cancelled"
 _ROLLOUT_TERMINAL_STATES = {
     ROLLOUT_STATE_DONE, ROLLOUT_STATE_FAILED, ROLLOUT_STATE_CANCELLED,
 }
-_ROLLOUT_ACTIVE_STATES = {ROLLOUT_STATE_SCHEDULED, ROLLOUT_STATE_RUNNING}
+_ROLLOUT_ACTIVE_STATES = {
+    ROLLOUT_STATE_SCHEDULED,
+    ROLLOUT_STATE_RUNNING,
+    ROLLOUT_STATE_PAUSED,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +148,29 @@ class FirmwareRollout:
     die erste Box getriggert. Cancel funktioniert im scheduled-State genauso
     wie im running-State — nur alle noch queued Devices werden skipped.
     """
+
+    window_start_hhmm: str = ""
+    """Wartungsfenster-Start als ``"HH:MM"`` (Server-lokale Zeit).
+
+    Leerer String = kein Wartungsfenster (bisheriges Verhalten,
+    Watcher arbeitet 24/7 durch). Zusammen mit ``window_end_hhmm``
+    definiert das Fenster in dem der Watcher neue Devices anpackt.
+    Overnight-Fenster wie ``"22:00"..."06:00"`` sind unterstuetzt.
+
+    Semantik: bevor eine noch queued Box getriggert wird, prueft der
+    Watcher ob wir gerade im Fenster sind. Wenn nein → State
+    ``paused`` bis das naechste Fenster oeffnet. Devices die schon
+    laufen laufen weiter — der Fenster-Check greift nur beim naechsten
+    Trigger.
+    """
+
+    window_end_hhmm: str = ""
+    """Wartungsfenster-Ende, gleiche Format wie ``window_start_hhmm``."""
+
+    paused_until_ms: int = 0
+    """Nur im State ``paused`` gesetzt: Unix-ms wann das naechste
+    Fenster oeffnet. Wird vom Watcher berechnet, damit die UI eine
+    "Rollout schlaeft bis..."-Anzeige machen kann."""
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +240,8 @@ class FirmwareRolloutWatcher:
         mode: str,
         continue_on_error: bool,
         scheduled_start_at_ms: int = 0,
+        window_start_hhmm: str = "",
+        window_end_hhmm: str = "",
     ) -> FirmwareRollout:
         """Startet einen neuen Rollout — sofort oder geplant.
 
@@ -234,6 +265,24 @@ class FirmwareRolloutWatcher:
             raise ValueError(msg)
         if not devices:
             msg = "Rollout braucht mindestens ein Ziel-Geraet."
+            raise ValueError(msg)
+        # Fenster: beide gesetzt ODER beide leer, sonst Fehler
+        w_start = (window_start_hhmm or "").strip()
+        w_end = (window_end_hhmm or "").strip()
+        if bool(w_start) != bool(w_end):
+            msg = (
+                "Wartungsfenster: entweder BEIDE Werte (Start + Ende) "
+                "oder gar keinen setzen."
+            )
+            raise ValueError(msg)
+        if w_start and parse_hhmm(w_start) is None:
+            msg = f"Ungueltiges Wartungsfenster-Start: {w_start!r} (erwartet HH:MM)"
+            raise ValueError(msg)
+        if w_end and parse_hhmm(w_end) is None:
+            msg = f"Ungueltiges Wartungsfenster-Ende: {w_end!r} (erwartet HH:MM)"
+            raise ValueError(msg)
+        if w_start and w_start == w_end:
+            msg = "Wartungsfenster: Start und Ende duerfen nicht identisch sein."
             raise ValueError(msg)
 
         with self._lock:
@@ -266,6 +315,8 @@ class FirmwareRolloutWatcher:
                 initiator=initiator,
                 state=initial_state,
                 scheduled_start_at_ms=scheduled_at,
+                window_start_hhmm=w_start,
+                window_end_hhmm=w_end,
                 devices=[
                     FirmwareRolloutDevice(
                         device_id=did,
@@ -387,11 +438,11 @@ class FirmwareRolloutWatcher:
 
         # Cancel angefragt: alle noch-queued Devices skippen, dann prüfen ob
         # die aktive Box terminal ist -> Rollout terminieren.
-        # Bei scheduled reicht Cancel-Flag -> sofortiger Uebergang.
+        # Bei scheduled/paused reicht Cancel-Flag -> sofortiger Uebergang.
         if rollout.cancel_requested:
-            if rollout.state == ROLLOUT_STATE_SCHEDULED:
+            if rollout.state in (ROLLOUT_STATE_SCHEDULED, ROLLOUT_STATE_PAUSED):
                 self._skip_remaining(
-                    rollout, reason="Rollout vor Start abgebrochen.",
+                    rollout, reason="Rollout vor Start/im Wartungsfenster abgebrochen.",
                 )
                 self._finalize(rollout, ROLLOUT_STATE_CANCELLED, now_ms)
                 return
@@ -420,13 +471,75 @@ class FirmwareRolloutWatcher:
                 ),
             )
 
+        # Wartungsfenster-Check: nur wenn Fenster gesetzt.
+        # Semantik: wenn eine Box in einem non-terminal State laeuft
+        # (triggered/running/rebooting/verifying), NICHT unterbrechen —
+        # der Fenster-Check greift nur bei "was ist das naechste queued
+        # Device". Andernfalls: pruefen ob Fenster offen ist.
+        if rollout.window_start_hhmm:
+            active = self._find_active_device(rollout)
+            has_active = (
+                active is not None
+                and active.state not in _DEVICE_TERMINAL_STATES
+            )
+            if not has_active:
+                # Nur noch queued oder gar nichts mehr -> Fenster pruefen
+                now_local = datetime.fromtimestamp(now_ms / 1000.0)
+                in_window = is_within_window(
+                    now_local,
+                    rollout.window_start_hhmm,
+                    rollout.window_end_hhmm,
+                )
+                if not in_window:
+                    # Ausser Fenster: pausieren (oder pausiert bleiben).
+                    if rollout.state != ROLLOUT_STATE_PAUSED:
+                        next_open_ms = next_window_open_ms(
+                            now_local,
+                            rollout.window_start_hhmm,
+                            rollout.window_end_hhmm,
+                        )
+                        with self._lock:
+                            rollout.state = ROLLOUT_STATE_PAUSED
+                            rollout.paused_until_ms = next_open_ms
+                            self._save_to_disk()
+                        self._audit.append(
+                            AuditEventKind.FIRMWARE_ROLLOUT_STARTED,
+                            actor=rollout.initiator,
+                            action="firmware_rollout_paused_out_of_window",
+                            summary=(
+                                f"Rollout {rollout.rollout_id} pausiert bis "
+                                f"naechstes Wartungsfenster (Start "
+                                f"{rollout.window_start_hhmm})."
+                            ),
+                        )
+                    return
+                # Fenster offen: falls wir vorher pausiert waren -> resume
+                if rollout.state == ROLLOUT_STATE_PAUSED:
+                    with self._lock:
+                        rollout.state = ROLLOUT_STATE_RUNNING
+                        rollout.paused_until_ms = 0
+                        self._save_to_disk()
+                    self._audit.append(
+                        AuditEventKind.FIRMWARE_ROLLOUT_STARTED,
+                        actor=rollout.initiator,
+                        action="firmware_rollout_resumed_in_window",
+                        summary=(
+                            f"Rollout {rollout.rollout_id} laeuft im "
+                            f"Wartungsfenster weiter."
+                        ),
+                    )
+
         # Total-Cap greift? Bei scheduled zaehlen wir ab created_at_ms,
         # inklusive Wartezeit — sonst blockiert ein "in 4h starten"-Rollout
         # einen zweiten. Aber 6h ist grosszuegig.
-        if now_ms - rollout.created_at_ms > DEFAULT_ROLLOUT_MAX_S * 1000:
-            self._skip_remaining(rollout, reason="Rollout-Total-Timeout (6h).")
-            self._finalize(rollout, ROLLOUT_STATE_FAILED, now_ms)
-            return
+        # Ausnahme: bei aktivem Wartungsfenster gilt kein Total-Cap —
+        # Multi-Day-Iteration ist der Anwendungsfall, 6h waeren
+        # sinnlos restriktiv.
+        if not rollout.window_start_hhmm:
+            if now_ms - rollout.created_at_ms > DEFAULT_ROLLOUT_MAX_S * 1000:
+                self._skip_remaining(rollout, reason="Rollout-Total-Timeout (6h).")
+                self._finalize(rollout, ROLLOUT_STATE_FAILED, now_ms)
+                return
 
         # Aktive Box abarbeiten (oder naechste queued starten).
         self._process(rollout, now_ms)
@@ -980,6 +1093,64 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+_HHMM_RE = re.compile(r"^([01][0-9]|2[0-3]):([0-5][0-9])$")
+
+
+def parse_hhmm(value: str) -> dt_time | None:
+    """Parst ``"HH:MM"`` zu :class:`datetime.time`. None bei leer/ungueltig."""
+    if not value:
+        return None
+    m = _HHMM_RE.match(value.strip())
+    if m is None:
+        return None
+    return dt_time(int(m.group(1)), int(m.group(2)))
+
+
+def is_within_window(
+    now_local: datetime, start_hhmm: str, end_hhmm: str,
+) -> bool:
+    """Prueft ob ``now_local`` (Server-lokale Zeit) im Wartungsfenster liegt.
+
+    Ohne beide Grenzen: True (kein Fenster = immer offen).
+    Overnight-Fenster (start > end, z.B. 22:00 → 06:00) werden korrekt
+    ueber Mitternacht behandelt.
+    """
+    start = parse_hhmm(start_hhmm)
+    end = parse_hhmm(end_hhmm)
+    if start is None or end is None:
+        return True
+    now_t = now_local.time()
+    if start <= end:
+        # Same-day window (z.B. 09:00 → 17:00)
+        return start <= now_t < end
+    # Overnight window (z.B. 22:00 → 06:00) — offen entweder abends nach
+    # start ODER morgens vor end.
+    return now_t >= start or now_t < end
+
+
+def next_window_open_ms(
+    now_local: datetime, start_hhmm: str, end_hhmm: str,
+) -> int:
+    """Berechnet Unix-ms wann das naechste Fenster oeffnet.
+
+    Ist das Fenster gerade offen: gibt now_local zurueck (der Aufrufer
+    muss vorher pruefen). Wird primaer fuer paused_until_ms genutzt,
+    damit die UI eine "Rollout schlaeft bis..."-Anzeige machen kann.
+    """
+    start = parse_hhmm(start_hhmm)
+    end = parse_hhmm(end_hhmm)
+    if start is None or end is None:
+        return int(now_local.timestamp() * 1000)
+    # Kandidat: heute um start:MM
+    candidate = now_local.replace(
+        hour=start.hour, minute=start.minute,
+        second=0, microsecond=0,
+    )
+    if candidate <= now_local:
+        candidate = candidate + timedelta(days=1)
+    return int(candidate.timestamp() * 1000)
+
+
 def _same_path(a: Path | None, b: Path) -> bool:
     """Vergleicht zwei Pfade tolerant (mit resolve, Fallback auf str).
 
@@ -1010,7 +1181,11 @@ __all__ = [
     "ROLLOUT_STATE_CANCELLED",
     "ROLLOUT_STATE_DONE",
     "ROLLOUT_STATE_FAILED",
+    "ROLLOUT_STATE_PAUSED",
     "ROLLOUT_STATE_RUNNING",
     "ROLLOUT_STATE_SCHEDULED",
     "RolloutBusyError",
+    "is_within_window",
+    "next_window_open_ms",
+    "parse_hhmm",
 ]

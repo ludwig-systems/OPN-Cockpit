@@ -4,6 +4,49 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Firmware-Rollout V2: Wartungsfenster mit Multi-Day-Iteration
+
+Der Firmware-Rollout kann optional an ein **wiederkehrendes Wartungs-
+fenster** gebunden werden. Anwendungsfall: 12 Boxen updaten, aber nur
+zwischen 22:00 und 06:00. Was in einer Nacht nicht fertig wird, wird
+am naechsten Fenster-Beginn nahtlos weitergefuehrt.
+
+**Semantik:**
+- Neuer Rollout-State ``paused`` — Rollout wartet auf nächstes Fenster.
+- Bevor eine noch queued Box getriggert wird, prueft der Watcher ob
+  wir gerade im Fenster sind. Wenn nein → State ``paused``,
+  ``paused_until_ms`` wird berechnet (naechster Fenster-Beginn).
+- Devices, die bereits triggered/running/rebooting/verifying sind,
+  laufen zu Ende — der Fenster-Check greift nur zwischen Boxen.
+- Beim Fenster-Beginn (naechster Tick nach paused_until_ms):
+  automatischer Uebergang paused → running.
+- Overnight-Fenster (Start &gt; Ende, z.B. 22:00–06:00) werden korrekt
+  ueber Mitternacht behandelt.
+- Bei aktivem Fenster ist der 6-h-Total-Cap deaktiviert — sonst
+  waeren Multi-Day-Rollouts nicht sinnvoll.
+- Cancel funktioniert im ``paused``-State genauso wie im
+  ``scheduled``-State: sofortiger Uebergang zu ``cancelled``, alle
+  noch queued Devices werden geskippt.
+
+**API-Erweiterung** (``POST /api/firmware/rollout``):
+Neue optionale Felder ``window_start_hhmm`` und ``window_end_hhmm``
+(``"HH:MM"``, Server-lokale Zeit). Beide oder keiner. Validierung
+gegen Format + identische Grenzen.
+
+**Response** ``GET /api/firmware/rollout``: neue Felder
+``window_start_hhmm``, ``window_end_hhmm``, ``paused_until_ms``.
+
+**UI**: Rollout-Modal um "Nur im Wartungsfenster arbeiten"-Checkbox +
+zwei Zeit-Inputs (Default 22:00–06:00). Rollout-Banner rendert den
+paused-State in Amber mit "Wartet bis…"-Text und dem eingestellten
+Fenster als Label.
+
+**Zeitzone**: pragmatisch server-lokal (kein TZ-Feld pro Rollout).
+Dokumentiert im UI-Hint. TZ-Support nachziehbar wenn benoetigt.
+
+22 neue Watcher-Tests inklusive Overnight-Fenster, Pause/Resume,
+Cancel-im-paused. Alle 1289 Tests gruen.
+
 ### SMTP + E-Mail-Benachrichtigung bei Firmware-Rollout-Ende
 
 Neue Vault-Sektion **SMTP-Config** — pro Tresor konfigurierbar

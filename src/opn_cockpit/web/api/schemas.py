@@ -763,6 +763,17 @@ class FirmwareRolloutRequest(BaseModel):
     mode: str = Field("update", pattern="^(update|upgrade)$")
     continue_on_error: bool = False
     scheduled_start_at_ms: int | None = Field(None, ge=0)
+    window_start_hhmm: str = Field(
+        "", max_length=5,
+        description=(
+            "Wartungsfenster-Start (HH:MM, Server-lokale Zeit). Leer = kein Fenster. "
+            "Zusammen mit window_end_hhmm."
+        ),
+    )
+    window_end_hhmm: str = Field(
+        "", max_length=5,
+        description="Wartungsfenster-Ende (HH:MM). Leer = kein Fenster.",
+    )
 
 
 class FirmwareRolloutDeviceEntry(BaseModel):
@@ -802,6 +813,11 @@ class FirmwareRolloutResponse(BaseModel):
     finished_at_ms: int = 0
     scheduled_start_at_ms: int = 0
     """Unix-ms Startzeitpunkt bei geplanten Rollouts, 0 wenn sofort gestartet."""
+
+    window_start_hhmm: str = ""
+    window_end_hhmm: str = ""
+    paused_until_ms: int = 0
+    """Nur im state='paused' relevant: wann geht das naechste Fenster auf."""
 
     devices: list[FirmwareRolloutDeviceEntry] = Field(default_factory=list)
     total: int = 0
