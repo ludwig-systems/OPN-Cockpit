@@ -2742,6 +2742,34 @@
 
           <div class="form-row">
             <div class="form-col">
+              <label class="form-label">Startzeit</label>
+              <div class="fw-schedule-choice">
+                <label class="form-radio">
+                  <input type="radio" name="fw-schedule" value="now" checked />
+                  <span>Sofort starten</span>
+                </label>
+                <label class="form-radio">
+                  <input type="radio" name="fw-schedule" value="preset" />
+                  <span>Heute Nacht 02:00</span>
+                </label>
+                <label class="form-radio">
+                  <input type="radio" name="fw-schedule" value="custom" />
+                  <span>Geplant zu…</span>
+                </label>
+              </div>
+              <div class="fw-schedule-custom" id="fw-schedule-custom-row" hidden>
+                <input type="datetime-local" id="fw-schedule-at" class="form-input" />
+                <div class="form-hint">
+                  Datum/Zeit in Cockpit-Server-Zeitzone. Der Rollout bleibt
+                  im <em>scheduled</em>-State bis der Zeitpunkt erreicht ist —
+                  du kannst ihn bis dahin noch abbrechen.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
               <label class="form-label">Ziel-Geraete</label>
               <div class="fw-rollout-toolbar">
                 <button class="btn-link" id="fw-rollout-select-all" type="button">Alle markieren</button>

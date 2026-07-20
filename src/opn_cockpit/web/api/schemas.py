@@ -670,11 +670,16 @@ class FirmwareRolloutRequest(BaseModel):
     ``continue_on_error`` bestimmt, ob nach einem Fehler weitergemacht
     wird (True) oder der Rollout abbricht (False, Default). Ein
     kaputtes Update sollte nicht durch die gesamte Firma laufen.
+
+    ``scheduled_start_at_ms``: Unix-Timestamp in Millisekunden fuer den
+    geplanten Start (Wartungsfenster). ``None``/``0`` = sofort. Werte
+    in der Vergangenheit werden als "sofort" behandelt (UI-Uhr-Skew).
     """
 
     device_ids: list[str] = Field(..., min_length=1, max_length=200)
     mode: str = Field("update", pattern="^(update|upgrade)$")
     continue_on_error: bool = False
+    scheduled_start_at_ms: int | None = Field(None, ge=0)
 
 
 class FirmwareRolloutDeviceEntry(BaseModel):
@@ -704,7 +709,7 @@ class FirmwareRolloutResponse(BaseModel):
 
     rollout_id: str = ""
     state: str = ""
-    """running / done / failed / cancelled — leer wenn kein Rollout aktiv."""
+    """scheduled / running / done / failed / cancelled — leer wenn kein Rollout aktiv."""
 
     mode: str = ""
     initiator: str = ""
@@ -712,6 +717,9 @@ class FirmwareRolloutResponse(BaseModel):
     cancel_requested: bool = False
     created_at_ms: int = 0
     finished_at_ms: int = 0
+    scheduled_start_at_ms: int = 0
+    """Unix-ms Startzeitpunkt bei geplanten Rollouts, 0 wenn sofort gestartet."""
+
     devices: list[FirmwareRolloutDeviceEntry] = Field(default_factory=list)
     total: int = 0
     done_count: int = 0

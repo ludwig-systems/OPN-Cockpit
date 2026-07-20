@@ -61,6 +61,7 @@ def _stats_to_response(watcher: FirmwareRolloutWatcher) -> FirmwareRolloutRespon
         cancel_requested=rollout.cancel_requested,
         created_at_ms=rollout.created_at_ms,
         finished_at_ms=rollout.finished_at_ms,
+        scheduled_start_at_ms=rollout.scheduled_start_at_ms,
         devices=[
             FirmwareRolloutDeviceEntry(
                 device_id=d.device_id,
@@ -144,6 +145,7 @@ def start_rollout(
             devices=ordered,
             mode=payload.mode,
             continue_on_error=payload.continue_on_error,
+            scheduled_start_at_ms=payload.scheduled_start_at_ms or 0,
         )
     except RolloutBusyError as exc:
         raise HTTPException(

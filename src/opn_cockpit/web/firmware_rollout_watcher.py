@@ -86,6 +86,7 @@ DEV_STATE_SKIPPED = "skipped"
 _DEVICE_TERMINAL_STATES = {DEV_STATE_DONE, DEV_STATE_FAILED, DEV_STATE_SKIPPED}
 
 # Rollout-States
+ROLLOUT_STATE_SCHEDULED = "scheduled"   # wartet auf scheduled_start_at_ms
 ROLLOUT_STATE_RUNNING = "running"
 ROLLOUT_STATE_DONE = "done"
 ROLLOUT_STATE_FAILED = "failed"
@@ -94,6 +95,7 @@ ROLLOUT_STATE_CANCELLED = "cancelled"
 _ROLLOUT_TERMINAL_STATES = {
     ROLLOUT_STATE_DONE, ROLLOUT_STATE_FAILED, ROLLOUT_STATE_CANCELLED,
 }
+_ROLLOUT_ACTIVE_STATES = {ROLLOUT_STATE_SCHEDULED, ROLLOUT_STATE_RUNNING}
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +132,15 @@ class FirmwareRollout:
     finished_at_ms: int = 0
     cancel_requested: bool = False
     initiator: str = ""
+    scheduled_start_at_ms: int = 0
+    """Unix-ms wann der Rollout starten soll.
+
+    Bei ``0`` startet der Watcher sofort beim naechsten Tick (bisheriges
+    Verhalten). Bei ``> now`` bleibt der Rollout in ``ROLLOUT_STATE_SCHEDULED``
+    bis der Zeitpunkt erreicht ist, dann wird er auf ``running`` gesetzt und
+    die erste Box getriggert. Cancel funktioniert im scheduled-State genauso
+    wie im running-State — nur alle noch queued Devices werden skipped.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -198,16 +209,24 @@ class FirmwareRolloutWatcher:
         devices: list[tuple[str, str, str]],
         mode: str,
         continue_on_error: bool,
+        scheduled_start_at_ms: int = 0,
     ) -> FirmwareRollout:
-        """Startet einen neuen Rollout.
+        """Startet einen neuen Rollout — sofort oder geplant.
 
         ``devices`` ist eine Liste von Tupeln
         ``(device_id, device_name, target_version)``. ``target_version``
         darf leer sein — Watcher haelt sich dann an OPNsense's Angabe
         beim Trigger-Zeitpunkt.
 
-        Wirft ``RolloutBusyError``, wenn bereits ein laufender Rollout
-        aktiv ist.
+        ``scheduled_start_at_ms=0`` (Default) startet sofort. Ein Wert
+        in der Zukunft schaltet den Rollout in ``ROLLOUT_STATE_SCHEDULED``
+        bis der Zeitpunkt erreicht ist. Werte in der Vergangenheit werden
+        als "sofort" interpretiert — kein Fehler, damit UI-Uhr-Skew nicht
+        zum Absturz fuehrt.
+
+        Wirft ``RolloutBusyError``, wenn bereits ein Rollout aktiv ist
+        (running ODER scheduled). ``ValueError`` bei ungueltigem mode oder
+        leerer Device-Liste.
         """
         if mode not in ("update", "upgrade"):
             msg = f"Ungueltiger mode: {mode!r} - erwartet 'update' oder 'upgrade'."
@@ -219,13 +238,24 @@ class FirmwareRolloutWatcher:
         with self._lock:
             if (
                 self._rollout is not None
-                and self._rollout.state == ROLLOUT_STATE_RUNNING
+                and self._rollout.state in _ROLLOUT_ACTIVE_STATES
             ):
                 raise RolloutBusyError(
-                    "Es laeuft bereits ein Firmware-Rollout. Bitte warten "
-                    "oder erst abbrechen (POST /api/firmware/rollout/cancel)."
+                    "Es laeuft bereits ein Firmware-Rollout (oder ist "
+                    "geplant). Bitte warten oder erst abbrechen "
+                    "(POST /api/firmware/rollout/cancel)."
                 )
             now_ms = _now_ms()
+
+            # Scheduled? Nur wenn Zeitpunkt echt in der Zukunft. Werte
+            # <= now werden als sofort behandelt (defensiv gegen UI-Skew).
+            if scheduled_start_at_ms > now_ms:
+                initial_state = ROLLOUT_STATE_SCHEDULED
+                scheduled_at = scheduled_start_at_ms
+            else:
+                initial_state = ROLLOUT_STATE_RUNNING
+                scheduled_at = 0
+
             rollout = FirmwareRollout(
                 rollout_id=uuid.uuid4().hex[:12],
                 created_at_ms=now_ms,
@@ -233,6 +263,8 @@ class FirmwareRolloutWatcher:
                 mode=mode,
                 continue_on_error=continue_on_error,
                 initiator=initiator,
+                state=initial_state,
+                scheduled_start_at_ms=scheduled_at,
                 devices=[
                     FirmwareRolloutDevice(
                         device_id=did,
@@ -248,33 +280,48 @@ class FirmwareRolloutWatcher:
             self._rollout = rollout
             self._save_to_disk()
 
-        self._audit.append(
-            AuditEventKind.FIRMWARE_ROLLOUT_STARTED,
-            actor=initiator,
-            action=f"firmware_rollout_{mode}",
-            target_count=len(devices),
-            summary=(
-                f"Firmware-Rollout ({mode}) gestartet fuer "
-                f"{len(devices)} Geraet(e)."
-            ),
-        )
+        if initial_state == ROLLOUT_STATE_SCHEDULED:
+            self._audit.append(
+                AuditEventKind.FIRMWARE_ROLLOUT_STARTED,
+                actor=initiator,
+                action=f"firmware_rollout_{mode}_scheduled",
+                target_count=len(devices),
+                summary=(
+                    f"Firmware-Rollout ({mode}) geplant fuer "
+                    f"{len(devices)} Geraet(e), Start: "
+                    f"{scheduled_at} ms."
+                ),
+            )
+        else:
+            self._audit.append(
+                AuditEventKind.FIRMWARE_ROLLOUT_STARTED,
+                actor=initiator,
+                action=f"firmware_rollout_{mode}",
+                target_count=len(devices),
+                summary=(
+                    f"Firmware-Rollout ({mode}) gestartet fuer "
+                    f"{len(devices)} Geraet(e)."
+                ),
+            )
         self.start()
         return rollout
 
     def cancel(self, *, initiator: str) -> bool:
-        """Bricht den laufenden Rollout ab.
+        """Bricht den laufenden oder geplanten Rollout ab.
 
-        Die aktuell laufende Box wird fertiggemacht (Watcher pollt den
-        upgradestatus zu Ende) — nur noch nicht getriggerte Devices
-        werden auf ``skipped`` gesetzt. Danach terminal-State
-        ``cancelled``.
+        * ``running``: die aktuell laufende Box wird fertiggemacht
+          (Watcher pollt den upgradestatus zu Ende), noch nicht getriggerte
+          Devices werden auf ``skipped`` gesetzt, danach terminal-State
+          ``cancelled``.
+        * ``scheduled``: sofortiger Uebergang zu ``cancelled``, keine
+          Aktion auf Boxen. Alle Devices bleiben ``queued`` → ``skipped``.
 
         Liefert True wenn ein aktiver Rollout gefunden und markiert
         wurde, False sonst.
         """
         with self._lock:
             rollout = self._rollout
-            if rollout is None or rollout.state != ROLLOUT_STATE_RUNNING:
+            if rollout is None or rollout.state not in _ROLLOUT_ACTIVE_STATES:
                 return False
             rollout.cancel_requested = True
             self._save_to_disk()
@@ -284,8 +331,8 @@ class FirmwareRolloutWatcher:
             actor=initiator,
             action="firmware_rollout_cancel_requested",
             summary=(
-                f"Firmware-Rollout {rollout.rollout_id} auf Abbruch gesetzt "
-                "(laufende Box wird zu Ende gefahren)."
+                f"Firmware-Rollout {rollout.rollout_id} ({rollout.state}) "
+                "auf Abbruch gesetzt."
             ),
         )
         return True
@@ -339,14 +386,42 @@ class FirmwareRolloutWatcher:
 
         # Cancel angefragt: alle noch-queued Devices skippen, dann prüfen ob
         # die aktive Box terminal ist -> Rollout terminieren.
+        # Bei scheduled reicht Cancel-Flag -> sofortiger Uebergang.
         if rollout.cancel_requested:
+            if rollout.state == ROLLOUT_STATE_SCHEDULED:
+                self._skip_remaining(
+                    rollout, reason="Rollout vor Start abgebrochen.",
+                )
+                self._finalize(rollout, ROLLOUT_STATE_CANCELLED, now_ms)
+                return
             active = self._find_active_device(rollout)
             if active is None or active.state in _DEVICE_TERMINAL_STATES:
                 self._skip_remaining(rollout, reason="Rollout abgebrochen.")
                 self._finalize(rollout, ROLLOUT_STATE_CANCELLED, now_ms)
                 return
 
-        # Total-Cap greift?
+        # Scheduled: warten bis der Zeitpunkt da ist, dann uebergehen auf
+        # running. Der Rest des Ticks laeuft dann normal weiter.
+        if rollout.state == ROLLOUT_STATE_SCHEDULED:
+            if now_ms < rollout.scheduled_start_at_ms:
+                return  # noch warten, nichts zu tun
+            with self._lock:
+                rollout.state = ROLLOUT_STATE_RUNNING
+                self._save_to_disk()
+            self._audit.append(
+                AuditEventKind.FIRMWARE_ROLLOUT_STARTED,
+                actor=rollout.initiator,
+                action=f"firmware_rollout_{rollout.mode}_start_from_schedule",
+                target_count=len(rollout.devices),
+                summary=(
+                    f"Firmware-Rollout {rollout.rollout_id} startet jetzt "
+                    "(geplanter Zeitpunkt erreicht)."
+                ),
+            )
+
+        # Total-Cap greift? Bei scheduled zaehlen wir ab created_at_ms,
+        # inklusive Wartezeit — sonst blockiert ein "in 4h starten"-Rollout
+        # einen zweiten. Aber 6h ist grosszuegig.
         if now_ms - rollout.created_at_ms > DEFAULT_ROLLOUT_MAX_S * 1000:
             self._skip_remaining(rollout, reason="Rollout-Total-Timeout (6h).")
             self._finalize(rollout, ROLLOUT_STATE_FAILED, now_ms)
@@ -842,5 +917,6 @@ __all__ = [
     "ROLLOUT_STATE_DONE",
     "ROLLOUT_STATE_FAILED",
     "ROLLOUT_STATE_RUNNING",
+    "ROLLOUT_STATE_SCHEDULED",
     "RolloutBusyError",
 ]

@@ -4232,6 +4232,52 @@ a.card-open-link { text-decoration: none; }
   }
 }
 
+/* ===== Firmware-Rollout Scheduling (v0.11) ===== */
+
+.fw-schedule-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.fw-schedule-choice .form-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fw-schedule-custom {
+  margin-top: 6px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fw-schedule-custom[hidden] { display: none !important; }
+
+.fw-schedule-custom .form-input {
+  max-width: 260px;
+}
+
+.fw-rollout-banner[data-state="scheduled"] {
+  /* Etwas anders als running - subtile Info-Farbe, nicht so intensiv. */
+  background: linear-gradient(
+    100deg,
+    rgba(80, 130, 180, 0.10),
+    rgba(80, 130, 180, 0.02) 70%
+  );
+  border-color: rgba(80, 130, 180, 0.4);
+}
+
+.fw-rollout-banner[data-state="scheduled"] .fw-rollout-banner-icon {
+  background: rgba(80, 130, 180, 0.18);
+  color: #4a75a5;
+}
+
 /* ===== Interfaces-Tab (v0.11 Device-Modal) ===== */
 
 .ifm-row {

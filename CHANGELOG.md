@@ -2,7 +2,51 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab
+## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling
+
+### Firmware-Rollout: Zeitplanung / Wartungsfenster
+
+Aus User-Feedback nach dem Iteration-B-Rollout: Updates + Reboot
+sollen sich zeitlich planen lassen (analog Cisco IOS
+`reload at HH:MM`). Ab v0.11 hat das Rollout-Modal drei
+Start-Optionen:
+
+- **Sofort starten** (Default, bisheriges Verhalten)
+- **Heute Nacht 02:00** — one-click-Preset fuer den haeufigsten
+  Wartungsfenster-Wunsch. Wenn's schon nach 2 Uhr ist, wird's der
+  naechste Tag.
+- **Geplant zu…** — HTML5-Datetime-Local-Input, freie Zeitwahl.
+
+**Persistenz**: Der geplante Rollout landet mit einem neuen State
+`scheduled` im FirmwareRolloutWatcher-Store. Cockpit-Restart adoptiert
+ihn wie einen laufenden Rollout — die Zeitplanung ueberlebt Neustarts.
+
+**Banner**: Persistentes Banner (unten, blau statt gruen) zeigt
+Startzeitpunkt + Live-Countdown (``noch 3h 17min``). Bei Erreichen der
+Zeit wechselt der Rollout automatisch nach `running`, das Banner
+wechselt die Farbe.
+
+**Cancel** funktioniert im `scheduled`-State ebenfalls: Klick auf
+Banner-`Abbrechen` verhindert den Start, keine Aktion auf Boxen. Alle
+Devices bleiben `queued` und werden auf `skipped` gesetzt.
+
+**Schutz gegen Uhr-Skew**: Ein Startzeitpunkt in der Vergangenheit
+wird als "sofort" behandelt statt zu crashen (User-Browser-Uhr vs.
+Cockpit-Server-Uhr koennen minutenweise abweichen).
+
+**Endpoint-Erweiterung**: `POST /api/firmware/rollout` nimmt jetzt
+optional `scheduled_start_at_ms: int` (Unix-ms in Cockpit-Server-
+Zeitzone). Default None/0 = sofort. `RolloutBusyError` (HTTP 409)
+greift jetzt auch wenn ein scheduled Rollout schon wartet.
+
+**Audit**: `FIRMWARE_ROLLOUT_STARTED` wird bei Submit gefeuert (mit
+`_scheduled`-Suffix im Action-Feld bei geplantem Start), ein zweites
+Mal beim Uebergang scheduled → running (`_start_from_schedule`).
+
+**Neue Tests**: 6 Unit-Tests in `test_firmware_rollout_watcher.py`
+(TestScheduling) — immediate/scheduled-Unterscheidung, past-time-
+Verhalten, Busy-Check gegen scheduled Rollouts, Cancel im scheduled-
+State, Persistenz-Round-Trip mit `scheduled_start_at_ms`.
 
 ### Interfaces-Tab im Device-Modal
 

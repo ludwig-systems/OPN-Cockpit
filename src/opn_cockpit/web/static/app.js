@@ -4742,6 +4742,14 @@
     $('#fw-rollout-mode').value = 'update';
     $('#fw-rollout-continue').checked = false;
     $('#firmware-rollout-error').hidden = true;
+    // Scheduling-Radio zurueck auf "Sofort", Custom-Input verstecken.
+    const radios = document.querySelectorAll('input[name="fw-schedule"]');
+    for (const r of radios) r.checked = (r.value === 'now');
+    $('#fw-schedule-custom-row').hidden = true;
+    // Custom-Input mit "heute Nacht 02:00" als sinnvoller Default vorbelegen,
+    // fuer den Fall dass User "Geplant zu…" waehlt.
+    const suggested = _rolloutDefaultScheduleTonight();
+    $('#fw-schedule-at').value = suggested;
 
     // Tag-Filter befuellen aus state.devices
     const filter = $('#fw-rollout-tag-filter');
@@ -4873,6 +4881,43 @@
     renderFirmwareRolloutList();
   }
 
+  function _rolloutDefaultScheduleTonight() {
+    // Liefert "YYYY-MM-DDT02:00" fuer heute Nacht 02:00 (bzw. morgen wenn
+    // schon nach 02:00). Format: HTML5 datetime-local ohne Zeitzone.
+    const d = new Date();
+    if (d.getHours() >= 2) {
+      // Bereits nach 2 Uhr - naechster Nacht
+      d.setDate(d.getDate() + 1);
+    }
+    d.setHours(2, 0, 0, 0);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function _readScheduledStartMs() {
+    // Liest die Scheduling-Choice aus dem Modal und returned einen
+    // Unix-ms-Wert oder 0 fuer "sofort".
+    const radios = document.querySelectorAll('input[name="fw-schedule"]');
+    let choice = 'now';
+    for (const r of radios) {
+      if (r.checked) { choice = r.value; break; }
+    }
+    if (choice === 'now') return 0;
+    if (choice === 'preset') {
+      // Heute Nacht 02:00 lokal
+      const d = new Date();
+      if (d.getHours() >= 2) d.setDate(d.getDate() + 1);
+      d.setHours(2, 0, 0, 0);
+      return d.getTime();
+    }
+    // custom
+    const val = $('#fw-schedule-at').value;
+    if (!val) return 0;
+    const parsed = new Date(val).getTime();
+    if (!Number.isFinite(parsed)) return 0;
+    return parsed;
+  }
+
   async function submitFirmwareRollout() {
     const box = $('#firmware-rollout-error');
     box.hidden = true;
@@ -4884,31 +4929,40 @@
     }
     const mode = $('#fw-rollout-mode').value;
     const continueOnError = $('#fw-rollout-continue').checked;
+    const scheduledMs = _readScheduledStartMs();
 
     // Nochmal Confirm mit Zusammenfassung
     const modeLabel = mode === 'upgrade' ? 'Major-Upgrade (mit Reboot!)' : 'Package-Update';
     const contLabel = continueOnError
       ? 'Bei Fehler weitermachen'
       : 'Bei erstem Fehler abbrechen';
+    let scheduleLabel = 'Sofort';
+    if (scheduledMs > 0) {
+      const when = new Date(scheduledMs);
+      scheduleLabel = `Geplant zu ${when.toLocaleString()}`;
+    }
     const prompt =
       `Firmware-Rollout starten?\n\n`
-      + `Modus:       ${modeLabel}\n`
-      + `Geraete:     ${ids.length}\n`
-      + `Fehlerpolitik: ${contLabel}\n\n`
+      + `Modus:         ${modeLabel}\n`
+      + `Geraete:       ${ids.length}\n`
+      + `Fehlerpolitik: ${contLabel}\n`
+      + `Startzeit:     ${scheduleLabel}\n\n`
       + `Der Rollout laeuft sequenziell (eine Box zur Zeit). Bei Major-\n`
       + `Upgrade wartet Cockpit pro Box einen Reboot ab (bis 15 min).\n\n`
-      + `OK = starten, Abbrechen = zurueck.`;
+      + `OK = ${scheduledMs > 0 ? 'planen' : 'starten'}, Abbrechen = zurueck.`;
     if (!window.confirm(prompt)) return;
 
     const btn = $('#firmware-rollout-start');
     btn.disabled = true;
-    btn.textContent = 'Starte…';
+    btn.textContent = scheduledMs > 0 ? 'Plane…' : 'Starte…';
     try {
-      const response = await apiPost('/api/firmware/rollout', {
+      const payload = {
         device_ids: ids,
         mode,
         continue_on_error: continueOnError,
-      });
+      };
+      if (scheduledMs > 0) payload.scheduled_start_at_ms = scheduledMs;
+      const response = await apiPost('/api/firmware/rollout', payload);
       if (response.status === 401) { handleSessionLost(); return; }
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -4919,7 +4973,9 @@
       closeFirmwareRolloutModal();
       startFirmwareRolloutPolling();
       pollFirmwareRolloutOnce().catch(() => {});
-      showToast('Rollout gestartet.');
+      showToast(scheduledMs > 0
+        ? `Rollout geplant fuer ${new Date(scheduledMs).toLocaleString()}.`
+        : 'Rollout gestartet.');
     } catch (err) {
       box.textContent = err.message;
       box.hidden = false;
@@ -4970,9 +5026,12 @@
 
     const title = $('#fw-rollout-banner-title');
     if (title) {
-      title.textContent = data.mode === 'upgrade'
-        ? 'Firmware-Rollout: Major-Upgrade'
-        : 'Firmware-Rollout: Package-Update';
+      const modeText = data.mode === 'upgrade'
+        ? 'Major-Upgrade'
+        : 'Package-Update';
+      title.textContent = data.state === 'scheduled'
+        ? `Firmware-Rollout geplant: ${modeText}`
+        : `Firmware-Rollout: ${modeText}`;
     }
 
     const progress = $('#fw-rollout-banner-progress');
@@ -4982,7 +5041,12 @@
       const skipped = data.skipped_count || 0;
       const total = data.total || 0;
       const inProgress = total - done - failed - skipped;
-      if (data.state === 'running') {
+      if (data.state === 'scheduled') {
+        const when = new Date(data.scheduled_start_at_ms);
+        const ms = data.scheduled_start_at_ms - Date.now();
+        progress.textContent =
+          `Startet ${when.toLocaleString()} · ${_fmtCountdown(ms)} · ${total} Ziel(e)`;
+      } else if (data.state === 'running') {
         progress.textContent =
           `${done}/${total} fertig · ${inProgress} aktiv/wartend · ${failed} Fehler`;
       } else {
@@ -5007,7 +5071,8 @@
 
     const cancelBtn = $('#fw-rollout-banner-cancel');
     const clearBtn = $('#fw-rollout-banner-clear');
-    if (data.state === 'running') {
+    // Cancel ist auch im scheduled-State erlaubt (dann verhindert er den Start).
+    if (data.state === 'running' || data.state === 'scheduled') {
       if (cancelBtn) {
         cancelBtn.hidden = data.cancel_requested === true;
         cancelBtn.disabled = data.cancel_requested === true;
@@ -5017,6 +5082,19 @@
       if (cancelBtn) cancelBtn.hidden = true;
       if (clearBtn) clearBtn.hidden = false;
     }
+  }
+
+  function _fmtCountdown(ms) {
+    if (ms <= 0) return 'startet jetzt';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `noch ${s}s`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `noch ${m} min`;
+    const h = Math.floor(m / 60);
+    const restMin = m % 60;
+    if (h < 24) return `noch ${h}h ${restMin}min`;
+    const d = Math.floor(h / 24);
+    return `noch ${d}d ${h % 24}h`;
   }
 
   async function cancelFirmwareRollout() {
@@ -8901,6 +8979,13 @@
     if (fwRolloutStart) {
       fwRolloutStart.addEventListener('click', () => {
         submitFirmwareRollout().catch((err) => showToast(err.message, true));
+      });
+    }
+    // Scheduling-Radios: bei "Geplant zu…" das Custom-DateTime-Feld einblenden.
+    const fwScheduleRadios = document.querySelectorAll('input[name="fw-schedule"]');
+    for (const r of fwScheduleRadios) {
+      r.addEventListener('change', () => {
+        $('#fw-schedule-custom-row').hidden = (r.value !== 'custom' || !r.checked);
       });
     }
     const fwRolloutTagFilter = $('#fw-rollout-tag-filter');
