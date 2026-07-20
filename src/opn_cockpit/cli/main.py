@@ -293,6 +293,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument("--until", dest="until_iso")
     p_audit.add_argument("--limit", type=int, default=50)
 
+    p_verify_pdf = sub.add_parser(
+        "audit-verify-pdf",
+        help=(
+            "Signatur eines PDF-Audit-Reports gegen den live Audit-Log "
+            "verifizieren (HMAC-SHA256)"
+        ),
+    )
+    p_verify_pdf.add_argument(
+        "--signature",
+        required=True,
+        help=(
+            "Hex-Signatur aus den PDF-Metadaten (Keywords-Feld: "
+            "'OPN-COCKPIT-AUDIT-SIG-v1:<hex>'). Extrahierbar via Adobe-Reader-"
+            "Eigenschaften oder shell-tool wie 'strings report.pdf | "
+            "grep OPN-COCKPIT-AUDIT-SIG-v1'."
+        ),
+    )
+    p_verify_pdf.add_argument(
+        "--event", help="Filter: nur diesen event-kind pruefen",
+    )
+    p_verify_pdf.add_argument("--action", help="Filter: nur diese action")
+    p_verify_pdf.add_argument(
+        "--device-id", dest="target_device_id",
+        help="Filter: nur diese target_device_id",
+    )
+    p_verify_pdf.add_argument("--actor", help="Filter: nur diesen actor")
+    p_verify_pdf.add_argument("--since", dest="since_iso")
+    p_verify_pdf.add_argument("--until", dest="until_iso")
+
     # ----- Migrations / Updates -----
 
     p_migrate = sub.add_parser(
@@ -336,6 +365,7 @@ def _dispatch(args: argparse.Namespace, settings: AppSettings) -> int:
     handlers_without_settings: dict[str, Callable[[argparse.Namespace], int]] = {
         "create-vault": cmd_create_vault,
         "audit": cmd_audit,
+        "audit-verify-pdf": cmd_audit_verify_pdf,
         "migrate": cmd_migrate,
     }
     handlers_with_settings: dict[str, Callable[[argparse.Namespace, AppSettings], int]] = {
@@ -1113,6 +1143,66 @@ def cmd_audit(args: argparse.Namespace) -> int:
             f"{rec.timestamp_utc}  {rec.actor:<12}  {rec.event:<22}  {action:<12}  {rec.summary}"
         )
     return EXIT_OK
+
+
+def cmd_audit_verify_pdf(args: argparse.Namespace) -> int:
+    """Prueft die HMAC-Signatur eines PDF-Audit-Reports gegen den Live-Log.
+
+    Der Nutzer extrahiert die Signatur einmal aus den PDF-Metadaten
+    (Keywords-Feld ``OPN-COCKPIT-AUDIT-SIG-v1:<hex>``), reicht sie via
+    ``--signature`` rein. Dieses Kommando laedt die aktuellen Records
+    aus dem Audit-Backend (identische Filter wie beim urspruenglichen
+    Export moeglich), rechnet die Signatur neu und vergleicht in
+    konstanter Zeit.
+
+    Exit-Code 0 bei Match, sonst != 0.
+    """
+    from opn_cockpit.audit.backend import get_audit_backend  # noqa: PLC0415
+    from opn_cockpit.audit.chain import load_or_generate_secret  # noqa: PLC0415
+    from opn_cockpit.audit.pdf_report import (  # noqa: PLC0415
+        SIG_PREFIX,
+        verify_pdf_signature,
+    )
+
+    signature = args.signature.strip()
+    # Trim des Prefix, falls User den mitkopiert hat.
+    if signature.startswith(SIG_PREFIX):
+        signature = signature[len(SIG_PREFIX):].strip()
+
+    try:
+        event = AuditEventKind(args.event) if args.event else None
+    except ValueError:
+        emit(f"Unbekannter event-Wert: {args.event}", err=True)
+        return EXIT_GENERAL_ERROR
+
+    audit = get_audit_backend()
+    records = audit.filter(
+        event=event,
+        action=args.action,
+        target_device_id=args.target_device_id,
+        actor=args.actor,
+        since_iso=args.since_iso,
+        until_iso=args.until_iso,
+    )
+    secret = load_or_generate_secret()
+    ok = verify_pdf_signature(records, signature, secret)
+    if ok:
+        emit(
+            f"OK - Signatur matcht ({len(records)} Records im aktuellen Filter). "
+            "PDF wurde nicht manipuliert.",
+        )
+        return EXIT_OK
+    emit(
+        f"FEHLER - Signatur passt NICHT zu den {len(records)} Records im "
+        "aktuellen Filter. Moegliche Ursachen:",
+        err=True,
+    )
+    emit("  1. Audit-Log wurde seit dem PDF-Export erweitert (neue Records).", err=True)
+    emit("     -> Filter-Zeitraum eingrenzen (--until <PDF-Erstellungsdatum>).", err=True)
+    emit("  2. Filter-Parameter weichen vom PDF-Export ab (event/actor/device).", err=True)
+    emit("  3. PDF wurde manipuliert oder Signatur-Feld ist falsch.", err=True)
+    emit("  4. Audit-Secret hat sich geaendert (OPNCOCKPIT_AUDIT_SECRET-Rotation).", err=True)
+    return EXIT_GENERAL_ERROR
 
 
 # ===========================================================================

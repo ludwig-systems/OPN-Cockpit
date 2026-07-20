@@ -4,6 +4,33 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### PDF-Audit-Report: CLI-Verifikation
+
+Der signierte PDF-Audit-Report ist seit v0.7 im Backend vollstaendig
+implementiert (HMAC-SHA256 ueber alle Records, sichtbarer Footer +
+maschinell auslesbare Metadaten). Was fehlte war ein bequemer Weg
+die Signatur wieder zu pruefen — heute noch offen fuer alle die
+compliance-relevante Reports langfristig archivieren.
+
+Ab v0.11 gibt es dafuer den CLI-Subcommand:
+
+```
+opn-cockpit-cli audit-verify-pdf --signature <hex-aus-pdf-metadaten>
+```
+
+Der Signature-Wert steht in den PDF-Metadaten (Keywords-Feld
+``OPN-COCKPIT-AUDIT-SIG-v1:<hex>``). Extrahierbar via Adobe-Reader-
+Eigenschaften oder Shell-Tool wie ``strings report.pdf | grep OPN-COCKPIT-AUDIT-SIG-v1``.
+Optional lassen sich dieselben Filter mitgeben (event/action/actor/
+device/since/until), wenn der Report mit Filter erzeugt wurde.
+
+Exit-Code 0 bei Match, sonst != 0 mit Fehlermeldung samt moeglicher
+Ursachen (neue Records nach Export, Filter-Abweichung, PDF-Manipulation,
+Audit-Secret-Rotation).
+
+Keine neue Runtime-Dependency — nutzt den bereits vorhandenen
+``verify_pdf_signature``-Helper im Audit-Modul.
+
 ### Security-Audit-Refresh (Delta v0.8 → v0.11)
 
 Vollstaendiger Delta-Audit ueber alle Features die seit dem
