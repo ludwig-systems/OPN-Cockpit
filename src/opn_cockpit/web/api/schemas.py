@@ -1519,6 +1519,10 @@ class InterfaceDetailEntry(BaseModel):
     mtu: str
     macaddr: str
     media: str
+    bytes_received: int = 0
+    bytes_transmitted: int = 0
+    packets_received: int = 0
+    packets_transmitted: int = 0
 
 
 class DeviceInterfacesResponse(BaseModel):
@@ -1530,6 +1534,24 @@ class DeviceInterfacesResponse(BaseModel):
     summary: str
     interfaces: list[InterfaceDetailEntry] = Field(default_factory=list)
     checked_at_iso: str
+
+
+class InterfaceReloadResponse(BaseModel):
+    """Antwort auf ``POST /api/inventory/devices/{id}/interfaces/{identifier}/reload``.
+
+    Analog zum Reload eines Dienstes: OPNsense's ``reloadInterface``-
+    Endpoint restart den Interface-Stack (down + up), ohne die
+    Config-XML zu aendern. Anwendungsfall: nach Kabel-Wechsel wenn
+    das OS den Link nicht selbst wiederfindet, oder um schnell einen
+    DHCP-Lease-Refresh anzustossen.
+    """
+
+    device_id: str
+    device_name: str
+    identifier: str
+    ok: bool
+    message: str
+    triggered_at_iso: str
 
 
 class PlannedActionResponse(BaseModel):

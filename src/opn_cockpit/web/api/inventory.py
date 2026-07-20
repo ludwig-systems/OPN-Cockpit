@@ -8,6 +8,7 @@ nur waehrend der Session und wird beim Lock/Auto-Lock geloescht.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -130,6 +131,7 @@ from opn_cockpit.web.api.schemas import (
     SafetyNetTestResponse,
     DeviceInterfacesResponse,
     InterfaceDetailEntry,
+    InterfaceReloadResponse,
     KachelWidgetsEntry,
     KachelWidgetsRequest,
     KachelWidgetsResponse,
@@ -588,6 +590,10 @@ def get_device_interfaces(
             mtu=iface.mtu,
             macaddr=iface.macaddr,
             media=iface.media,
+            bytes_received=iface.bytes_received,
+            bytes_transmitted=iface.bytes_transmitted,
+            packets_received=iface.packets_received,
+            packets_transmitted=iface.packets_transmitted,
         )
         for iface in result.interfaces
     ]
@@ -595,6 +601,116 @@ def get_device_interfaces(
         device_id=device.id, device_name=device.name,
         reachable=True, summary=result.summary,
         interfaces=entries, checked_at_iso=timestamp,
+    )
+
+
+# Regex fuer Interface-Identifier: OPNsense nutzt nur alphanumerisch
+# (wan, lan, opt1, opt42, dmz). Enge Whitelist als Path-Injection-
+# Verteidigung, weil wir den Wert in einen OPNsense-Pfad einsetzen.
+_INTERFACE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+
+
+@router.post(
+    "/devices/{device_id}/interfaces/{identifier}/reload",
+    response_model=InterfaceReloadResponse,
+)
+def reload_device_interface(
+    device_id: str,
+    identifier: str,
+    session: Session = Depends(require_session),
+) -> InterfaceReloadResponse:
+    """Startet den Interface-Stack einer Box neu (down + up).
+
+    Kein Config-Change — greift nur den laufenden Interface-Stack an.
+    Anwendungsfall: DHCP-Lease erneuern, Link-Detection nach Kabel-
+    Wechsel wieder anwerfen, Router-Advertisement-Flush.
+
+    NICHT dasselbe wie Enable/Disable im OPNsense-Menue — dafuer
+    bietet die OPNsense-Core-API fuer normale Interfaces keinen
+    Endpoint (siehe CHANGELOG v0.11).
+    """
+    from opn_cockpit.core.health_widgets import (  # noqa: PLC0415
+        INTERFACES_RELOAD_ENDPOINT_TEMPLATE,
+    )
+
+    require_write_role(session)
+    device = _resolve_device_or_404(session, device_id)
+
+    if not _INTERFACE_ID_RE.match(identifier):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Interface-Identifier enthaelt ungueltige Zeichen. "
+                "Erlaubt: a-z, 0-9, Bindestrich, Unterstrich."
+            ),
+        )
+
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    endpoint = INTERFACES_RELOAD_ENDPOINT_TEMPLATE.format(identifier=identifier)
+    timestamp = _iso_now()
+
+    with HttpClient(targets=[tgt], tuning=tuning) as client:
+        try:
+            response = client.call(
+                tgt, device.api_key, device.api_secret,
+                "POST", endpoint, json={},
+            )
+        except OpnCockpitError as exc:
+            reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+            get_audit_backend().append(
+                AuditEventKind.DEVICE_RESULT,
+                actor=audit_actor(session),
+                action="interface_reload_failed",
+                target_device_id=device.id,
+                target_device_name=device.name,
+                error_kind=exc.context.error_kind,
+                summary=(
+                    f"Interface-Reload '{identifier}' auf '{device.name}' "
+                    f"gescheitert: {reason}"
+                ),
+            )
+            session.touch()
+            return InterfaceReloadResponse(
+                device_id=device.id, device_name=device.name,
+                identifier=identifier, ok=False,
+                message=f"Reload gescheitert: {reason}",
+                triggered_at_iso=timestamp,
+            )
+
+    # Response kann JSON mit "message"/"status" haben oder einfach 200 OK.
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    message = ""
+    if isinstance(body, dict):
+        message = str(
+            body.get("message")
+            or body.get("status")
+            or body.get("result")
+            or "",
+        ).strip()
+    if not message:
+        message = "Interface-Reload gestartet."
+
+    get_audit_backend().append(
+        AuditEventKind.APPLY_COMPLETED,
+        actor=audit_actor(session),
+        action="interface_reload",
+        target_device_id=device.id,
+        target_device_name=device.name,
+        summary=(
+            f"Interface-Reload '{identifier}' auf '{device.name}' "
+            f"ausgeloest: {message}"
+        ),
+    )
+    session.touch()
+    return InterfaceReloadResponse(
+        device_id=device.id, device_name=device.name,
+        identifier=identifier, ok=True,
+        message=message, triggered_at_iso=timestamp,
     )
 
 

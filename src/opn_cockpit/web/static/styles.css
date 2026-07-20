@@ -4404,7 +4404,7 @@ a.card-open-link { text-decoration: none; }
 
 .ifm-row {
   display: grid;
-  grid-template-columns: 14px 110px 1fr auto;
+  grid-template-columns: 14px 110px 1fr auto auto;
   gap: 10px;
   align-items: center;
   padding: 8px 12px;
@@ -4483,4 +4483,36 @@ a.card-open-link { text-decoration: none; }
 
 .ifm-tail .ifm-mtu-mac {
   display: block;
+}
+
+.ifm-tail .ifm-traffic {
+  display: block;
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.ifm-tail .ifm-traffic .ifm-traffic-arrow {
+  color: var(--accent);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.ifm-tail .ifm-traffic .ifm-traffic-p {
+  color: var(--text-subtle);
+  font-size: 9px;
+}
+
+.ifm-actions {
+  display: flex;
+  gap: 6px;
+  justify-self: end;
+}
+
+.btn-secondary.btn-secondary-small {
+  padding: 3px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  border-radius: 4px;
 }

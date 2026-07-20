@@ -33,6 +33,8 @@ from opn_cockpit.core.http_client import HttpClient, HttpTarget
 
 CARP_STATUS_ENDPOINT = "/api/diagnostics/interface/get_vip_status"
 INTERFACES_INFO_ENDPOINT = "/api/interfaces/overview/interfacesInfo"
+INTERFACES_TRAFFIC_ENDPOINT = "/api/diagnostics/traffic/interface"
+INTERFACES_RELOAD_ENDPOINT_TEMPLATE = "/api/interfaces/overview/reloadInterface/{identifier}"
 SYSTEM_INFO_ENDPOINT = "/api/diagnostics/system/systemInformation"
 
 # Alternative NTP-Endpoints, die je nach OPNsense-Version verfuegbar sind.
@@ -547,6 +549,12 @@ class InterfaceDetail:
     mtu: str               # OPNsense liefert das als String — wir uebernehmen 1:1
     macaddr: str
     media: str             # z. B. "1000baseTX <full-duplex>"
+    # Traffic-Counter (kumulativ seit Interface-Up). 0 wenn OPNsense keinen
+    # Traffic-Endpoint bietet oder das OS-Device dort nicht auftaucht.
+    bytes_received: int = 0
+    bytes_transmitted: int = 0
+    packets_received: int = 0
+    packets_transmitted: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -596,16 +604,70 @@ def _extract_first_ip(row: dict[str, Any], key: str) -> tuple[str, int]:
     return "", 0
 
 
+def _fetch_traffic_counters(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> dict[str, tuple[int, int, int, int]]:
+    """Liefert pro OS-Device-Name (em0, igb1, vtnet0) ein Tupel
+    (bytes_rx, bytes_tx, packets_rx, packets_tx).
+
+    Best-Effort: fehlt der Endpoint, kommt ein leeres Dict zurueck und
+    der Aufrufer zeigt die Interfaces halt ohne Traffic-Zahlen. Wir
+    reissen den ganzen Interface-Tab nicht ab weil ein Nebenwidget
+    kaputt ist.
+    """
+    reachable, authenticated, body, ep_available = _safe_fetch(
+        client, target, key, secret, INTERFACES_TRAFFIC_ENDPOINT, method="POST",
+    )
+    if not reachable or not authenticated or not ep_available:
+        return {}
+
+    ifaces = body.get("interfaces") if isinstance(body, dict) else None
+    if not isinstance(ifaces, dict):
+        return {}
+
+    def _int(value: Any) -> int:
+        try:
+            return int(str(value or "0"))
+        except (TypeError, ValueError):
+            return 0
+
+    out: dict[str, tuple[int, int, int, int]] = {}
+    for dev_name, dev_stats in ifaces.items():
+        if not isinstance(dev_stats, dict):
+            continue
+        # OPNsense-Schluesselvariante: "bytes received" (Space)
+        # oder in aelteren Builds "bytes_received" — beide abfangen.
+        bytes_rx = _int(dev_stats.get(
+            "bytes received", dev_stats.get("bytes_received", 0),
+        ))
+        bytes_tx = _int(dev_stats.get(
+            "bytes transmitted", dev_stats.get("bytes_transmitted", 0),
+        ))
+        packets_rx = _int(dev_stats.get(
+            "packets received", dev_stats.get("packets_received", 0),
+        ))
+        packets_tx = _int(dev_stats.get(
+            "packets transmitted", dev_stats.get("packets_transmitted", 0),
+        ))
+        out[str(dev_name)] = (bytes_rx, bytes_tx, packets_rx, packets_tx)
+    return out
+
+
 def fetch_interfaces_detailed(
     client: HttpClient,
     target: HttpTarget,
     key: str,
     secret: str,
 ) -> InterfacesDetailResult:
-    """Vollstaendige Interface-Liste mit IP/MTU/MAC/Link-Status.
+    """Vollstaendige Interface-Liste mit IP/MTU/MAC/Link-Status + Traffic.
 
     Nutzt denselben Endpoint wie ``fetch_interfaces_status``, extrahiert
     aber alle sinnvollen Felder pro Zeile — fuer den Device-Modal-Tab.
+    Danach ein zweiter Best-Effort-Call an den Traffic-Endpoint fuer
+    RX/TX-Counter (fehlt der Endpoint, bleiben die Zahlen bei 0).
     """
     reachable, authenticated, body, ep_available = _safe_fetch(
         client, target, key, secret, INTERFACES_INFO_ENDPOINT, method="POST",
@@ -621,6 +683,8 @@ def fetch_interfaces_detailed(
             endpoint_available=ep_available,
             interfaces=(), summary=summary,
         )
+
+    traffic_by_device = _fetch_traffic_counters(client, target, key, secret)
 
     rows = _extract_rows(body)
     entries: list[InterfaceDetail] = []
@@ -645,6 +709,8 @@ def fetch_interfaces_detailed(
         ipv4, ipv4_bits = _extract_first_ip(row, "ipv4")
         ipv6, ipv6_bits = _extract_first_ip(row, "ipv6")
 
+        rx_b, tx_b, rx_p, tx_p = traffic_by_device.get(device, (0, 0, 0, 0))
+
         entries.append(InterfaceDetail(
             identifier=identifier,
             description=str(row.get("description", "")).strip(),
@@ -659,6 +725,10 @@ def fetch_interfaces_detailed(
             mtu=str(row.get("mtu", "")).strip(),
             macaddr=str(row.get("macaddr", "")).strip(),
             media=str(row.get("media", "")).strip(),
+            bytes_received=rx_b,
+            bytes_transmitted=tx_b,
+            packets_received=rx_p,
+            packets_transmitted=tx_p,
         ))
 
     # Nach Identifier alphabetisch sortieren (wan, lan, opt1..); Interfaces
@@ -676,6 +746,8 @@ __all__ = [
     "CARP_STATUS_ENDPOINT",
     "CarpStatus",
     "INTERFACES_INFO_ENDPOINT",
+    "INTERFACES_RELOAD_ENDPOINT_TEMPLATE",
+    "INTERFACES_TRAFFIC_ENDPOINT",
     "InterfaceDetail",
     "InterfacesDetailResult",
     "InterfacesStatus",

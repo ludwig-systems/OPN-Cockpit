@@ -4,6 +4,43 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Interfaces-Tab V2: RX/TX-Statistiken + Interface-Reload
+
+Der Interface-Tab im Device-Modal zeigt jetzt zusaetzlich zu IP/MTU/MAC
+auch **Traffic-Counter** (kumulativ seit Interface-Up):
+
+- Bytes empfangen / gesendet (human-readable: B, KB, MB, GB, TB)
+- Pakete empfangen / gesendet (k / M / G-Notation)
+- Tooltip mit Roh-Zahlen fuer exakten Vergleich
+
+Datenquelle: ``POST /api/diagnostics/traffic/interface``. Der Endpoint
+wird best-effort abgefragt — fehlt er (aeltere OPNsense), bleibt die
+Traffic-Spalte einfach leer, der Rest des Tabs funktioniert weiter.
+Mapping ueber OS-Device-Namen (em0, vtnet0, igb1).
+
+**Interface-Reload** statt Enable/Disable: pro Interface-Zeile ein
+neuer ``Reload``-Button, der ``POST /api/interfaces/overview/
+reloadInterface/{id}`` triggert (Interface-Stack down + up, kein
+Config-Change). Anwendungsfall: DHCP-Lease-Refresh, Link-Detection
+nach Kabel-Wechsel, Router-Advertisement-Flush.
+
+Confirm-Modal warnt vor der 2-5s-Unterbrechung; nach Erfolg wird der
+Tab nach 3 s neu geladen damit der Link-Status sich stabilisiert.
+Alle Reloads landen im Audit-Log (``interface_reload`` /
+``interface_reload_failed``).
+
+**Kein echtes Enable/Disable in dieser Iteration:** die OPNsense-
+Core-API bietet fuer normale physische/virtuelle Interfaces (WAN,
+LAN, opt*) keinen sauberen Endpoint zum Setzen des ``enabled``-
+Flags — der Wert liegt nur im ``config.xml`` und laesst sich ueber
+die API nur per Voll-Config-Restore aendern (viel zu invasiv fuer
+einen Klick). Fuer VLAN- / LAGG-Interfaces gibt es einen
+``toggleItem``-Endpoint pro Sub-Modul — der ist als V3 vorgemerkt
+sobald der Bedarf konkret ist.
+
+Neuer Endpoint POST ``/api/inventory/devices/{id}/interfaces/{id}/reload``
+mit Regex-Whitelist auf Identifier (Path-Injection-Verteidigung).
+
 ### Unbound-CSV-Import auf mehrere Gateways gleichzeitig
 
 Der bestehende CSV-Import (Host-Overrides + Query-Forwards) rollt jetzt

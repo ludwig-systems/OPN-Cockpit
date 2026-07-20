@@ -4330,7 +4330,7 @@
       meta.appendChild(ipRow);
       row.appendChild(meta);
 
-      // Media / MTU / MAC
+      // Media / MTU / MAC + Traffic (RX/TX)
       const tail = document.createElement('div');
       tail.className = 'ifm-tail';
       if (iface.media) {
@@ -4348,9 +4348,89 @@
         m2.textContent = mtuMac.join(' · ');
         tail.appendChild(m2);
       }
+      const hasTraffic = (iface.bytes_received || iface.bytes_transmitted);
+      if (hasTraffic) {
+        const t = document.createElement('span');
+        t.className = 'ifm-traffic';
+        const rxB = formatTrafficBytes(iface.bytes_received || 0);
+        const txB = formatTrafficBytes(iface.bytes_transmitted || 0);
+        const rxP = formatPackets(iface.packets_received || 0);
+        const txP = formatPackets(iface.packets_transmitted || 0);
+        t.innerHTML =
+          `<span class="ifm-traffic-arrow">↓</span>${rxB}`
+          + ` <span class="ifm-traffic-p">(${rxP} pkt)</span>`
+          + ` <span class="ifm-traffic-arrow">↑</span>${txB}`
+          + ` <span class="ifm-traffic-p">(${txP} pkt)</span>`;
+        t.title =
+          `Kumulativ seit Interface-Up.\n`
+          + `RX: ${iface.bytes_received} B / ${iface.packets_received} pkt\n`
+          + `TX: ${iface.bytes_transmitted} B / ${iface.packets_transmitted} pkt`;
+        tail.appendChild(t);
+      }
       row.appendChild(tail);
 
+      // Actions (Reload-Interface)
+      if (iface.identifier) {
+        const actions = document.createElement('div');
+        actions.className = 'ifm-actions';
+        const reloadBtn = document.createElement('button');
+        reloadBtn.type = 'button';
+        reloadBtn.className = 'btn-secondary btn-secondary-small';
+        reloadBtn.textContent = 'Reload';
+        reloadBtn.title = (
+          'Interface-Stack down + up. Kein Config-Change.\n'
+          + 'Nuetzlich bei haengendem Link oder DHCP-Lease-Refresh.\n'
+          + 'Dauert 2-5 s, kurze Unterbrechung.'
+        );
+        reloadBtn.addEventListener('click', () => {
+          doInterfaceReload(iface).catch((err) => showToast(err.message, true));
+        });
+        actions.appendChild(reloadBtn);
+        row.appendChild(actions);
+      }
+
       list.appendChild(row);
+    }
+  }
+
+  async function doInterfaceReload(iface) {
+    if (!currentDeviceId || !iface.identifier) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    const devName = device ? device.name : currentDeviceId;
+    const label = iface.description
+      ? `${iface.identifier} (${iface.description})`
+      : iface.identifier;
+    const ok = window.confirm(
+      `Interface "${label}" auf "${devName}" neu laden?\n\n`
+      + `Der Interface-Stack wird kurz down + up. Kein Config-Change, `
+      + `aber laufende Verbindungen ueber dieses Interface werden `
+      + `unterbrochen (typisch 2-5 Sekunden).`,
+    );
+    if (!ok) return;
+    try {
+      const r = await apiPost(
+        `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}`
+        + `/interfaces/${encodeURIComponent(iface.identifier)}/reload`,
+        {},
+      );
+      if (r.status === 401) { handleSessionLost(); return; }
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        showToast(data.detail || `Fehler ${r.status}`, true);
+        return;
+      }
+      if (!data.ok) {
+        showToast(`Reload ${iface.identifier} fehlgeschlagen: ${data.message}`, true);
+        return;
+      }
+      showToast(`Interface ${iface.identifier} neu geladen: ${data.message}`);
+      // Nach ~3s nochmal frisch nachladen, damit Link-Status sich stabilisiert.
+      setTimeout(() => {
+        ifmLoadedForDeviceId = null;
+        loadInterfacesTab(true).catch(() => {});
+      }, 3000);
+    } catch (err) {
+      showToast(err.message, true);
     }
   }
 
@@ -5468,6 +5548,31 @@
     if (n < 1024) return `${n} B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
     return `${(n / 1024 / 1024).toFixed(2)} MB`;
+  }
+
+  function formatTrafficBytes(n) {
+    // Interface-Counter (kumulativ) — GB/TB muessen abgedeckt sein.
+    // Bewusst getrennt von formatBytes, das fuer Backups/Uploads bei
+    // MB stehen bleibt.
+    if (!n || n < 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    let unit = 0;
+    let value = n;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    // Bei B/KB keine Nachkommas; ab MB zwei Stellen.
+    const digits = unit <= 1 ? 0 : 2;
+    return `${value.toFixed(digits)} ${units[unit]}`;
+  }
+
+  function formatPackets(n) {
+    if (!n || n < 0) return '0';
+    if (n < 1000) return String(n);
+    if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+    if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+    return `${(n / 1_000_000_000).toFixed(2)}G`;
   }
 
   function doDuplicate() {
