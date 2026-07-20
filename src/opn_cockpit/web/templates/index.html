@@ -2655,6 +2655,29 @@
 
           <div class="form-row">
             <div class="form-col">
+              <div class="form-label-row">
+                <label class="form-label">Ziel-Gateways</label>
+                <div class="unbound-import-target-toggle">
+                  <button type="button" class="btn-link btn-link-inline"
+                          id="unbound-import-target-all">alle</button>
+                  <span aria-hidden="true">·</span>
+                  <button type="button" class="btn-link btn-link-inline"
+                          id="unbound-import-target-none">keins</button>
+                </div>
+              </div>
+              <div class="unbound-import-targets" id="unbound-import-targets">
+                <!-- Dynamisch gefuellt aus state.devices beim Modal-Open -->
+              </div>
+              <div class="form-hint" id="unbound-import-targets-hint">
+                Bei mehr als einem Ziel wird die CSV auf jedes Gateway einzeln
+                angewendet (Pre-Apply-Backup pro Gateway). Ein Fehler auf
+                einem Gateway blockiert die anderen nicht.
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
               <label class="form-checkbox">
                 <input type="checkbox" id="unbound-import-reconcile" />
                 <span>Reconcile-Modus: nicht im CSV enthaltene Eintraege LOESCHEN</span>

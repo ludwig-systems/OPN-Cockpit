@@ -138,6 +138,9 @@ from opn_cockpit.web.api.schemas import (
     UnboundImportAction,
     UnboundImportRequest,
     UnboundImportResponse,
+    UnboundMultiImportDeviceResult,
+    UnboundMultiImportRequest,
+    UnboundMultiImportResponse,
     WidgetCarpEntry,
     WidgetInterfacesEntry,
     WidgetNtpEntry,
@@ -2311,6 +2314,138 @@ def import_device_unbound_forwards(
         subsystem="unbound_forwards",
     )
 
+
+# ----- Multi-Device-Import -------------------------------------------------
+
+
+@router.post(
+    "/unbound/import-multi",
+    response_model=UnboundMultiImportResponse,
+)
+def import_unbound_multi_device(
+    payload: UnboundMultiImportRequest,
+    session: Session = Depends(require_session),
+) -> UnboundMultiImportResponse:
+    """CSV-Bulk-Import auf mehrere Gateways gleichzeitig.
+
+    Ruft die bestehende Single-Device-Logik pro Geraet sequenziell auf
+    und aggregiert die Reports. Ein Geraet-Fehler blockiert die anderen
+    NICHT — der Fehler landet in der ``results``-Liste mit ``ok=False``.
+
+    Semantik:
+    - CSV wird pro Geraet frisch geparst; der Live-Zustand ist pro
+      Geraet unterschiedlich, also auch der Diff (ADD/UPDATE/SKIP).
+    - Bei ``dry_run=true``: nur Preview pro Geraet, keine Aenderungen.
+    - Bei ``dry_run=false``: pro Geraet Pre-Apply-Backup + Actions +
+      reconfigure. Ein failed Backup verwirft NUR dieses Geraet.
+    - ``reconcile=true`` wirkt pro Geraet (Live-only-Eintraege loeschen).
+    """
+    require_write_role(session)
+
+    single_payload = UnboundImportRequest(
+        csv_content=payload.csv_content,
+        reconcile=payload.reconcile,
+        dry_run=payload.dry_run,
+    )
+
+    results: list[UnboundMultiImportDeviceResult] = []
+    parse_errors_first: list[str] = []
+    any_applied = False
+
+    for device_id in payload.device_ids:
+        device = next(
+            (d for d in session.opened.data.devices if d.id == device_id),
+            None,
+        )
+        if device is None:
+            results.append(UnboundMultiImportDeviceResult(
+                device_id=device_id,
+                device_name="(unbekannt)",
+                ok=False,
+                error_summary=f"Geraet '{device_id}' nicht im Tresor.",
+            ))
+            continue
+
+        try:
+            require_device_access(device, session)
+        except HTTPException as exc:
+            results.append(UnboundMultiImportDeviceResult(
+                device_id=device.id,
+                device_name=device.name,
+                ok=False,
+                error_summary=(
+                    exc.detail if isinstance(exc.detail, str)
+                    else "Kein Zugriff auf dieses Geraet."
+                ),
+            ))
+            continue
+
+        try:
+            report = _run_unbound_import(
+                session=session, device=device, payload=single_payload,
+                subsystem=payload.subsystem,
+            )
+        except HTTPException as exc:
+            # Pre-Apply-Backup fail, Parse-Fail beim Apply, o.ae. — der
+            # Aufruf pro Geraet raist. Wir kapseln das statt den ganzen
+            # Multi-Endpoint zu killen.
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            results.append(UnboundMultiImportDeviceResult(
+                device_id=device.id,
+                device_name=device.name,
+                ok=False,
+                error_summary=detail,
+            ))
+            continue
+        except Exception as exc:  # noqa: BLE001
+            results.append(UnboundMultiImportDeviceResult(
+                device_id=device.id,
+                device_name=device.name,
+                ok=False,
+                error_summary=f"Interner Fehler: {exc}",
+            ))
+            continue
+
+        # Parse-Errors sind fuer alle Geraete gleich (dieselbe CSV) —
+        # nur einmal an den Top-Level.
+        if report.parse_errors and not parse_errors_first:
+            parse_errors_first = list(report.parse_errors)
+
+        if report.applied:
+            any_applied = True
+
+        results.append(UnboundMultiImportDeviceResult(
+            device_id=device.id,
+            device_name=device.name,
+            ok=True,
+            report=report,
+        ))
+
+    ok_reports = [r.report for r in results if r.ok and r.report is not None]
+    executed_iso = ""
+    if any_applied:
+        for r in ok_reports:
+            if r.applied and r.executed_at_iso:
+                executed_iso = r.executed_at_iso
+                break
+
+    return UnboundMultiImportResponse(
+        subsystem=payload.subsystem,
+        reconcile=payload.reconcile,
+        dry_run=payload.dry_run,
+        applied=any_applied,
+        parse_errors=parse_errors_first,
+        results=results,
+        total_devices=len(payload.device_ids),
+        ok_device_count=sum(1 for r in results if r.ok),
+        failed_device_count=sum(1 for r in results if not r.ok),
+        add_count=sum(r.add_count for r in ok_reports),
+        update_count=sum(r.update_count for r in ok_reports),
+        delete_count=sum(r.delete_count for r in ok_reports),
+        skip_count=sum(r.skip_count for r in ok_reports),
+        failed_count=sum(r.failed_count for r in ok_reports),
+        executed_at_iso=executed_iso,
+    )
 
 
 # ---------------------------------------------------------------------------

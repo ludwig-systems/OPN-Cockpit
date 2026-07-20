@@ -4,6 +4,32 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Unbound-CSV-Import auf mehrere Gateways gleichzeitig
+
+Der bestehende CSV-Import (Host-Overrides + Query-Forwards) rollt jetzt
+optional auf N Gateways in einem Rutsch aus. Anwendungsfall: dieselbe
+DNS-Konfiguration in mehrere Standorte spielen, ohne pro Box das
+Modal einzeln zu bedienen.
+
+- Neuer Endpoint ``POST /api/inventory/unbound/import-multi`` — nimmt
+  ``device_ids``-Liste, ``subsystem`` (``unbound_hosts`` /
+  ``unbound_forwards``), ``csv_content``, ``reconcile``, ``dry_run``.
+- Semantik: pro Geraet wird die Single-Device-Logik sequenziell
+  aufgerufen. Ein Geraet-Fehler (Kein Zugriff, Pre-Apply-Backup fail,
+  Netzwerk) blockiert die anderen NICHT — er landet als
+  ``ok=False`` in der aggregierten Response.
+- Pre-Apply-Backup und Reconfigure laufen pro Geraet — kein Cross-
+  Device-Rollback, jede Box hat ihre eigene Backup-Line.
+- CSV-Preview zeigt pro Geraet Add/Update/Skip-Counts + aufklappbare
+  Aktions-Liste. Aggregierte Zaehler oben (X/Y Gateways, Sum
+  add/update/delete/skip/failed).
+
+UI: bestehendes CSV-Import-Modal um Ziel-Auswahl erweitert. Aktuelles
+Device ist vorausgewaehlt, ``alle`` / ``keins`` Toggle. Bei einem
+einzigen ausgewaehlten Geraet nutzt der Client den bestehenden
+Single-Endpoint (kein Verhaltens-Regression). Bei ≥2 wird der
+Multi-Endpoint mit Pro-Device-Preview-Rendering aufgerufen.
+
 ### Frontend-Inline-Validierung: FQDN + Domain-Felder
 
 Die bestehenden Client-Side-Validatoren (cidr / ipv4 / host /

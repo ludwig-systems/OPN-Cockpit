@@ -1333,6 +1333,94 @@ class UnboundImportResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Multi-Device-Import (v0.12): dieselbe CSV auf N Gateways in einem Rutsch
+# ---------------------------------------------------------------------------
+
+
+class UnboundMultiImportRequest(BaseModel):
+    """Bulk-Import einer CSV auf mehrere Gateways gleichzeitig.
+
+    Das Preview/Apply-Modell aus :class:`UnboundImportRequest` bleibt
+    erhalten. Der Server ruft die bestehende Single-Device-Logik
+    sequenziell pro Geraet auf und aggregiert die Reports.
+    """
+
+    device_ids: list[str] = Field(..., min_length=1)
+    subsystem: str = Field(..., description="unbound_hosts oder unbound_forwards")
+    csv_content: str = Field(..., max_length=5_000_000)
+    reconcile: bool = False
+    dry_run: bool = True
+
+    @field_validator("subsystem")
+    @classmethod
+    def _check_subsystem(cls, value: str) -> str:
+        v = value.strip()
+        if v not in ("unbound_hosts", "unbound_forwards"):
+            msg = "subsystem muss 'unbound_hosts' oder 'unbound_forwards' sein"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("device_ids")
+    @classmethod
+    def _dedupe_device_ids(cls, ids: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for did in ids:
+            key = did.strip()
+            if key and key not in seen:
+                seen.add(key)
+                out.append(key)
+        if not out:
+            msg = "device_ids darf nicht leer sein"
+            raise ValueError(msg)
+        return out
+
+
+class UnboundMultiImportDeviceResult(BaseModel):
+    """Ergebnis pro Geraet innerhalb eines Multi-Device-Imports.
+
+    ``ok=False`` bedeutet: das Geraet konnte gar nicht bearbeitet werden
+    (Zugriff, Netzwerk, Pre-Apply-Backup). In dem Fall enthaelt
+    ``error_summary`` den Grund und ``report`` ist ``None``. Andere
+    Geraete laufen unabhaengig weiter.
+    """
+
+    device_id: str
+    device_name: str
+    ok: bool
+    error_summary: str = ""
+    report: UnboundImportResponse | None = None
+
+
+class UnboundMultiImportResponse(BaseModel):
+    """Aggregierte Antwort fuer :class:`UnboundMultiImportRequest`."""
+
+    subsystem: str
+    reconcile: bool
+    dry_run: bool
+    applied: bool
+    """False im dry_run oder wenn kein einziges Geraet applied wurde."""
+
+    parse_errors: list[str] = Field(default_factory=list)
+    """CSV-Parse-Fehler. Werden vor dem Fan-out einmal berechnet."""
+
+    results: list[UnboundMultiImportDeviceResult] = Field(default_factory=list)
+
+    total_devices: int = 0
+    ok_device_count: int = 0
+    failed_device_count: int = 0
+
+    add_count: int = 0
+    update_count: int = 0
+    delete_count: int = 0
+    skip_count: int = 0
+    failed_count: int = 0
+    """Aggregierte Zaehler ueber alle Geraete."""
+
+    executed_at_iso: str = ""
+
+
+# ---------------------------------------------------------------------------
 # Kachel-Widgets (v0.11): CARP/HA, Interfaces, NTP
 # ---------------------------------------------------------------------------
 

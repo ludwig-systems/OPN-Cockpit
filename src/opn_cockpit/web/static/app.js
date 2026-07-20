@@ -3564,7 +3564,61 @@
     $('#unbound-import-error').hidden = true;
     $('#unbound-import-preview').hidden = true;
     $('#unbound-import-apply-btn').disabled = true;
+    renderUnboundImportTargets(currentDeviceId);
     $('#unbound-import-modal').hidden = false;
+  }
+
+  function renderUnboundImportTargets(preselectDeviceId) {
+    const box = $('#unbound-import-targets');
+    if (!box) return;
+    box.innerHTML = '';
+    const devices = state.devices || [];
+    if (devices.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'form-hint';
+      empty.textContent = 'Keine Gateways im Tresor.';
+      box.appendChild(empty);
+      return;
+    }
+    // Sortiert nach Name, aktuelles Device oben.
+    const sorted = devices.slice().sort((a, b) => {
+      if (a.id === preselectDeviceId) return -1;
+      if (b.id === preselectDeviceId) return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+    for (const d of sorted) {
+      const label = document.createElement('label');
+      label.className = 'unbound-import-target';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = d.id;
+      cb.checked = d.id === preselectDeviceId;
+      cb.addEventListener('change', () => {
+        // Preview verwerfen, wenn Auswahl sich aendert - die alte Preview
+        // bezog sich auf einen anderen Ziel-Satz.
+        $('#unbound-import-preview').hidden = true;
+        $('#unbound-import-apply-btn').disabled = true;
+      });
+      label.appendChild(cb);
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = d.name;
+      label.appendChild(name);
+      if (d.host) {
+        const host = document.createElement('span');
+        host.className = 'host';
+        host.textContent = d.host;
+        label.appendChild(host);
+      }
+      box.appendChild(label);
+    }
+  }
+
+  function readSelectedTargetDeviceIds() {
+    const box = $('#unbound-import-targets');
+    if (!box) return [];
+    return Array.from(box.querySelectorAll('input[type=checkbox]:checked'))
+      .map((el) => el.value);
   }
 
   function closeUnboundImportModal() {
@@ -3584,9 +3638,13 @@
     });
   }
 
-  function importEndpointPath(subsystem) {
+  function importEndpointPath(subsystem, deviceId) {
     const suffix = subsystem === 'hosts' ? 'unbound-hosts' : 'unbound-forwards';
-    return `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/${suffix}/import`;
+    return `/api/inventory/devices/${encodeURIComponent(deviceId)}/${suffix}/import`;
+  }
+
+  function importMultiEndpointPath() {
+    return `/api/inventory/unbound/import-multi`;
   }
 
   async function submitUnboundImport(dryRun) {
@@ -3594,6 +3652,12 @@
     errBox.hidden = true;
     if (!unboundImportSubsystem || !currentDeviceId) {
       errBox.textContent = 'Modal-Zustand verloren - bitte neu oeffnen.';
+      errBox.hidden = false;
+      return;
+    }
+    const targetIds = readSelectedTargetDeviceIds();
+    if (targetIds.length === 0) {
+      errBox.textContent = 'Bitte mindestens ein Ziel-Gateway auswaehlen.';
       errBox.hidden = false;
       return;
     }
@@ -3611,11 +3675,23 @@
     const originalText = button.textContent;
     button.textContent = dryRun ? 'Berechne…' : 'Wende an…';
     try {
-      const response = await apiPost(importEndpointPath(unboundImportSubsystem), {
-        csv_content: csvText,
-        reconcile,
-        dry_run: dryRun,
-      });
+      let response;
+      if (targetIds.length === 1) {
+        response = await apiPost(
+          importEndpointPath(unboundImportSubsystem, targetIds[0]),
+          { csv_content: csvText, reconcile, dry_run: dryRun },
+        );
+      } else {
+        const subsystem = unboundImportSubsystem === 'hosts'
+          ? 'unbound_hosts' : 'unbound_forwards';
+        response = await apiPost(importMultiEndpointPath(), {
+          device_ids: targetIds,
+          subsystem,
+          csv_content: csvText,
+          reconcile,
+          dry_run: dryRun,
+        });
+      }
       if (response.status === 401) { handleSessionLost(); return; }
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -3624,23 +3700,42 @@
         return;
       }
       const data = await response.json();
-      renderUnboundImportPreview(data);
+      const isMulti = targetIds.length > 1;
+      if (isMulti) {
+        renderUnboundImportMultiPreview(data);
+      } else {
+        renderUnboundImportPreview(data);
+      }
       if (!dryRun && data.applied) {
-        showToast(
-          `Import fertig: ${data.add_count} neu · ${data.update_count} update`
-          + ` · ${data.delete_count} delete · ${data.failed_count} Fehler`,
-        );
-        // Live-Liste neu laden, damit die UI die neuen Eintraege zeigt.
-        if (unboundImportSubsystem === 'hosts') {
-          unbLoadedForDeviceId = null;
-          loadUnboundTab(true).catch(() => {});
+        if (isMulti) {
+          showToast(
+            `Multi-Import fertig: ${data.ok_device_count}/${data.total_devices} Gateways`
+            + ` · ${data.add_count} neu · ${data.update_count} update`
+            + ` · ${data.failed_count} Fehler`,
+          );
         } else {
-          fwdLoadedForDeviceId = null;
-          loadUnboundForwardsTab(true).catch(() => {});
+          showToast(
+            `Import fertig: ${data.add_count} neu · ${data.update_count} update`
+            + ` · ${data.delete_count} delete · ${data.failed_count} Fehler`,
+          );
         }
-        // Wenn keine Fehler: Modal schliessen. Sonst offen lassen damit
-        // der User die Fehlermeldungen sieht.
-        if (data.failed_count === 0) {
+        // Live-Liste des aktuellen Devices neu laden, falls das Modal aus
+        // seinem Tab geoeffnet wurde und dieses Device im Ziel-Satz war.
+        if (targetIds.includes(currentDeviceId)) {
+          if (unboundImportSubsystem === 'hosts') {
+            unbLoadedForDeviceId = null;
+            loadUnboundTab(true).catch(() => {});
+          } else {
+            fwdLoadedForDeviceId = null;
+            loadUnboundForwardsTab(true).catch(() => {});
+          }
+        }
+        // Modal auto-close nur wenn ueberall sauber. Bei Fehlern
+        // laesst der User die Preview zur Diagnose offen.
+        const noFailures = isMulti
+          ? (data.failed_count === 0 && data.failed_device_count === 0)
+          : (data.failed_count === 0);
+        if (noFailures) {
           setTimeout(closeUnboundImportModal, 800);
         }
       }
@@ -3651,6 +3746,133 @@
       button.disabled = false;
       button.textContent = originalText;
     }
+  }
+
+  function renderUnboundImportMultiPreview(data) {
+    $('#unbound-import-preview').hidden = false;
+
+    // Aggregierte Summary + Badges
+    const summary = $('#unbound-import-summary');
+    summary.innerHTML = '';
+    const scopeBadge = document.createElement('span');
+    scopeBadge.className = 'badge scope';
+    scopeBadge.textContent = `${data.ok_device_count}/${data.total_devices} Gateways`;
+    summary.appendChild(scopeBadge);
+    const badges = [
+      ['add', data.add_count, 'neu'],
+      ['update', data.update_count, 'update'],
+      ['delete', data.delete_count, 'delete'],
+      ['skip', data.skip_count, 'skip'],
+    ];
+    if (data.applied) badges.push(['failed', data.failed_count, 'Fehler']);
+    for (const [kind, count, label] of badges) {
+      if (!count && kind !== 'failed') continue;
+      if (kind === 'failed' && !data.applied) continue;
+      const b = document.createElement('span');
+      b.className = `badge ${kind}`;
+      b.textContent = `${count} ${label}`;
+      summary.appendChild(b);
+    }
+    if (data.failed_device_count > 0) {
+      const b = document.createElement('span');
+      b.className = 'badge failed';
+      b.textContent = `${data.failed_device_count} Gateway-Fehler`;
+      summary.appendChild(b);
+    }
+    const totalText = document.createElement('span');
+    totalText.style.color = 'var(--text-subtle)';
+    totalText.textContent = data.applied
+      ? `Angewendet: ${data.executed_at_iso || 'jetzt'}`
+      : `Preview - keine Aenderungen ausgefuehrt.`;
+    summary.appendChild(totalText);
+
+    // Parse-Errors (einmal — CSV ist ueberall gleich)
+    const errBox = $('#unbound-import-parse-errors');
+    if (data.parse_errors && data.parse_errors.length) {
+      errBox.hidden = false;
+      errBox.textContent =
+        `CSV-Fehler (bitte korrigieren, dann erneut Preview):\n\n`
+        + data.parse_errors.join('\n');
+    } else {
+      errBox.hidden = true;
+    }
+
+    // Pro-Device-Boxes
+    const list = $('#unbound-import-actions-list');
+    list.innerHTML = '';
+    for (const res of (data.results || [])) {
+      const box = document.createElement('div');
+      box.className = 'unbound-import-device-box';
+      if (!res.ok) box.classList.add('failed');
+
+      const header = document.createElement('div');
+      header.className = 'unbound-import-device-header';
+      const title = document.createElement('span');
+      title.className = 'device-name';
+      title.textContent = res.device_name;
+      header.appendChild(title);
+
+      if (res.ok && res.report) {
+        const rep = res.report;
+        const stats = document.createElement('span');
+        stats.className = 'device-stats';
+        const parts = [
+          `${rep.add_count} neu`,
+          `${rep.update_count} upd`,
+          `${rep.delete_count} del`,
+          `${rep.skip_count} skip`,
+        ];
+        if (rep.applied) parts.push(`${rep.failed_count} err`);
+        stats.textContent = parts.join(' · ');
+        header.appendChild(stats);
+      } else {
+        const errTag = document.createElement('span');
+        errTag.className = 'device-stats failed';
+        errTag.textContent = 'Fehler';
+        header.appendChild(errTag);
+      }
+      box.appendChild(header);
+
+      if (!res.ok) {
+        const msg = document.createElement('div');
+        msg.className = 'unbound-import-device-error';
+        msg.textContent = res.error_summary || 'Unbekannter Fehler.';
+        box.appendChild(msg);
+      } else if (res.report && (res.report.actions || []).length > 0) {
+        const details = document.createElement('details');
+        details.className = 'unbound-import-device-actions';
+        const summ = document.createElement('summary');
+        summ.textContent = `${res.report.actions.length} Aktionen anzeigen`;
+        details.appendChild(summ);
+        for (const a of res.report.actions) {
+          const row = document.createElement('div');
+          row.className = 'unbound-import-action-row';
+          const kind = document.createElement('span');
+          kind.className = `kind ${a.action}`;
+          kind.textContent = a.action;
+          row.appendChild(kind);
+          const ident = document.createElement('span');
+          ident.className = 'identity';
+          ident.textContent = a.identity;
+          row.appendChild(ident);
+          const s = document.createElement('span');
+          s.className = 'summary';
+          s.textContent = a.summary || '';
+          row.appendChild(s);
+          details.appendChild(row);
+        }
+        box.appendChild(details);
+      }
+      list.appendChild(box);
+    }
+
+    // Apply-Button aktivieren nur bei gueltiger Preview mit
+    // tatsaechlichen Aenderungen und ohne Parse-Fehler.
+    const totalChanges = data.add_count + data.update_count + data.delete_count;
+    const canApply = !data.applied
+      && (!data.parse_errors || data.parse_errors.length === 0)
+      && totalChanges > 0;
+    $('#unbound-import-apply-btn').disabled = !canApply;
   }
 
   function renderUnboundImportPreview(data) {
@@ -9232,6 +9454,30 @@
     if (impReconcile) {
       impReconcile.addEventListener('change', () => {
         // Reconcile-Toggle bricht die berechnete Preview - user muss neu preview'n
+        $('#unbound-import-preview').hidden = true;
+        $('#unbound-import-apply-btn').disabled = true;
+      });
+    }
+    const impTargetAll = $('#unbound-import-target-all');
+    if (impTargetAll) {
+      impTargetAll.addEventListener('click', () => {
+        const box = $('#unbound-import-targets');
+        if (!box) return;
+        box.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+          cb.checked = true;
+        });
+        $('#unbound-import-preview').hidden = true;
+        $('#unbound-import-apply-btn').disabled = true;
+      });
+    }
+    const impTargetNone = $('#unbound-import-target-none');
+    if (impTargetNone) {
+      impTargetNone.addEventListener('click', () => {
+        const box = $('#unbound-import-targets');
+        if (!box) return;
+        box.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+          cb.checked = false;
+        });
         $('#unbound-import-preview').hidden = true;
         $('#unbound-import-apply-btn').disabled = true;
       });
