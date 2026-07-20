@@ -128,11 +128,17 @@ from opn_cockpit.web.api.schemas import (
     RouteEntryResponse,
     RuleEntryResponse,
     SafetyNetTestResponse,
+    KachelWidgetsEntry,
+    KachelWidgetsRequest,
+    KachelWidgetsResponse,
     SyncAliasRequest,
     SyncAliasResponse,
     UnboundImportAction,
     UnboundImportRequest,
     UnboundImportResponse,
+    WidgetCarpEntry,
+    WidgetInterfacesEntry,
+    WidgetNtpEntry,
     SyncUnboundHostRequest,
     SyncUnboundHostResponse,
     TagSummary,
@@ -392,6 +398,123 @@ def heartbeat(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(probe, active_targets))
     return HeartbeatResponse(results=maintenance_results + results)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/inventory/kachel-widgets  - Batch CARP/Interfaces/NTP
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/kachel-widgets",
+    response_model=KachelWidgetsResponse,
+)
+def kachel_widgets(
+    payload: KachelWidgetsRequest,
+    session: Session = Depends(require_session),
+) -> KachelWidgetsResponse:
+    """Sammelt CARP/HA, Interface-Link-Status und NTP-Zeit fuer N Boxen.
+
+    Ein HTTP-Call pro Widget pro Box (3 Calls), parallel via ThreadPool.
+    Endpoints sind defensiv — 404 landet als ``endpoint_available=false``
+    und das UI zeigt ``n/a`` statt zu crashen.
+
+    Wird vom Frontend im 60-Sekunden-Rhythmus abgefragt (kein Live-Poll —
+    die Widget-Werte aendern sich selten und wir wollen die OPNsense-API
+    nicht ueberrennen).
+    """
+    from opn_cockpit.core.health_widgets import (  # noqa: PLC0415
+        fetch_carp_status,
+        fetch_interfaces_status,
+        fetch_ntp_status,
+    )
+
+    visible_devices = filter_devices_for(session.opened.data.devices, session)
+    if payload.device_ids:
+        wanted = set(payload.device_ids)
+        targets = [d for d in visible_devices if d.id in wanted]
+    else:
+        targets = list(visible_devices)
+
+    if not targets:
+        return KachelWidgetsResponse(results=[])
+
+    timestamp = _iso_now()
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+
+    def _probe(vd: VaultDevice) -> KachelWidgetsEntry:
+        # Maintenance-Boxes ueberspringen wir - sonst tauchen sie mit
+        # "unreachable" auf obwohl sie nur bewusst offline sind.
+        if vd.maintenance:
+            return KachelWidgetsEntry(
+                device_id=vd.id,
+                checked_at_iso=timestamp,
+                carp=WidgetCarpEntry(
+                    reachable=False, authenticated=False,
+                    endpoint_available=False, state="unknown",
+                    vip_count=0, master_count=0, backup_count=0,
+                    init_count=0, maintenance_mode=False,
+                    summary="Wartungsmodus",
+                ),
+                interfaces=WidgetInterfacesEntry(
+                    reachable=False, authenticated=False,
+                    endpoint_available=False, state="unknown",
+                    total=0, up_count=0, down_count=0, down_names=[],
+                    summary="Wartungsmodus",
+                ),
+                ntp=WidgetNtpEntry(
+                    reachable=False, authenticated=False,
+                    endpoint_available=False, state="unknown",
+                    system_time="", summary="Wartungsmodus",
+                ),
+            )
+        tgt = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
+        with HttpClient(targets=[tgt], tuning=tuning) as client:
+            carp = fetch_carp_status(client, tgt, vd.api_key, vd.api_secret)
+            ifaces = fetch_interfaces_status(client, tgt, vd.api_key, vd.api_secret)
+            ntp = fetch_ntp_status(client, tgt, vd.api_key, vd.api_secret)
+        return KachelWidgetsEntry(
+            device_id=vd.id,
+            checked_at_iso=timestamp,
+            carp=WidgetCarpEntry(
+                reachable=carp.reachable,
+                authenticated=carp.authenticated,
+                endpoint_available=carp.endpoint_available,
+                state=carp.state,
+                vip_count=carp.vip_count,
+                master_count=carp.master_count,
+                backup_count=carp.backup_count,
+                init_count=carp.init_count,
+                maintenance_mode=carp.maintenance_mode,
+                summary=carp.summary,
+            ),
+            interfaces=WidgetInterfacesEntry(
+                reachable=ifaces.reachable,
+                authenticated=ifaces.authenticated,
+                endpoint_available=ifaces.endpoint_available,
+                state=ifaces.state,
+                total=ifaces.total,
+                up_count=ifaces.up_count,
+                down_count=ifaces.down_count,
+                down_names=list(ifaces.down_names),
+                summary=ifaces.summary,
+            ),
+            ntp=WidgetNtpEntry(
+                reachable=ntp.reachable,
+                authenticated=ntp.authenticated,
+                endpoint_available=ntp.endpoint_available,
+                state=ntp.state,
+                system_time=ntp.system_time,
+                summary=ntp.summary,
+            ),
+        )
+
+    workers = min(HEARTBEAT_MAX_WORKERS, len(targets))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(_probe, targets))
+    session.touch()
+    return KachelWidgetsResponse(results=results)
 
 
 # ---------------------------------------------------------------------------

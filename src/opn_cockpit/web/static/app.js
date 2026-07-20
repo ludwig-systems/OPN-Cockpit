@@ -226,6 +226,7 @@
     vaultSettings: null,           // gecachte /api/vaults/settings - fuer Opt-In-Features wie Drift
     firmware: {},                  // device_id -> { version, status, update_available, summary, checked_at_iso }
     firmwareLoading: false,
+    widgetsByDevice: {},           // device_id -> { carp, interfaces, ntp, checked_at_iso }
     serverMode: 'vault',           // 'vault' (single) | 'user-db' (multi)
     bootstrapStatus: 'single-user', // single-user | needs-admin | needs-vault-unlock | ready
   };
@@ -964,6 +965,7 @@
     checkForUpdate();
     startTlsPolling();
     startFirmwareRolloutPolling();
+    startKachelWidgetsPolling();
   }
 
   function applyMultiUserVisibility() {
@@ -1558,8 +1560,102 @@
       article.appendChild(driftBadge);
     }
 
+    // Kachel-Widgets (v0.11): CARP/HA · Interfaces · NTP.
+    // Nur rendern wenn Daten vorliegen — sonst bleibt die Kachel kompakter,
+    // bis der Widgets-Poll die Werte nachlaedt (60-s-Zyklus).
+    const widgets = state.widgetsByDevice[device.id];
+    if (widgets) {
+      const widgetsRow = document.createElement('div');
+      widgetsRow.className = 'card-widgets';
+      widgetsRow.appendChild(_renderWidgetChip('carp', 'CARP', widgets.carp));
+      widgetsRow.appendChild(_renderWidgetChip('ifaces', 'Ports', widgets.interfaces));
+      widgetsRow.appendChild(_renderWidgetChip('ntp', 'NTP', widgets.ntp));
+      article.appendChild(widgetsRow);
+    }
+
     article.addEventListener('click', () => openDeviceModal(device.id));
     return article;
+  }
+
+  function _renderWidgetChip(kind, label, data) {
+    // Chip = kompakte Farb-Zeile (Icon + Label + Kurztext). Kein Klick-
+    // Handler - die Info ist informativ, Details liegen im Tooltip.
+    const chip = document.createElement('div');
+    chip.className = `card-widget-chip widget-${kind} widget-state-${(data && data.state) || 'unknown'}`;
+    const isMaintenance = data && data.summary === 'Wartungsmodus';
+    if (isMaintenance) {
+      chip.classList.add('widget-maintenance');
+    }
+    const dot = document.createElement('span');
+    dot.className = 'widget-dot';
+    chip.appendChild(dot);
+    const lbl = document.createElement('span');
+    lbl.className = 'widget-label';
+    lbl.textContent = label;
+    chip.appendChild(lbl);
+    const val = document.createElement('span');
+    val.className = 'widget-value';
+    val.textContent = _widgetShortText(kind, data);
+    chip.appendChild(val);
+    // Tooltip mit voller Info
+    chip.title = _widgetTooltip(kind, data);
+    return chip;
+  }
+
+  function _widgetShortText(kind, data) {
+    if (!data) return 'n/a';
+    if (!data.reachable) return 'offline';
+    if (!data.authenticated) return 'auth';
+    if (!data.endpoint_available) return 'n/a';
+    if (kind === 'carp') {
+      if (data.vip_count === 0) return 'kein HA';
+      if (data.maintenance_mode) return 'Wartung';
+      if (data.master_count === data.vip_count) return `${data.vip_count} MASTER`;
+      if (data.backup_count === data.vip_count) return `${data.vip_count} BACKUP`;
+      return `M${data.master_count}/B${data.backup_count}`;
+    }
+    if (kind === 'ifaces') {
+      return `${data.up_count}/${data.total}`;
+    }
+    if (kind === 'ntp') {
+      return data.system_time ? 'sync' : '—';
+    }
+    return '';
+  }
+
+  function _widgetTooltip(kind, data) {
+    if (!data) return 'Widget: keine Daten geladen';
+    if (kind === 'carp') {
+      if (!data.endpoint_available) {
+        return 'CARP/HA: OPNsense-Version hat den VIP-Status-Endpoint nicht.';
+      }
+      const lines = [`CARP/HA: ${data.summary}`];
+      if (data.vip_count > 0) {
+        lines.push(`VIPs: ${data.vip_count}`);
+        lines.push(`MASTER: ${data.master_count} · BACKUP: ${data.backup_count} · INIT: ${data.init_count}`);
+        if (data.maintenance_mode) lines.push('Persistent CARP Maintenance Mode aktiv.');
+      }
+      return lines.join('\n');
+    }
+    if (kind === 'ifaces') {
+      if (!data.endpoint_available) {
+        return 'Interfaces: Endpoint nicht verfuegbar.';
+      }
+      const lines = [`Interfaces: ${data.up_count}/${data.total} up`];
+      if (data.down_count > 0) {
+        lines.push(`Down: ${data.down_names.join(', ')}`);
+      }
+      return lines.join('\n');
+    }
+    if (kind === 'ntp') {
+      if (!data.endpoint_available) {
+        return 'NTP: kein System-Info-Endpoint. Fuer echten Sync-Status das os-ntp-Plugin installieren.';
+      }
+      return data.system_time
+        ? `System-Zeit: ${data.system_time}`
+        : (data.summary || 'System-Zeit nicht auslesbar');
+    }
+    return data.summary || '';
   }
 
   function computeReachability(hb) {
@@ -7830,6 +7926,52 @@
     tlsPollTimer = setInterval(() => {
       pollTlsState().catch(() => {});
     }, 60000);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Kachel-Widgets (v0.11): CARP/HA · Interfaces · NTP
+  // ---------------------------------------------------------------------------
+
+  let kachelWidgetsPollTimer = null;
+  const KACHEL_WIDGETS_POLL_INTERVAL_MS = 60_000;
+
+  function startKachelWidgetsPolling() {
+    if (kachelWidgetsPollTimer) return;
+    // Erst nach kurzem Delay - der Heartbeat priorisiert.
+    setTimeout(() => pollKachelWidgets().catch(() => {}), 2000);
+    kachelWidgetsPollTimer = setInterval(() => {
+      pollKachelWidgets().catch(() => {});
+    }, KACHEL_WIDGETS_POLL_INTERVAL_MS);
+  }
+
+  function stopKachelWidgetsPolling() {
+    if (kachelWidgetsPollTimer) {
+      clearInterval(kachelWidgetsPollTimer);
+      kachelWidgetsPollTimer = null;
+    }
+  }
+
+  async function pollKachelWidgets() {
+    if (!state.devices || state.devices.length === 0) return;
+    try {
+      const response = await apiPost('/api/inventory/kachel-widgets', {
+        // ohne device_ids -> alle sichtbaren; das Backend filtert per ACL.
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) return;
+      const data = await response.json();
+      for (const entry of (data.results || [])) {
+        state.widgetsByDevice[entry.device_id] = {
+          carp: entry.carp,
+          interfaces: entry.interfaces,
+          ntp: entry.ntp,
+          checked_at_iso: entry.checked_at_iso,
+        };
+      }
+      renderGrid();
+    } catch (_err) {
+      // stumme Toleranz - Widgets sind optional, sollen nichts blockieren.
+    }
   }
 
   function stopTlsPolling() {

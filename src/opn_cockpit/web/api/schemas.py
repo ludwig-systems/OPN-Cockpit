@@ -1324,6 +1324,78 @@ class UnboundImportResponse(BaseModel):
     """ISO-Timestamp beim Apply. Leer im dry_run."""
 
 
+# ---------------------------------------------------------------------------
+# Kachel-Widgets (v0.11): CARP/HA, Interfaces, NTP
+# ---------------------------------------------------------------------------
+
+
+class WidgetCarpEntry(BaseModel):
+    """CARP/HA-Widget-Zustand einer Box."""
+
+    reachable: bool
+    authenticated: bool
+    endpoint_available: bool
+    state: str
+    """``ok`` / ``warn`` / ``fail`` / ``unknown``."""
+
+    vip_count: int
+    master_count: int
+    backup_count: int
+    init_count: int
+    maintenance_mode: bool
+    summary: str
+
+
+class WidgetInterfacesEntry(BaseModel):
+    """Interfaces-Widget-Zustand einer Box."""
+
+    reachable: bool
+    authenticated: bool
+    endpoint_available: bool
+    state: str
+    total: int
+    up_count: int
+    down_count: int
+    down_names: list[str] = Field(default_factory=list)
+    summary: str
+
+
+class WidgetNtpEntry(BaseModel):
+    """NTP-Widget-Zustand einer Box."""
+
+    reachable: bool
+    authenticated: bool
+    endpoint_available: bool
+    state: str
+    system_time: str
+    summary: str
+
+
+class KachelWidgetsEntry(BaseModel):
+    """Aggregierte Widgets fuer eine einzelne Kachel."""
+
+    device_id: str
+    checked_at_iso: str
+    carp: WidgetCarpEntry
+    interfaces: WidgetInterfacesEntry
+    ntp: WidgetNtpEntry
+
+
+class KachelWidgetsRequest(BaseModel):
+    """Batch-Abfrage der Kachel-Widgets fuer mehrere Geraete.
+
+    Wenn ``device_ids`` leer/nicht gesetzt ist, sammeln wir alle
+    sichtbaren Geraete des Users. Gefaehrlich bei sehr grossem Inventar —
+    Cockpit uebergibt sonst typisch nur die aktuell sichtbaren Karten.
+    """
+
+    device_ids: list[str] | None = None
+
+
+class KachelWidgetsResponse(BaseModel):
+    results: list[KachelWidgetsEntry]
+
+
 class PlannedActionResponse(BaseModel):
     device_id: str
     device_name: str

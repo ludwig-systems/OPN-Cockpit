@@ -2,7 +2,44 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV Bulk-Import
+## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets
+
+### Kachel-Widgets: CARP/HA · Interfaces · NTP
+
+Jede Geraete-Kachel bekommt ab v0.11 eine untere Chip-Zeile mit drei
+Status-Widgets, die 60 Sekunden aktualisiert werden:
+
+- **CARP** — Master/Backup-Zaehler + Maintenance-Mode-Flag.
+  ``2 MASTER`` gruen bei Master-Node, ``BACKUP`` gruen bei Backup-Node,
+  ``M1/B1`` gelb wenn Master/Backup gemischt (Split-Brain oder
+  Uebergang), ``kein HA`` grau wenn keine VIPs konfiguriert.
+- **Ports** — ``4/4`` gruen wenn alle Interfaces up, ``3/4`` gelb
+  wenn ≥25% down; Tooltip listet die down-Namen (max. 10). Deaktivierte
+  Interfaces werden ignoriert.
+- **NTP** — Best-Effort via ``systemInformation``-Endpoint. ``sync``
+  gruen wenn OPNsense eine System-Zeit meldet. Ohne dedizierten
+  OPNsense-NTP-Endpoint bleibt das Widget ``n/a`` — Cockpit dokumentiert
+  im Tooltip dass fuer echten Peer-State das ``os-ntp``-Plugin noetig
+  waere.
+
+**Kachel-Layout leicht groesser**: Grid-Spalten von ``282px`` auf
+``320px`` erhoeht, damit die drei Chips nicht umbrechen.
+
+**Defensive Endpoints**: Alle drei OPNsense-Endpoints
+(``/api/diagnostics/interface/get_vip_status``,
+``/api/interfaces/overview/interfacesInfo``,
+``/api/diagnostics/system/systemInformation``) sind optional — 404
+oder Schema-Drift wird als ``unknown``-State abgefangen. Kein Widget
+soll das UI blockieren wenn ein OPNsense-Release die Endpoint-Form
+aendert.
+
+**Neuer Endpoint**: ``POST /api/inventory/kachel-widgets`` (Batch fuer
+mehrere Boxen, ThreadPool-parallel).
+
+**Tests**: 18 neue Unit-Tests in
+``tests/unit/core/test_health_widgets.py`` fuer alle drei Widgets:
+State-Klassifikation, Schema-Varianten (rows-Liste vs. Dict-of-Rows),
+404-Fallback, NTP-Kandidaten-Reihenfolge.
 
 ### CSV Import/Export fuer Unbound DNS
 
