@@ -657,6 +657,69 @@ class FirmwareUpgradeStatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Firmware-Rollout (Iteration B)
+# ---------------------------------------------------------------------------
+
+
+class FirmwareRolloutRequest(BaseModel):
+    """Startet einen Firmware-Rollout ueber mehrere Geraete.
+
+    ``mode`` steuert ``update`` (Package-Aktualisierung) vs ``upgrade``
+    (Major-Release mit Reboot).
+
+    ``continue_on_error`` bestimmt, ob nach einem Fehler weitergemacht
+    wird (True) oder der Rollout abbricht (False, Default). Ein
+    kaputtes Update sollte nicht durch die gesamte Firma laufen.
+    """
+
+    device_ids: list[str] = Field(..., min_length=1, max_length=200)
+    mode: str = Field("update", pattern="^(update|upgrade)$")
+    continue_on_error: bool = False
+
+
+class FirmwareRolloutDeviceEntry(BaseModel):
+    """Status eines einzelnen Geraets innerhalb eines Rollouts."""
+
+    device_id: str
+    device_name: str
+    position: int
+    state: str
+    """queued / triggered / running / rebooting / verifying / done / failed / skipped."""
+
+    version_before: str = ""
+    target_version: str = ""
+    version_after: str = ""
+    started_at_ms: int = 0
+    finished_at_ms: int = 0
+    log: str = ""
+    summary: str = ""
+
+
+class FirmwareRolloutResponse(BaseModel):
+    """Aktueller Rollout-Zustand fuer den UI-Banner-Poll."""
+
+    active: bool
+    """True wenn ein Rollout in ``running`` ist oder ein terminaler Rollout
+    innerhalb der Report-TTL sichtbar bleibt."""
+
+    rollout_id: str = ""
+    state: str = ""
+    """running / done / failed / cancelled — leer wenn kein Rollout aktiv."""
+
+    mode: str = ""
+    initiator: str = ""
+    continue_on_error: bool = False
+    cancel_requested: bool = False
+    created_at_ms: int = 0
+    finished_at_ms: int = 0
+    devices: list[FirmwareRolloutDeviceEntry] = Field(default_factory=list)
+    total: int = 0
+    done_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+
+
+# ---------------------------------------------------------------------------
 # Cert-Inventur (v0.7 Safety-Net #3)
 # ---------------------------------------------------------------------------
 

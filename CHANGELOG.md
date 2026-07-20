@@ -2,7 +2,53 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware-Install (Iteration A)
+## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware-Rollout
+
+### Firmware-Rollout: Sammelaktion pro Tag-Gruppe (Iteration B)
+
+Aufbauend auf dem Single-Device-Install aus Iteration A ist ab v0.11
+auch die **sequenzielle Sammelaktion ueber mehrere Boxen** verfuegbar:
+Sidebar → **„Firmware-Rollout"** → Tag-Filter + Multi-Select + Modus
+(`update` / `upgrade`) + `continue_on_error`-Flag → Bestaetigen.
+
+**Sequenziell**, eine Box zur Zeit — sonst rebooten mehrere gleichzeitig
+und ganze VLANs kappen. Der Watcher pollt pro Box `upgradestatus`,
+erkennt bei Major-Upgrade den Reboot (Unreachable-Toleranz 15 Min),
+prueft nach Rueckkehr die Firmware-Version und macht die naechste Box.
+
+**Persistenz:** State liegt in
+`<app_data>/state/firmware-rollout.json`. Cockpit-Restart ist
+resistent — nach dem Restart adoptiert der Watcher den laufenden
+Rollout, sobald jemand den Tresor entsperrt (Session-Adoption via
+`vault_path`, analog RetryWatcher/SafetyNetWatcher).
+
+**Persistentes UI-Banner** unter dem TLS-Banner zeigt den Rollout-
+Progress live an (10-s-Poll). Aktive Box + Status pro Zeile. Buttons
+„Abbrechen" (laufende Box wird zu Ende gefahren, Rest wird skipped) und
+„Ausblenden" (nur bei terminalem Rollout).
+
+**Neue Endpoints:**
+- `POST   /api/firmware/rollout` mit `{device_ids, mode, continue_on_error}`
+  — Rolle `write`. Ein Rollout zur Zeit; zweiter Submit → **409 Busy**.
+- `GET    /api/firmware/rollout` — Banner-Poll (Progress + Device-States).
+- `POST   /api/firmware/rollout/cancel` — laufende Box zu Ende, Rest skip.
+- `DELETE /api/firmware/rollout` — terminierten Rollout aus dem Banner
+  raus (nur wenn `done`/`failed`/`cancelled`).
+
+**Neue Audit-Events:**
+`FIRMWARE_ROLLOUT_STARTED`, `FIRMWARE_ROLLOUT_COMPLETED` (mit
+Endzustand-String im `action`-Feld), `FIRMWARE_ROLLOUT_CANCELLED` sowie
+`FIRMWARE_UPDATE_STARTED/COMPLETED/FAILED` pro Box mit Rollout-Referenz
+in `summary`.
+
+**Timeouts** (defensiv gesetzt, tests-freundlich anpassbar):
+- pro Box: 30 min Running-Phase, danach Fehler
+- pro Reboot-Fenster: 15 min Unreachable-Toleranz
+- pro Rollout: 6 h Total-Cap
+
+**Tests:** 11 neue Unit-Tests in
+`tests/unit/web/test_firmware_rollout_watcher.py` fuer
+Submit-Kontrakt, Cancel, Terminal-Clear, Persistenz-Round-Trip.
 
 ### Firmware-Install: Single-Device (Iteration A)
 

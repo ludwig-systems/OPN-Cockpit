@@ -963,6 +963,7 @@
     startRetryPolling();
     checkForUpdate();
     startTlsPolling();
+    startFirmwareRolloutPolling();
   }
 
   function applyMultiUserVisibility() {
@@ -4253,6 +4254,332 @@
     if (log && data.log) {
       log.textContent = data.log;
       log.scrollTop = log.scrollHeight;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Firmware-Rollout (Iteration B): Sammelaktion pro Tag-Gruppe
+  // ---------------------------------------------------------------------------
+
+  let fwRolloutPollTimer = null;
+  let fwRolloutModalSelected = new Set();
+
+  function openFirmwareRolloutModal() {
+    // Reset State
+    fwRolloutModalSelected = new Set();
+    $('#fw-rollout-mode').value = 'update';
+    $('#fw-rollout-continue').checked = false;
+    $('#firmware-rollout-error').hidden = true;
+
+    // Tag-Filter befuellen aus state.devices
+    const filter = $('#fw-rollout-tag-filter');
+    filter.innerHTML = '<option value="">Alle Geraete zeigen</option>';
+    const tags = new Set();
+    for (const d of state.devices) {
+      for (const t of (d.tags || [])) tags.add(t);
+    }
+    for (const t of Array.from(tags).sort()) {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      filter.appendChild(opt);
+    }
+    filter.value = '';
+
+    renderFirmwareRolloutList();
+    $('#firmware-rollout-modal').hidden = false;
+  }
+
+  function closeFirmwareRolloutModal() {
+    $('#firmware-rollout-modal').hidden = true;
+    fwRolloutModalSelected = new Set();
+  }
+
+  function renderFirmwareRolloutList() {
+    const list = $('#fw-rollout-list');
+    list.innerHTML = '';
+    const filterTag = $('#fw-rollout-tag-filter').value;
+    const visible = filterTag
+      ? state.devices.filter((d) => (d.tags || []).includes(filterTag))
+      : state.devices;
+
+    if (visible.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.padding = '18px';
+      empty.style.textAlign = 'center';
+      empty.style.color = 'var(--text-subtle)';
+      empty.textContent = filterTag
+        ? `Keine Geraete mit Tag "${filterTag}".`
+        : 'Keine Geraete im Inventar.';
+      list.appendChild(empty);
+      updateRolloutCount();
+      return;
+    }
+
+    for (const device of visible) {
+      const row = document.createElement('div');
+      row.className = 'fw-rollout-row';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.deviceId = device.id;
+      checkbox.checked = fwRolloutModalSelected.has(device.id);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) fwRolloutModalSelected.add(device.id);
+        else fwRolloutModalSelected.delete(device.id);
+        updateRolloutCount();
+      });
+      row.appendChild(checkbox);
+
+      const name = document.createElement('span');
+      name.className = 'fw-rollout-row-name';
+      name.textContent = device.name;
+      row.appendChild(name);
+
+      if (device.tags && device.tags.length) {
+        const tags = document.createElement('span');
+        tags.className = 'fw-rollout-row-tags';
+        for (const t of device.tags) {
+          const tag = document.createElement('span');
+          tag.className = 'tag';
+          tag.textContent = t;
+          tags.appendChild(tag);
+        }
+        row.appendChild(tags);
+      }
+
+      const fw = state.firmware[device.id];
+      const fwSpan = document.createElement('span');
+      fwSpan.className = 'fw-rollout-row-fw';
+      if (!fw || !fw.version || fw.version === 'unknown') {
+        fwSpan.classList.add('no-info');
+        fwSpan.textContent = 'kein Status';
+      } else if (fw.update_available) {
+        fwSpan.classList.add('has-update');
+        fwSpan.textContent = fw.new_version
+          ? `v${fw.version} → v${fw.new_version}`
+          : `v${fw.version} (Update)`;
+      } else {
+        fwSpan.textContent = `v${fw.version} (aktuell)`;
+      }
+      row.appendChild(fwSpan);
+
+      list.appendChild(row);
+    }
+    updateRolloutCount();
+  }
+
+  function updateRolloutCount() {
+    $('#fw-rollout-count').textContent =
+      `${fwRolloutModalSelected.size} ausgewaehlt`;
+  }
+
+  function selectAllRollout() {
+    const rows = document.querySelectorAll('#fw-rollout-list input[type="checkbox"]');
+    for (const c of rows) {
+      c.checked = true;
+      fwRolloutModalSelected.add(c.dataset.deviceId);
+    }
+    updateRolloutCount();
+  }
+
+  function selectNoneRollout() {
+    const rows = document.querySelectorAll('#fw-rollout-list input[type="checkbox"]');
+    for (const c of rows) {
+      c.checked = false;
+      fwRolloutModalSelected.delete(c.dataset.deviceId);
+    }
+    updateRolloutCount();
+  }
+
+  function selectUpdatesOnlyRollout() {
+    fwRolloutModalSelected = new Set();
+    for (const d of state.devices) {
+      const fw = state.firmware[d.id];
+      if (fw && fw.update_available) fwRolloutModalSelected.add(d.id);
+    }
+    renderFirmwareRolloutList();
+  }
+
+  async function submitFirmwareRollout() {
+    const box = $('#firmware-rollout-error');
+    box.hidden = true;
+    const ids = Array.from(fwRolloutModalSelected);
+    if (ids.length === 0) {
+      box.textContent = 'Mindestens ein Geraet auswaehlen.';
+      box.hidden = false;
+      return;
+    }
+    const mode = $('#fw-rollout-mode').value;
+    const continueOnError = $('#fw-rollout-continue').checked;
+
+    // Nochmal Confirm mit Zusammenfassung
+    const modeLabel = mode === 'upgrade' ? 'Major-Upgrade (mit Reboot!)' : 'Package-Update';
+    const contLabel = continueOnError
+      ? 'Bei Fehler weitermachen'
+      : 'Bei erstem Fehler abbrechen';
+    const prompt =
+      `Firmware-Rollout starten?\n\n`
+      + `Modus:       ${modeLabel}\n`
+      + `Geraete:     ${ids.length}\n`
+      + `Fehlerpolitik: ${contLabel}\n\n`
+      + `Der Rollout laeuft sequenziell (eine Box zur Zeit). Bei Major-\n`
+      + `Upgrade wartet Cockpit pro Box einen Reboot ab (bis 15 min).\n\n`
+      + `OK = starten, Abbrechen = zurueck.`;
+    if (!window.confirm(prompt)) return;
+
+    const btn = $('#firmware-rollout-start');
+    btn.disabled = true;
+    btn.textContent = 'Starte…';
+    try {
+      const response = await apiPost('/api/firmware/rollout', {
+        device_ids: ids,
+        mode,
+        continue_on_error: continueOnError,
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        box.textContent = body.detail || `Fehler ${response.status}`;
+        box.hidden = false;
+        return;
+      }
+      closeFirmwareRolloutModal();
+      startFirmwareRolloutPolling();
+      pollFirmwareRolloutOnce().catch(() => {});
+      showToast('Rollout gestartet.');
+    } catch (err) {
+      box.textContent = err.message;
+      box.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Rollout starten';
+    }
+  }
+
+  function startFirmwareRolloutPolling() {
+    // Direkt einen Poll setzen; dann alle 10 s.
+    pollFirmwareRolloutOnce().catch(() => {});
+    if (fwRolloutPollTimer) return;
+    fwRolloutPollTimer = setInterval(() => {
+      pollFirmwareRolloutOnce().catch(() => {});
+    }, 10000);
+  }
+
+  function stopFirmwareRolloutPolling() {
+    if (fwRolloutPollTimer) {
+      clearInterval(fwRolloutPollTimer);
+      fwRolloutPollTimer = null;
+    }
+  }
+
+  async function pollFirmwareRolloutOnce() {
+    try {
+      const response = await apiGet('/api/firmware/rollout');
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) return;
+      const data = await response.json();
+      renderFirmwareRolloutBanner(data);
+    } catch (_err) {
+      // stumme Retry-Toleranz - Cockpit-Restart o.ae.
+    }
+  }
+
+  function renderFirmwareRolloutBanner(data) {
+    const banner = $('#fw-rollout-banner');
+    if (!banner) return;
+    if (!data.active) {
+      banner.hidden = true;
+      banner.dataset.state = 'idle';
+      return;
+    }
+    banner.hidden = false;
+    banner.dataset.state = data.state || 'running';
+
+    const title = $('#fw-rollout-banner-title');
+    if (title) {
+      title.textContent = data.mode === 'upgrade'
+        ? 'Firmware-Rollout: Major-Upgrade'
+        : 'Firmware-Rollout: Package-Update';
+    }
+
+    const progress = $('#fw-rollout-banner-progress');
+    if (progress) {
+      const done = data.done_count || 0;
+      const failed = data.failed_count || 0;
+      const skipped = data.skipped_count || 0;
+      const total = data.total || 0;
+      const inProgress = total - done - failed - skipped;
+      if (data.state === 'running') {
+        progress.textContent =
+          `${done}/${total} fertig · ${inProgress} aktiv/wartend · ${failed} Fehler`;
+      } else {
+        progress.textContent =
+          `Beendet: ${done} ok · ${failed} Fehler · ${skipped} uebersprungen (${data.state})`;
+      }
+    }
+
+    // Aktuelle laufende Box zeigen
+    const current = $('#fw-rollout-banner-current');
+    if (current) {
+      const active = (data.devices || []).find(
+        (d) => d.state !== 'queued' && d.state !== 'done' && d.state !== 'failed' && d.state !== 'skipped',
+      );
+      if (active) {
+        current.hidden = false;
+        current.textContent = `Aktuell: ${active.device_name} — ${active.state} — ${active.summary || ''}`;
+      } else {
+        current.hidden = true;
+      }
+    }
+
+    const cancelBtn = $('#fw-rollout-banner-cancel');
+    const clearBtn = $('#fw-rollout-banner-clear');
+    if (data.state === 'running') {
+      if (cancelBtn) {
+        cancelBtn.hidden = data.cancel_requested === true;
+        cancelBtn.disabled = data.cancel_requested === true;
+      }
+      if (clearBtn) clearBtn.hidden = true;
+    } else {
+      if (cancelBtn) cancelBtn.hidden = true;
+      if (clearBtn) clearBtn.hidden = false;
+    }
+  }
+
+  async function cancelFirmwareRollout() {
+    if (!window.confirm(
+      'Rollout wirklich abbrechen? Die aktuell laufende Box wird fertig-\n'
+      + 'gemacht (kein hartes Kill), noch nicht gestartete Boxen werden\n'
+      + 'auf "skipped" gesetzt.',
+    )) return;
+    try {
+      const response = await apiPost('/api/firmware/rollout/cancel');
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      pollFirmwareRolloutOnce().catch(() => {});
+      showToast('Abbruch angefordert.');
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  async function clearFirmwareRolloutBanner() {
+    try {
+      const response = await apiDelete('/api/firmware/rollout');
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      renderFirmwareRolloutBanner(await response.json());
+    } catch (err) {
+      showToast(err.message, true);
     }
   }
 
@@ -8042,6 +8369,52 @@
     $('#add-route-btn').addEventListener('click', () => openPlanModal('route'));
     $('#add-alias-btn').addEventListener('click', () => openPlanModal('alias'));
     $('#bulk-import-btn').addEventListener('click', openBulkModal);
+    const fwRolloutOpenBtn = $('#firmware-rollout-btn');
+    if (fwRolloutOpenBtn) {
+      fwRolloutOpenBtn.addEventListener('click', openFirmwareRolloutModal);
+    }
+
+    // Firmware-Rollout Modal + Banner (Iteration B)
+    const fwRolloutClose = $('#firmware-rollout-modal-close');
+    if (fwRolloutClose) fwRolloutClose.addEventListener('click', closeFirmwareRolloutModal);
+    const fwRolloutCancel = $('#firmware-rollout-cancel');
+    if (fwRolloutCancel) fwRolloutCancel.addEventListener('click', closeFirmwareRolloutModal);
+    const fwRolloutStart = $('#firmware-rollout-start');
+    if (fwRolloutStart) {
+      fwRolloutStart.addEventListener('click', () => {
+        submitFirmwareRollout().catch((err) => showToast(err.message, true));
+      });
+    }
+    const fwRolloutTagFilter = $('#fw-rollout-tag-filter');
+    if (fwRolloutTagFilter) fwRolloutTagFilter.addEventListener('change', renderFirmwareRolloutList);
+    const fwSelectAll = $('#fw-rollout-select-all');
+    if (fwSelectAll) fwSelectAll.addEventListener('click', selectAllRollout);
+    const fwSelectNone = $('#fw-rollout-select-none');
+    if (fwSelectNone) fwSelectNone.addEventListener('click', selectNoneRollout);
+    const fwSelectUpdates = $('#fw-rollout-select-updates');
+    if (fwSelectUpdates) fwSelectUpdates.addEventListener('click', selectUpdatesOnlyRollout);
+    const fwBannerCancel = $('#fw-rollout-banner-cancel');
+    if (fwBannerCancel) {
+      fwBannerCancel.addEventListener('click', () => {
+        cancelFirmwareRollout().catch((err) => showToast(err.message, true));
+      });
+    }
+    const fwBannerClear = $('#fw-rollout-banner-clear');
+    if (fwBannerClear) {
+      fwBannerClear.addEventListener('click', () => {
+        clearFirmwareRolloutBanner().catch((err) => showToast(err.message, true));
+      });
+    }
+    const fwBannerDetails = $('#fw-rollout-banner-details');
+    if (fwBannerDetails) {
+      // Details-Klick oeffnet erneut das Modal - dort sieht der User
+      // in Iteration B die Live-Liste (Boxen mit Status). Naeher/besser
+      // waere ein eigenes Detail-Panel, aber Modal reuse ist minimal-invasiv.
+      fwBannerDetails.addEventListener('click', () => {
+        pollFirmwareRolloutOnce().catch(() => {});
+        showToast('Details siehe Banner-Progress und Audit-Log.');
+      });
+    }
 
     // Bulk-Modal (Firewall-Import)
     $('#bulk-modal-close').addEventListener('click', closeBulkModal);

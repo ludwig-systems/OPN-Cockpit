@@ -3884,3 +3884,160 @@ a.card-open-link { text-decoration: none; }
   display: flex;
   justify-content: flex-end;
 }
+
+/* ===== Firmware-Rollout-Banner + Modal (Iteration B) ===== */
+
+.fw-rollout-banner {
+  margin: 8px 28px 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-soft);
+  background: linear-gradient(
+    100deg,
+    rgba(132, 158, 76, 0.10),
+    rgba(132, 158, 76, 0.02) 70%
+  );
+  font-size: 13px;
+}
+
+.fw-rollout-banner[hidden] { display: none !important; }
+
+.fw-rollout-banner[data-state="done"] {
+  background: linear-gradient(
+    100deg,
+    rgba(132, 158, 76, 0.18),
+    rgba(132, 158, 76, 0.04) 70%
+  );
+  border-color: var(--accent);
+}
+
+.fw-rollout-banner[data-state="failed"],
+.fw-rollout-banner[data-state="cancelled"] {
+  background: var(--danger-bg);
+  border-color: var(--danger, #d97767);
+}
+
+.fw-rollout-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fw-rollout-banner-icon {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(132, 158, 76, 0.15);
+  color: var(--accent);
+}
+
+.fw-rollout-banner[data-state="failed"] .fw-rollout-banner-icon,
+.fw-rollout-banner[data-state="cancelled"] .fw-rollout-banner-icon {
+  background: rgba(229, 113, 100, 0.18);
+  color: var(--danger, #d97767);
+}
+
+.fw-rollout-banner-title {
+  font-family: var(--font-display, inherit);
+  font-size: 14px;
+}
+
+.fw-rollout-banner-progress {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-subtle);
+  flex: 1 1 auto;
+}
+
+.fw-rollout-banner-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.fw-rollout-banner-current {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
+.fw-rollout-banner-current[hidden] { display: none !important; }
+
+/* ---- Rollout-Modal (Ziel-Auswahl) ---- */
+
+.fw-rollout-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  margin-bottom: 8px;
+}
+
+.fw-rollout-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  color: var(--text-subtle);
+}
+
+.fw-rollout-list {
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  padding: 4px 0;
+}
+
+.fw-rollout-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  font-size: 13px;
+}
+
+.fw-rollout-row:last-child { border-bottom: none; }
+
+.fw-rollout-row:hover {
+  background: rgba(132, 158, 76, 0.05);
+}
+
+.fw-rollout-row-name {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+.fw-rollout-row-tags {
+  display: flex;
+  gap: 4px;
+}
+
+.fw-rollout-row-tags .tag {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.fw-rollout-row-fw {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-subtle);
+  min-width: 120px;
+  text-align: right;
+}
+
+.fw-rollout-row-fw.has-update {
+  color: var(--accent);
+}
+
+.fw-rollout-row-fw.no-info {
+  color: rgba(0, 0, 0, 0.35);
+  font-style: italic;
+}

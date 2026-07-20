@@ -210,18 +210,7 @@ delForward/{uuid}}`.
 6. Ende: Panel wird grün, Cockpit holt automatisch den neuen
    Firmware-Status → Badge verschwindet.
 
-**Was Cockpit nicht macht (Iteration A):**
-
-- **Sammelaktion** über mehrere Boxen: kommt in einem späteren Update
-  (mit persistentem Rollout-Watcher). Aktuell muss der Admin pro Box
-  klicken.
-- **Post-Reboot-Recovery über Cockpit-Restart hinweg**: wenn das
-  Cockpit selbst neustartet während ein Update auf einer Box läuft,
-  geht der Live-Poll verloren. Der Update-Job auf OPNsense läuft
-  aber weiter — beim nächsten „Updates suchen" wird das Ergebnis
-  sichtbar.
-
-**API-Endpoints:**
+**API-Endpoints (Single-Device):**
 
 - `POST /api/inventory/devices/{id}/firmware-update` mit Body
   `{"mode": "update"}` oder `{"mode": "upgrade"}`
@@ -229,6 +218,68 @@ delForward/{uuid}}`.
   OPNsense's `upgradestatus`, liefert `running`/`done`/`error`/`unknown`
   plus Log-Text
 - Audit-Events: `FIRMWARE_UPDATE_STARTED`, `FIRMWARE_UPDATE_FAILED`
+
+### Sammelaktion pro Tag-Gruppe (Iteration B)
+
+**Sidebar → „Firmware-Rollout"**. Modal zeigt:
+
+- **Tag-Filter** oben — grenzt die Liste unten ein (Auswahl-Checkboxen
+  bleiben unangetastet, du kannst mehrere Tag-Runden durchklicken).
+- **Modus**: `update` (Package-Aktualisierung, kein Reboot) oder
+  `upgrade` (Major-Release, Reboot).
+- **„Nach Fehler weitermachen"**-Checkbox: Default aus. Bei aus wird
+  der Rollout beim ersten Fehler gestoppt und die restlichen Boxen
+  auf `skipped` gesetzt. Bei an geht der Rollout stur weiter — nur
+  sinnvoll für „will die 20 Boxen sowieso alle durchziehen, egal ob
+  eine hängt".
+- **Ziel-Liste** mit Checkbox pro Gerät + Firmware-Status
+  (`v25.7.1 → v25.7.4` bei verfügbarem Update, `v25.7.4 (aktuell)`
+  sonst). Toolbar-Shortcuts: „Alle markieren" / „Alle abwählen" /
+  **„Nur mit Update"** (letzteres ist der 95%-Anwendungsfall).
+
+**Ablauf:**
+
+1. Bestätigen → Confirm-Dialog mit Zusammenfassung (Modus, Anzahl,
+   Fehlerpolitik) → OK.
+2. **Persistentes Banner** unter dem TLS-Banner erscheint: zeigt
+   Progress (`3/12 fertig · 1 aktiv · 0 Fehler`), Modus, aktuelle Box
+   und Status-Zeile. Live-Poll alle 10 s.
+3. Cockpit arbeitet die Boxen **sequenziell** ab. Pro Box:
+   `queued → triggered → running → rebooting (nur upgrade) →
+   verifying → done`. Fehler → `failed`; wenn `continue_on_error=false`
+   werden restliche Boxen `skipped`.
+4. Am Ende zeigt das Banner `done` (grün), `failed` (rot) oder
+   `cancelled` — plus einen **„Ausblenden"**-Button (löscht den
+   Banner-State, laufenden Boxen wird nichts angetan).
+
+**„Abbrechen"** während des Rollouts: das Banner hat einen Roten
+`Abbrechen`-Button. Der Watcher macht die **aktuell laufende Box zu
+Ende** (kein hartes Kill — nicht mitten im Reboot abbrechen), setzt
+alle noch nicht gestarteten auf `skipped` und markiert den Rollout
+als `cancelled`.
+
+**Persistenz + Cockpit-Restart:** Der Rollout-State liegt in
+`<app_data>/state/firmware-rollout.json`. Wird das Cockpit während
+eines laufenden Rollouts neu gestartet (Update, Neustart, TLS-
+Rotation), adoptiert der Watcher den Rollout beim ersten Tick nach
+dem nächsten Vault-Unlock und arbeitet weiter, wo er aufgehört hat.
+
+**Grenzen:**
+
+- Ein Rollout zur Zeit — zweiter Start wird mit HTTP 409 abgelehnt.
+- Timeouts: 30 min pro Box (Running-Phase), 15 min Reboot-Fenster,
+  6 h Total-Cap. Wer laaangsame Boxen hat, kann in einer späteren
+  Version eigene Werte pro Vault einstellen.
+
+**API-Endpoints (Sammelaktion):**
+
+- `POST /api/firmware/rollout` mit `{device_ids, mode, continue_on_error}`
+- `GET /api/firmware/rollout` — Banner-Poll (aktueller Zustand)
+- `POST /api/firmware/rollout/cancel` — laufenden Rollout abbrechen
+- `DELETE /api/firmware/rollout` — terminierten Rollout aus Banner raus
+- Audit-Events: `FIRMWARE_ROLLOUT_STARTED`, `FIRMWARE_ROLLOUT_COMPLETED`
+  (mit Endzustand), `FIRMWARE_ROLLOUT_CANCELLED`, pro Box zusätzlich
+  `FIRMWARE_UPDATE_STARTED/COMPLETED/FAILED`.
 
 ---
 

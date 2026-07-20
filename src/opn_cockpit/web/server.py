@@ -127,6 +127,24 @@ def create_app() -> FastAPI:
         restart_callback=get_restart_callback(),
     )
     app.state.tls_watcher.start()
+
+    # FirmwareRolloutWatcher: sequenzielle Sammelaktion fuer Firmware-
+    # Updates ueber mehrere Boxen. Persistent in
+    # <app_data>/state/firmware-rollout.json damit ein Cockpit-Restart
+    # waehrend eines Rollouts den Fortschritt nicht killt.
+    from opn_cockpit.web.firmware_rollout_watcher import (  # noqa: PLC0415
+        FirmwareRolloutWatcher,
+        QUEUE_FILE_NAME as FIRMWARE_ROLLOUT_QUEUE_FILE_NAME,
+    )
+    firmware_rollout_queue_path = (
+        get_app_data_dir() / "state" / FIRMWARE_ROLLOUT_QUEUE_FILE_NAME
+    )
+    app.state.firmware_rollout_watcher = FirmwareRolloutWatcher(
+        session_manager,
+        get_audit_backend(),
+        queue_path=firmware_rollout_queue_path,
+    )
+
     app.state.login_rate_limiter = RateLimiter()
     app.state.bootstrap_rate_limiter = RateLimiter(
         # Bootstrap ist seltener als Login — strenger limitieren.
