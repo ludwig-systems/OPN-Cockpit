@@ -4,6 +4,26 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Frontend-Inline-Validierung: FQDN + Domain-Felder
+
+Die bestehenden Client-Side-Validatoren (cidr / ipv4 / host /
+aliasName / gatewayName / port) wurden um einen ``fqdn``-Validator
+ergaenzt: pure Domain-Namen (keine IP), Label bis 63 Zeichen, gesamt
+bis 253, Regel a-z A-Z 0-9 mit Bindestrich inside.
+
+Angewendet an 5 Domain-Feldern:
+
+- ``ub-domain`` (Unbound-Host-Override)
+- ``dom-domain`` (Domain-Override)
+- ``fwd-domain`` (Query-Forward — leer erlaubt = alle Queries)
+- ``fwd-verify`` (DoT-Verify-CN)
+- ``ad-ssh-host`` (SSH-Host im Device-Modal) — nutzt ``host``-Validator
+  (akzeptiert IPv4 UND FQDN)
+
+Feedback beim Tippen: roter Rahmen + Inline-Fehlermeldung. Empty
+value bleibt still, damit Pflichtfeld-Marker nicht beim Tab-Wechsel
+rot leuchten — der Submit-Pfad prueft "leer aber required".
+
 ### PDF-Audit-Report: CLI-Verifikation
 
 Der signierte PDF-Audit-Report ist seit v0.7 im Backend vollstaendig

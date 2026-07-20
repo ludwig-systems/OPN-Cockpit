@@ -173,6 +173,27 @@
       // Alias-Name oder Sonderform - nicht clientseitig blocken.
       return null;
     },
+    fqdn(v) {
+      // Pure Domain / FQDN. Kein IPv4/IPv6, kein Slash. Buchstabe/Ziffer
+      // am Anfang, dann labels mit "." getrennt, letztes Label 2+ Zeichen.
+      // Interne TLDs wie "lab.local" oder "corp" (single-label) sind OK.
+      if (v.length > 253) return 'Domain zu lang (max 253 Zeichen).';
+      if (v.endsWith('.') || v.includes('..')) return 'Punkt-Fehler in Domain.';
+      // Erlaubt jetzt: label (a-z 0-9 -), Trennpunkt, mind. 1 label.
+      // Keine reine IP als "Domain" - dafuer gibt es 'ipv4'/'host'.
+      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(v)) {
+        return 'Bitte Hostname/Domain angeben, keine IP.';
+      }
+      const labels = v.split('.');
+      for (const label of labels) {
+        if (!label) return 'Leeres Label in Domain.';
+        if (label.length > 63) return 'Label zu lang (max 63).';
+        if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(label)) {
+          return 'Nur a-z A-Z 0-9 "-" erlaubt; Label muss mit Buchstabe/Ziffer starten und enden.';
+        }
+      }
+      return null;
+    },
   };
 
   function attachInlineValidator(input) {

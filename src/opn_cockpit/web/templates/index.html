@@ -713,7 +713,7 @@
           <div class="form-row">
             <div class="form-col flex-grow">
               <label class="form-label" for="ad-ssh-host">SSH-Host (leer = wie API)</label>
-              <input id="ad-ssh-host" class="form-input" type="text" placeholder="" />
+              <input id="ad-ssh-host" class="form-input" type="text" placeholder="" data-validate="host" />
             </div>
             <div class="form-col form-col-port">
               <label class="form-label" for="ad-ssh-port">SSH-Port</label>
@@ -1272,7 +1272,7 @@
             </div>
             <div class="form-col">
               <label class="form-label" for="ub-domain">Domain</label>
-              <input id="ub-domain" class="form-input" type="text" placeholder="lab.local" />
+              <input id="ub-domain" class="form-input" type="text" placeholder="lab.local" data-validate="fqdn" />
             </div>
           </div>
           <div class="form-row">
@@ -1324,7 +1324,7 @@
           <div class="form-row">
             <div class="form-col">
               <label class="form-label" for="dom-domain">Domain</label>
-              <input id="dom-domain" class="form-input" type="text" placeholder="internal.example.com" />
+              <input id="dom-domain" class="form-input" type="text" placeholder="internal.example.com" data-validate="fqdn" />
             </div>
             <div class="form-col">
               <label class="form-checkbox" style="margin-top:24px;">
@@ -1375,7 +1375,7 @@
           <div class="form-row">
             <div class="form-col">
               <label class="form-label" for="fwd-domain">Domain (leer = alle)</label>
-              <input id="fwd-domain" class="form-input" type="text" placeholder="(leer fuer alle Queries)" />
+              <input id="fwd-domain" class="form-input" type="text" placeholder="(leer fuer alle Queries)" data-validate="fqdn" />
             </div>
             <div class="form-col">
               <label class="form-checkbox" style="margin-top:24px;">
@@ -1404,7 +1404,7 @@
             </div>
             <div class="form-col">
               <label class="form-label" for="fwd-verify">Verify-CN (bei DoT)</label>
-              <input id="fwd-verify" class="form-input" type="text" placeholder="cloudflare-dns.com" />
+              <input id="fwd-verify" class="form-input" type="text" placeholder="cloudflare-dns.com" data-validate="fqdn" />
             </div>
           </div>
           <div class="form-row">
