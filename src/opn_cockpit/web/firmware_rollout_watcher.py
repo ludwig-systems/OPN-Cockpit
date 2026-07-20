@@ -36,6 +36,7 @@ import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock, Thread
 
@@ -772,6 +773,93 @@ class FirmwareRolloutWatcher:
                 f"({final_state})."
             ),
         )
+        self._send_completion_mail(rollout, final_state)
+
+    def _send_completion_mail(
+        self, rollout: FirmwareRollout, final_state: str,
+    ) -> None:
+        """Best-Effort E-Mail-Benachrichtigung nach Rollout-Ende.
+
+        Bricht Rollout NIEMALS ab wenn Mail fehlschlaegt — Mail ist
+        eine Ergaenzung, nicht der kritische Pfad. Alle Exceptions
+        werden geschluckt und geloggt.
+        """
+        try:
+            session = self._find_session_for_rollout(rollout)
+            if session is None:
+                _log.debug(
+                    "Rollout %s: keine offene Session -> keine Mail",
+                    rollout.rollout_id,
+                )
+                return
+            smtp = session.opened.data.settings.smtp
+            if not smtp.enabled or not smtp.default_recipients:
+                _log.debug(
+                    "Rollout %s: SMTP off oder keine Empfaenger",
+                    rollout.rollout_id,
+                )
+                return
+
+            # Zaehler + Zeilen aus dem Device-Zustand
+            ok = sum(1 for d in rollout.devices if d.state == DEV_STATE_DONE)
+            failed = sum(
+                1 for d in rollout.devices if d.state == DEV_STATE_FAILED
+            )
+            skipped = sum(
+                1 for d in rollout.devices if d.state == DEV_STATE_SKIPPED
+            )
+            device_lines: list[str] = []
+            for d in rollout.devices:
+                label = d.device_name or d.device_id
+                summary = (d.summary or "").strip() or "-"
+                device_lines.append(f"  [{d.state.upper():8}] {label}: {summary}")
+
+            finished_iso = ""
+            if rollout.finished_at_ms:
+                finished_iso = datetime.fromtimestamp(
+                    rollout.finished_at_ms / 1000.0, tz=UTC,
+                ).isoformat()
+
+            from opn_cockpit.notifications.mail import (  # noqa: PLC0415
+                MailError,
+                send_rollout_completion_mail,
+            )
+
+            try:
+                send_rollout_completion_mail(
+                    smtp,
+                    rollout_id=rollout.rollout_id,
+                    status=final_state,
+                    finished_at_iso=finished_iso,
+                    total=len(rollout.devices),
+                    ok=ok, failed=failed, skipped=skipped,
+                    device_lines=device_lines,
+                    initiator=rollout.initiator or "",
+                )
+            except MailError as exc:
+                _log.warning(
+                    "Rollout %s Mail-Send fehlgeschlagen: %s",
+                    rollout.rollout_id, exc,
+                )
+                # Audit-Eintrag damit User sieht warum die erwartete
+                # Mail nicht kam.
+                self._audit.append(
+                    AuditEventKind.FIRMWARE_ROLLOUT_COMPLETED,
+                    actor=rollout.initiator,
+                    action="firmware_rollout_mail_failed",
+                    summary=(
+                        f"Rollout {rollout.rollout_id}: Mail-Send "
+                        f"an {len(smtp.default_recipients)} Empfaenger "
+                        f"gescheitert — {exc}"
+                    ),
+                )
+        except Exception as exc:  # noqa: BLE001
+            # Defensive-Wrapper: nichts an dieser Stelle darf den
+            # Watcher stoppen.
+            _log.exception(
+                "Rollout %s: unerwarteter Fehler beim Mail-Versand: %s",
+                rollout.rollout_id, exc,
+            )
 
     # ----- Session-Adoption + HTTP-Client -----
 

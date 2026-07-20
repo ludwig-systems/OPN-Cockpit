@@ -1909,6 +1909,70 @@
 
           <div class="form-divider"></div>
 
+          <!-- Sektion: SMTP / E-Mail-Benachrichtigungen (v0.12) -->
+          <h3 class="modal-section-title">E-Mail-Benachrichtigungen (SMTP)</h3>
+          <div class="form-hint" style="margin-bottom:12px;">
+            Wenn aktiviert, verschickt Cockpit nach dem Ende eines
+            Firmware-Rollouts (done / failed / cancelled) eine
+            Zusammenfassungs-Mail an die Default-Empfaenger. SMTP-Config
+            liegt im Tresor — Master-Passwort schuetzt sie mit.
+          </div>
+          <label class="form-checkbox">
+            <input id="vs-smtp-enabled" type="checkbox" />
+            <span>SMTP-Benachrichtigungen aktivieren</span>
+          </label>
+          <div class="form-grid-2col" style="margin-top:8px;">
+            <div class="form-col">
+              <label class="form-label" for="vs-smtp-host">SMTP-Host</label>
+              <input id="vs-smtp-host" class="form-input" type="text"
+                     placeholder="mail.example.com" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="vs-smtp-port">Port</label>
+              <input id="vs-smtp-port" class="form-input" type="number"
+                     min="1" max="65535" step="1" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="vs-smtp-tls">TLS-Modus</label>
+              <select id="vs-smtp-tls" class="form-input">
+                <option value="starttls">STARTTLS (Port 587)</option>
+                <option value="tls">TLS-wrapped (Port 465)</option>
+                <option value="none">Kein TLS (nur Lab!)</option>
+              </select>
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="vs-smtp-from">From-Adresse</label>
+              <input id="vs-smtp-from" class="form-input" type="text"
+                     placeholder="cockpit@example.com" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="vs-smtp-user">Username (leer = kein Auth)</label>
+              <input id="vs-smtp-user" class="form-input" type="text"
+                     autocomplete="off" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="vs-smtp-pass">Passwort</label>
+              <input id="vs-smtp-pass" class="form-input" type="password"
+                     autocomplete="new-password"
+                     placeholder="*** = beibehalten" />
+            </div>
+          </div>
+          <label class="form-label" for="vs-smtp-recipients" style="margin-top:10px;">
+            Default-Empfaenger (eine Adresse pro Zeile)
+          </label>
+          <textarea id="vs-smtp-recipients" class="form-input form-input-mono"
+                    rows="3" placeholder="admin@example.com&#10;oncall@example.com"></textarea>
+          <div class="form-row" style="margin-top:8px; gap:8px; align-items:center;">
+            <button class="btn-secondary" id="vs-smtp-save" type="button">SMTP speichern</button>
+            <input id="vs-smtp-test-to" class="form-input" type="text"
+                   placeholder="test@example.com" style="max-width:220px;" />
+            <button class="btn-secondary" id="vs-smtp-test-btn" type="button">Test-Mail senden</button>
+          </div>
+          <div class="form-error" id="vs-smtp-error" hidden></div>
+          <div class="form-success" id="vs-smtp-ok" hidden></div>
+
+          <div class="form-divider"></div>
+
           <!-- Sektion: Custom Root-CAs (v0.8 #12) -->
           <h3 class="modal-section-title">Vertrauenswuerdige Root-CAs</h3>
           <div class="form-hint" style="margin-bottom:12px;">

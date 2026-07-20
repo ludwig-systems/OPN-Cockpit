@@ -64,6 +64,36 @@ class VaultDevice:
 
 
 @dataclass(slots=True)
+class SmtpSettings:
+    """SMTP-Konfiguration fuer Benachrichtigungen (Firmware-Rollout u.a.).
+
+    Ganze Sektion optional — ``enabled=False`` schaltet alle
+    E-Mail-Pfade ab, Cockpit ruft dann nirgends smtplib auf.
+
+    ``password`` liegt wie API-Secrets nur im entschluesselten
+    Tresor-Speicher; auf der API-Sicht wird er als ``***`` maskiert
+    zurueckgegeben, ein PUT mit ``password="***"`` uebernimmt den
+    gespeicherten Wert (kein Verlust bei Teil-Updates).
+
+    ``tls_mode``:
+    * ``starttls`` — Port 587-typisch, SMTP-Verbindung startet
+      unverschluesselt und wird per STARTTLS hochgestuft.
+    * ``tls``      — Port 465-typisch, TLS-wrapped von Anfang an.
+    * ``none``     — Klartext (nur fuer Lab-SMTP-Server, WARNUNG!).
+    """
+
+    enabled: bool = False
+    host: str = ""
+    port: int = 587
+    tls_mode: str = "starttls"
+    username: str = ""
+    password: str = ""
+    from_addr: str = ""
+    default_recipients: list[str] = field(default_factory=list)
+    connect_timeout_s: float = 15.0
+
+
+@dataclass(slots=True)
 class VaultSettings:
     """Pro-Tresor-Settings, die mit ihm wandern (Portabilität).
 
@@ -137,6 +167,10 @@ class VaultSettings:
     # statt pro Geraet auf "TLS aus" zu schalten. Wenn die Liste leer
     # ist, gilt nur das System-CA-Bundle (heutiges Default-Verhalten).
     trusted_ca_pems: list[str] = field(default_factory=list)
+
+    # v0.12 SMTP fuer E-Mail-Benachrichtigungen (Firmware-Rollout Ende,
+    # ggf. zukuenftig: Cert-Ablauf, Config-Drift). Default AUS.
+    smtp: SmtpSettings = field(default_factory=SmtpSettings)
 
 
 @dataclass(slots=True)
@@ -250,6 +284,38 @@ def _settings_from_dict(raw: dict[str, Any]) -> VaultSettings:
         ),
         trusted_ca_pems=_normalize_pem_list(
             raw.get("trusted_ca_pems", defaults.trusted_ca_pems),
+        ),
+        smtp=_smtp_from_dict(raw.get("smtp") or {}),
+    )
+
+
+def _smtp_from_dict(raw: dict[str, Any]) -> SmtpSettings:
+    defaults = SmtpSettings()
+    recipients_raw = raw.get("default_recipients", [])
+    recipients = (
+        [str(r).strip() for r in recipients_raw if str(r).strip()]
+        if isinstance(recipients_raw, list) else []
+    )
+    tls_mode = str(raw.get("tls_mode", defaults.tls_mode)).strip().lower()
+    if tls_mode not in ("starttls", "tls", "none"):
+        tls_mode = defaults.tls_mode
+    try:
+        port = int(raw.get("port", defaults.port))
+    except (TypeError, ValueError):
+        port = defaults.port
+    if port < 1 or port > 65535:
+        port = defaults.port
+    return SmtpSettings(
+        enabled=bool(raw.get("enabled", defaults.enabled)),
+        host=str(raw.get("host", "")).strip(),
+        port=port,
+        tls_mode=tls_mode,
+        username=str(raw.get("username", "")).strip(),
+        password=str(raw.get("password", "")),
+        from_addr=str(raw.get("from_addr", "")).strip(),
+        default_recipients=recipients,
+        connect_timeout_s=float(
+            raw.get("connect_timeout_s", defaults.connect_timeout_s),
         ),
     )
 

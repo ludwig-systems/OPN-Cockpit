@@ -7115,6 +7115,118 @@
         }
       }
     } catch (_e) { /* Modal kann auch mit leerem Feld bedient werden */ }
+    // SMTP separat laden (eigener Endpoint wegen Password-Semantik)
+    loadSmtpSettings().catch(() => {});
+  }
+
+  async function loadSmtpSettings() {
+    // Reset auf Defaults falls der Endpoint schweigt
+    $('#vs-smtp-enabled').checked = false;
+    $('#vs-smtp-host').value = '';
+    $('#vs-smtp-port').value = '587';
+    $('#vs-smtp-tls').value = 'starttls';
+    $('#vs-smtp-from').value = '';
+    $('#vs-smtp-user').value = '';
+    $('#vs-smtp-pass').value = '';
+    $('#vs-smtp-recipients').value = '';
+    $('#vs-smtp-test-to').value = '';
+    $('#vs-smtp-error').hidden = true;
+    $('#vs-smtp-ok').hidden = true;
+    try {
+      const r = await apiGet('/api/vaults/settings/smtp');
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) return;
+      const d = await r.json();
+      $('#vs-smtp-enabled').checked = d.enabled === true;
+      $('#vs-smtp-host').value = d.host || '';
+      if (typeof d.port === 'number') $('#vs-smtp-port').value = d.port;
+      $('#vs-smtp-tls').value = d.tls_mode || 'starttls';
+      $('#vs-smtp-from').value = d.from_addr || '';
+      $('#vs-smtp-user').value = d.username || '';
+      $('#vs-smtp-pass').value = d.password || '';  // ist "***" wenn gespeichert
+      $('#vs-smtp-recipients').value = (d.default_recipients || []).join('\n');
+    } catch (_e) { /* still tolerant */ }
+  }
+
+  async function saveSmtpSettings() {
+    const errBox = $('#vs-smtp-error');
+    const okBox = $('#vs-smtp-ok');
+    errBox.hidden = true;
+    okBox.hidden = true;
+    const recipientsRaw = ($('#vs-smtp-recipients').value || '').split(/[\r\n,;]+/);
+    const recipients = recipientsRaw
+      .map((r) => r.trim())
+      .filter((r) => r.length > 0);
+    const body = {
+      enabled: $('#vs-smtp-enabled').checked,
+      host: ($('#vs-smtp-host').value || '').trim(),
+      port: parseInt($('#vs-smtp-port').value, 10) || 587,
+      tls_mode: $('#vs-smtp-tls').value || 'starttls',
+      username: ($('#vs-smtp-user').value || '').trim(),
+      password: $('#vs-smtp-pass').value || '',
+      from_addr: ($('#vs-smtp-from').value || '').trim(),
+      default_recipients: recipients,
+      connect_timeout_s: 15.0,
+    };
+    if (body.enabled && !body.host) {
+      errBox.textContent = 'SMTP aktiviert, aber kein Host angegeben.';
+      errBox.hidden = false;
+      return;
+    }
+    try {
+      const smtpHeaders = { 'Content-Type': 'application/json', Accept: 'application/json' };
+      const smtpToken = getToken();
+      if (smtpToken) smtpHeaders.Authorization = `Bearer ${smtpToken}`;
+      const r = await fetch('/api/vaults/settings/smtp', {
+        method: 'PUT',
+        headers: smtpHeaders,
+        body: JSON.stringify(body),
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        errBox.textContent = (d.detail || `Fehler ${r.status}`);
+        errBox.hidden = false;
+        return;
+      }
+      const saved = await r.json();
+      // Nach dem Save maskiert das Backend das Passwort wieder mit ***,
+      // damit ein zweites Save nicht das gespeicherte Password loescht.
+      $('#vs-smtp-pass').value = saved.password || '';
+      okBox.textContent = 'SMTP-Config gespeichert.';
+      okBox.hidden = false;
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+    }
+  }
+
+  async function sendSmtpTestMail() {
+    const errBox = $('#vs-smtp-error');
+    const okBox = $('#vs-smtp-ok');
+    errBox.hidden = true;
+    okBox.hidden = true;
+    const to = ($('#vs-smtp-test-to').value || '').trim();
+    if (!to || to.indexOf('@') < 0) {
+      errBox.textContent = 'Test-Empfaenger-Adresse fehlt oder ist ungueltig.';
+      errBox.hidden = false;
+      return;
+    }
+    try {
+      const r = await apiPost('/api/vaults/settings/smtp/test', { to });
+      if (r.status === 401) { handleSessionLost(); return; }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) {
+        errBox.textContent = d.detail || `Test-Mail fehlgeschlagen (${r.status}).`;
+        errBox.hidden = false;
+        return;
+      }
+      okBox.textContent = d.detail || `Test-Mail an ${to} versendet.`;
+      okBox.hidden = false;
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+    }
   }
 
   async function saveBackupSettings() {
@@ -9228,6 +9340,15 @@
       });
       $('#vs-timeout-save').addEventListener('click', saveInactivityTimeout);
       $('#vs-backup-save').addEventListener('click', saveBackupSettings);
+      // SMTP-Settings (v0.12)
+      const smtpSaveBtn = $('#vs-smtp-save');
+      if (smtpSaveBtn) smtpSaveBtn.addEventListener('click', () => {
+        saveSmtpSettings().catch((e) => showToast(e.message, true));
+      });
+      const smtpTestBtn = $('#vs-smtp-test-btn');
+      if (smtpTestBtn) smtpTestBtn.addEventListener('click', () => {
+        sendSmtpTestMail().catch((e) => showToast(e.message, true));
+      });
       // Trust-CA: Inline-Expand-Form im Vault-Settings (kein Sub-Modal mehr).
       $('#vs-ca-add-btn').addEventListener('click', openCaAddForm);
       $('#vs-ca-cancel-btn').addEventListener('click', closeCaAddForm);

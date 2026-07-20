@@ -737,6 +737,14 @@ body {
 
 .form-col-port { width: 96px; flex: 0 0 96px; }
 
+.form-grid-2col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 14px;
+  align-items: start;
+}
+.form-grid-2col .form-col { flex: 0 0 auto; }
+
 .form-divider {
   margin: 18px 0 4px;
   height: 1px;

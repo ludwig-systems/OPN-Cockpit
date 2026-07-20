@@ -261,6 +261,89 @@ class VaultSettingsResponse(BaseModel):
     # ist nicht "secret" - das sind oeffentliche Zertifikate - aber
     # er ist sperrig und im Settings-GET-Roundtrip unnoetig.
     trusted_ca_count: int = 0
+    # v0.12 SMTP-Zustand: nur "an/aus" + Host — Details holen sich UI
+    # ueber /settings/smtp separat, damit das grosse Settings-GET
+    # kompakt bleibt.
+    smtp_enabled: bool = False
+    smtp_host: str = ""
+
+
+class SmtpSettingsResponse(BaseModel):
+    """Vollstaendige SMTP-Konfig fuer das Settings-Modal.
+
+    Password ist immer als ``***`` maskiert wenn ein Wert gespeichert ist,
+    sonst leer. PUT mit ``password="***"`` uebernimmt den gespeicherten
+    Wert, jeder andere Wert ueberschreibt.
+    """
+
+    enabled: bool = False
+    host: str = ""
+    port: int = 587
+    tls_mode: str = "starttls"
+    username: str = ""
+    password: str = ""
+    from_addr: str = ""
+    default_recipients: list[str] = Field(default_factory=list)
+    connect_timeout_s: float = 15.0
+
+
+class SmtpSettingsUpdateRequest(BaseModel):
+    """PUT-Body fuer /settings/smtp."""
+
+    enabled: bool = False
+    host: str = Field(default="", max_length=255)
+    port: int = Field(default=587, ge=1, le=65535)
+    tls_mode: str = Field(default="starttls")
+    username: str = Field(default="", max_length=255)
+    password: str = Field(default="", max_length=1024)
+    from_addr: str = Field(default="", max_length=320)
+    default_recipients: list[str] = Field(default_factory=list, max_length=32)
+    connect_timeout_s: float = Field(default=15.0, ge=1.0, le=120.0)
+
+    @field_validator("tls_mode")
+    @classmethod
+    def _check_tls_mode(cls, value: str) -> str:
+        v = (value or "").strip().lower()
+        if v not in ("starttls", "tls", "none"):
+            msg = "tls_mode muss 'starttls', 'tls' oder 'none' sein"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("default_recipients")
+    @classmethod
+    def _clean_recipients(cls, recipients: list[str]) -> list[str]:
+        out: list[str] = []
+        for r in recipients:
+            v = (r or "").strip()
+            if not v:
+                continue
+            # Minimal-Check — kein full RFC5322-Parser, aber "@" muss drin sein.
+            if "@" not in v or len(v) > 320:
+                msg = f"Ungueltige E-Mail-Adresse: {v}"
+                raise ValueError(msg)
+            out.append(v)
+        return out
+
+
+class SmtpTestRequest(BaseModel):
+    """POST-Body fuer /settings/smtp/test — schickt eine Test-Mail an eine
+    frei waehlbare Adresse, ohne die gespeicherte Config zu aendern."""
+
+    to: str = Field(..., min_length=3, max_length=320)
+
+    @field_validator("to")
+    @classmethod
+    def _check_to(cls, value: str) -> str:
+        v = value.strip()
+        if "@" not in v:
+            msg = "Ungueltige E-Mail-Adresse"
+            raise ValueError(msg)
+        return v
+
+
+class SmtpTestResponse(BaseModel):
+    ok: bool
+    detail: str = ""
 
 
 class TrustedCaEntry(BaseModel):

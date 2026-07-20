@@ -29,7 +29,7 @@ from opn_cockpit.vault.errors import (
     VaultVersionError,
     WeakPasswordError,
 )
-from opn_cockpit.vault.model import VaultData, VaultSettings
+from opn_cockpit.vault.model import SmtpSettings, VaultData, VaultSettings
 from opn_cockpit.vault.store import change_password as vault_change_password
 from opn_cockpit.vault.store import create_vault, open_vault
 from opn_cockpit.web.acl import require_admin_role
@@ -39,6 +39,10 @@ from opn_cockpit.web.api.schemas import (
     CreateVaultRequest,
     CreateVaultResponse,
     PathSuggestion,
+    SmtpSettingsResponse,
+    SmtpSettingsUpdateRequest,
+    SmtpTestRequest,
+    SmtpTestResponse,
     TemplateExportRequest,
     TrustedCaCreateRequest,
     TrustedCaEntry,
@@ -490,6 +494,10 @@ def update_vault_settings(
             else old_settings.safety_net_window_s
         ),
         trusted_ca_pems=list(old_settings.trusted_ca_pems),
+        # SMTP wird ueber eigene /settings/smtp-Endpoints gepflegt.
+        # Hier nur durchreichen damit ein normaler Settings-Save die
+        # SMTP-Config nicht ausversehen loescht.
+        smtp=old_settings.smtp,
     )
     session.opened.data.settings = new_settings
 
@@ -527,7 +535,157 @@ def _settings_to_response(s: VaultSettings) -> VaultSettingsResponse:
         safety_net_enabled=bool(s.safety_net_enabled),
         safety_net_window_s=int(s.safety_net_window_s),
         trusted_ca_count=len(s.trusted_ca_pems or []),
+        smtp_enabled=bool(s.smtp.enabled),
+        smtp_host=str(s.smtp.host or ""),
     )
+
+
+# ---------------------------------------------------------------------------
+# SMTP-Sub-Settings (v0.12): getrennt weil Password-Roundtrip
+# spezielle Semantik hat und die Test-Mail einen eigenen Endpoint braucht.
+# ---------------------------------------------------------------------------
+
+
+_PASSWORD_MASK = "***"
+
+
+def _smtp_to_response(s: SmtpSettings) -> SmtpSettingsResponse:
+    return SmtpSettingsResponse(
+        enabled=bool(s.enabled),
+        host=str(s.host or ""),
+        port=int(s.port),
+        tls_mode=str(s.tls_mode or "starttls"),
+        username=str(s.username or ""),
+        password=_PASSWORD_MASK if s.password else "",
+        from_addr=str(s.from_addr or ""),
+        default_recipients=list(s.default_recipients or []),
+        connect_timeout_s=float(s.connect_timeout_s),
+    )
+
+
+def _merge_smtp_password(
+    old: SmtpSettings, incoming: str,
+) -> str:
+    """Behandelt die Masking-Semantik: incoming ``***`` = alten Wert
+    beibehalten; leerer String = Passwort explizit loeschen; sonst
+    ueberschreiben."""
+    if incoming == _PASSWORD_MASK:
+        return old.password
+    return incoming
+
+
+@router.get("/settings/smtp", response_model=SmtpSettingsResponse)
+def get_smtp_settings(
+    session: Session = Depends(require_session),
+) -> SmtpSettingsResponse:
+    """Volle SMTP-Config fuer das Settings-Modal (Password maskiert)."""
+    return _smtp_to_response(session.opened.data.settings.smtp)
+
+
+@router.put("/settings/smtp", response_model=SmtpSettingsResponse)
+def update_smtp_settings(
+    payload: SmtpSettingsUpdateRequest,
+    request: Request,
+    session: Session = Depends(require_session),
+) -> SmtpSettingsResponse:
+    """Setzt die SMTP-Config im Tresor.
+
+    Password-Semantik: PUT mit ``password="***"`` behaelt das
+    gespeicherte Passwort (kein Verlust beim Teil-Update). Leerer
+    String loescht das Passwort explizit.
+    """
+    require_admin_role(session)
+    if session.vault_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Aktiver Tresor-Pfad fehlt.",
+        )
+    old_settings = session.opened.data.settings
+    merged_password = _merge_smtp_password(old_settings.smtp, payload.password)
+    new_smtp = SmtpSettings(
+        enabled=payload.enabled,
+        host=payload.host.strip(),
+        port=payload.port,
+        tls_mode=payload.tls_mode,
+        username=payload.username.strip(),
+        password=merged_password,
+        from_addr=payload.from_addr.strip(),
+        default_recipients=list(payload.default_recipients),
+        connect_timeout_s=payload.connect_timeout_s,
+    )
+    # Sanity-Check: enabled ohne Host macht keinen Sinn
+    if new_smtp.enabled and not new_smtp.host:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SMTP aktiviert, aber kein Host angegeben.",
+        )
+
+    old_smtp = old_settings.smtp
+    session.opened.data.settings.smtp = new_smtp
+
+    def _rollback() -> None:
+        session.opened.data.settings.smtp = old_smtp
+
+    persist_session_vault(request, session, session.vault_path, rollback=_rollback)
+
+    get_audit_backend().append(
+        AuditEventKind.VAULT_OPENED,
+        actor=audit_actor(session),
+        vault_path=str(session.vault_path),
+        summary=(
+            f"SMTP-Config aktualisiert: enabled={new_smtp.enabled}, "
+            f"host={new_smtp.host or '(leer)'}, "
+            f"recipients={len(new_smtp.default_recipients)}"
+        ),
+    )
+    return _smtp_to_response(new_smtp)
+
+
+@router.post("/settings/smtp/test", response_model=SmtpTestResponse)
+def test_smtp_settings(
+    payload: SmtpTestRequest,
+    session: Session = Depends(require_session),
+) -> SmtpTestResponse:
+    """Schickt eine Test-Mail an die angegebene Adresse.
+
+    Nutzt die aktuell gespeicherte SMTP-Config — auch dann wenn
+    ``enabled=False`` (Testfall: Config eingegeben, aber vor
+    Aktivieren nochmal pruefen).
+    """
+    require_admin_role(session)
+    from opn_cockpit.notifications.mail import (  # noqa: PLC0415
+        MailError,
+        MailMessage,
+        send_mail,
+    )
+
+    smtp = session.opened.data.settings.smtp
+    # Fuer den Test aktivieren wir SMTP temporaer im lokalen Copy —
+    # die Vault-Persistenz bleibt unberuehrt.
+    from dataclasses import replace  # noqa: PLC0415
+    smtp_effective = replace(smtp, enabled=True)
+
+    if not smtp_effective.host:
+        return SmtpTestResponse(
+            ok=False,
+            detail="Kein SMTP-Host konfiguriert.",
+        )
+
+    subject = "[Cockpit] SMTP-Test"
+    body = (
+        "Diese Test-Mail wurde vom OPN-Cockpit-Admin-Interface "
+        "verschickt.\n\n"
+        f"Host:    {smtp_effective.host}:{smtp_effective.port}\n"
+        f"TLS:     {smtp_effective.tls_mode}\n"
+        f"From:    {smtp_effective.from_addr or '(leer)'}\n"
+    )
+    try:
+        send_mail(smtp_effective, MailMessage(
+            to=(payload.to,), subject=subject, body_text=body,
+        ))
+    except MailError as exc:
+        return SmtpTestResponse(ok=False, detail=str(exc))
+    return SmtpTestResponse(ok=True, detail=f"Test-Mail an {payload.to} verschickt.")
 
 
 @router.post("/change-password", status_code=status.HTTP_200_OK)

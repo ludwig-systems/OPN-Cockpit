@@ -4,6 +4,41 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### SMTP + E-Mail-Benachrichtigung bei Firmware-Rollout-Ende
+
+Neue Vault-Sektion **SMTP-Config** — pro Tresor konfigurierbar
+(mitwandernd, mit Master-Passwort geschuetzt). Cockpit verschickt nach
+dem Ende eines Firmware-Rollouts (done / failed / cancelled) eine
+Zusammenfassungs-Mail an die Default-Empfaenger:
+
+- Betreff mit Rollout-ID + Status
+- Body: Zaehler (X OK, Y FAILED, Z SKIPPED) + Pro-Geraet-Zeile
+  mit Endzustand und Summary
+- ``Auto-Submitted: auto-generated`` Header damit MTAs keine
+  Auto-Replies zurueckschicken
+
+**Endpunkte** unter ``/api/vaults/settings/smtp``:
+- GET — Config lesen, Password immer als ``***`` maskiert
+- PUT — Setzen. Password-Semantik: ``"***"`` behaelt den gespeicherten
+  Wert (kein Verlust bei Teil-Updates); leerer String loescht ihn
+- POST ``/test`` — Test-Mail an eine frei waehlbare Adresse ohne
+  die Config zu aendern, auch bei ``enabled=False`` nutzbar
+
+**TLS-Modi**: STARTTLS (Port 587), TLS-wrapped (Port 465), oder
+none (nur fuer Lab-SMTP). Passwort-freie Server werden akzeptiert
+(username="" -> kein login-Call).
+
+UI: neuer Block im Vault-Settings-Modal (SMTP-Sektion vor der CA-
+Sektion): Host, Port, TLS-Modus, Username, Passwort, From, Default-
+Empfaenger, Test-Empfaenger + Test-Button.
+
+**Best-Effort**: Mail-Send blockiert einen Rollout NIEMALS. Alle
+Exceptions werden geschluckt und im Audit-Log dokumentiert
+(``firmware_rollout_mail_failed``).
+
+Pro-Tag-Wartungsfenster mit Multi-Day-Iteration steht als
+naechster Sub-Schritt noch aus.
+
 ### Interfaces-Tab V2: RX/TX-Statistiken + Interface-Reload
 
 Der Interface-Tab im Device-Modal zeigt jetzt zusaetzlich zu IP/MTU/MAC
