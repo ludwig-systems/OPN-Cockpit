@@ -948,6 +948,7 @@
           <button class="modal-tab" data-tab="routes" role="tab">Routen</button>
           <button class="modal-tab" data-tab="rules" role="tab">Regeln</button>
           <button class="modal-tab" data-tab="unbound" role="tab">DNS</button>
+          <button class="modal-tab" data-tab="interfaces" role="tab">Interfaces</button>
         </div>
 
         <div class="modal-body">
@@ -1195,6 +1196,24 @@
               </div>
               <div class="alm-list" id="fwd-list"></div>
             </div>
+          </div>
+
+          <!-- Tab: Interfaces (Detail-Info zum Kachel-Widget "Ports") -->
+          <div class="modal-tab-pane" data-tab-pane="interfaces" role="tabpanel" hidden>
+            <div class="alm-toolbar">
+              <input id="ifm-filter" class="form-input" type="search"
+                     placeholder="Filter (Name, Description, IP)..." autocomplete="off" />
+              <div class="alm-status" id="ifm-status">—</div>
+            </div>
+            <div class="form-hint" style="margin-bottom:8px;">
+              Live-Interfaces aus <em>System → Overview → Interfaces</em>.
+              Statuspunkt: <span style="color: var(--accent);">gruen</span>
+              = admin-up + link-up · <span style="color: #b06a1f;">gelb</span>
+              = admin-up + link-down (kein Kabel?) ·
+              <span style="color: var(--text-subtle);">grau</span>
+              = admin-disabled.
+            </div>
+            <div class="alm-list" id="ifm-list"></div>
           </div>
 
           <!-- Tab: Regeln (Firewall-Filter) -->

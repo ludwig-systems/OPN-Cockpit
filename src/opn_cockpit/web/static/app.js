@@ -2642,6 +2642,8 @@
       loadRoutesTab().catch(() => {});
     } else if (tabName === 'rules') {
       loadRulesTab().catch(() => {});
+    } else if (tabName === 'interfaces') {
+      loadInterfacesTab().catch(() => {});
     } else if (tabName === 'unbound') {
       // Beim Tab-Wechsel immer auf Sub-Tab "hosts" zuruecksetzen — der
       // User-Klick auf "Domain-Overrides" laedt diesen lazy nach.
@@ -2699,6 +2701,8 @@
     almCurrentDevice = null;
     bhLoadedForDeviceId = null;
     currentBackupDeviceId = null;
+    ifmLoadedForDeviceId = null;
+    ifmRawInterfaces = [];
     // Firmware-Progress-Poll stoppen. Das Update laeuft in OPNsense
     // weiter - beim naechsten Oeffnen holt "Updates suchen" den Stand.
     hideFirmwareProgress();
@@ -3957,6 +3961,155 @@
   let frmEditMode = 'add';
   let frmEditUuid = '';
   let frmTargetDeviceId = '';
+
+  // -------------------- Interfaces-Tab im Device-Modal (v0.11) --------------------
+
+  let ifmRawInterfaces = [];
+  let ifmLoadedForDeviceId = null;
+
+  async function loadInterfacesTab(force = false) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    if (!device) return;
+    if (!force && ifmLoadedForDeviceId === currentDeviceId && ifmRawInterfaces.length) {
+      renderInterfacesList();
+      return;
+    }
+    ifmRawInterfaces = [];
+    ifmLoadedForDeviceId = currentDeviceId;
+    $('#ifm-status').textContent = 'Lade…';
+    $('#ifm-filter').value = '';
+    $('#ifm-list').innerHTML = '';
+    try {
+      const r = await apiGet(`/api/inventory/devices/${currentDeviceId}/interfaces`);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        $('#ifm-status').textContent = body.detail || `Fehler ${r.status}`;
+        return;
+      }
+      const data = await r.json();
+      ifmRawInterfaces = data.interfaces || [];
+      $('#ifm-status').textContent = data.summary;
+      renderInterfacesList();
+    } catch (err) {
+      $('#ifm-status').textContent = err.message;
+    }
+  }
+
+  function renderInterfacesList() {
+    const list = $('#ifm-list');
+    list.innerHTML = '';
+    const filter = ($('#ifm-filter').value || '').trim().toLowerCase();
+    const matching = filter
+      ? ifmRawInterfaces.filter((i) =>
+          (i.identifier || '').toLowerCase().includes(filter)
+          || (i.description || '').toLowerCase().includes(filter)
+          || (i.device || '').toLowerCase().includes(filter)
+          || (i.ipv4 || '').toLowerCase().includes(filter)
+          || (i.ipv6 || '').toLowerCase().includes(filter)
+          || (i.macaddr || '').toLowerCase().includes(filter))
+      : ifmRawInterfaces;
+
+    if (matching.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.padding = '24px';
+      empty.style.textAlign = 'center';
+      empty.style.color = 'var(--text-subtle)';
+      empty.textContent = filter
+        ? 'Kein Treffer fuer den Filter.'
+        : 'Keine Interfaces geladen.';
+      list.appendChild(empty);
+      return;
+    }
+
+    for (const iface of matching) {
+      const row = document.createElement('div');
+      row.className = 'ifm-row';
+
+      // Statuspunkt
+      const dot = document.createElement('span');
+      dot.className = 'ifm-status-dot';
+      if (!iface.enabled) {
+        dot.classList.add('off');
+        dot.title = 'Admin-disabled';
+      } else if (iface.link_up) {
+        dot.classList.add('up');
+        dot.title = 'Admin-up + Link-up';
+      } else {
+        dot.classList.add('no-link');
+        dot.title = 'Admin-up, aber kein Link (Kabel raus?)';
+      }
+      row.appendChild(dot);
+
+      // Identifier + Device
+      const idCell = document.createElement('div');
+      idCell.className = 'ifm-identifier';
+      const idText = document.createTextNode(iface.identifier || '(unbenannt)');
+      idCell.appendChild(idText);
+      if (iface.device && iface.device !== iface.identifier) {
+        const dev = document.createElement('span');
+        dev.className = 'ifm-device';
+        dev.textContent = iface.device;
+        idCell.appendChild(dev);
+      }
+      row.appendChild(idCell);
+
+      // Description + IP-Zeile
+      const meta = document.createElement('div');
+      meta.className = 'ifm-meta';
+      if (iface.description) {
+        const d = document.createElement('span');
+        d.className = 'ifm-description';
+        d.textContent = iface.description;
+        meta.appendChild(d);
+      }
+      const ipRow = document.createElement('span');
+      ipRow.className = 'ifm-ip';
+      const v4 = iface.ipv4
+        ? `${iface.ipv4}${iface.ipv4_subnetbits ? '/' + iface.ipv4_subnetbits : ''}`
+        : '';
+      const v6 = iface.ipv6
+        ? `${iface.ipv6}${iface.ipv6_subnetbits ? '/' + iface.ipv6_subnetbits : ''}`
+        : '';
+      if (v4) {
+        ipRow.appendChild(document.createTextNode(v4));
+      }
+      if (v6) {
+        const v6span = document.createElement('span');
+        v6span.className = 'ifm-ip-v6';
+        v6span.textContent = v6;
+        ipRow.appendChild(v6span);
+      }
+      if (!v4 && !v6) {
+        ipRow.appendChild(document.createTextNode('— keine IP —'));
+      }
+      meta.appendChild(ipRow);
+      row.appendChild(meta);
+
+      // Media / MTU / MAC
+      const tail = document.createElement('div');
+      tail.className = 'ifm-tail';
+      if (iface.media) {
+        const m = document.createElement('span');
+        m.className = 'ifm-media';
+        m.textContent = iface.media;
+        tail.appendChild(m);
+      }
+      const mtuMac = [];
+      if (iface.mtu) mtuMac.push(`MTU ${iface.mtu}`);
+      if (iface.macaddr) mtuMac.push(iface.macaddr);
+      if (mtuMac.length) {
+        const m2 = document.createElement('span');
+        m2.className = 'ifm-mtu-mac';
+        m2.textContent = mtuMac.join(' · ');
+        tail.appendChild(m2);
+      }
+      row.appendChild(tail);
+
+      list.appendChild(row);
+    }
+  }
 
   async function loadRulesTab(force = false) {
     if (!currentDeviceId) return;
@@ -8898,6 +9051,8 @@
     if (frmFilter) frmFilter.addEventListener('input', renderRulesList);
     const frmAdd = $('#frm-add-btn');
     if (frmAdd) frmAdd.addEventListener('click', openRuleAddModal);
+    const ifmFilter = $('#ifm-filter');
+    if (ifmFilter) ifmFilter.addEventListener('input', renderInterfacesList);
     // Unbound-Tab + Modal
     const unbFilter = $('#unb-filter');
     if (unbFilter) unbFilter.addEventListener('input', renderUnboundList);

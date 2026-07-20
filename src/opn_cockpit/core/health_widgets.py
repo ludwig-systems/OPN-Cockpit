@@ -517,10 +517,167 @@ def _as_bool(value: Any) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Interfaces-Detail (fuer Device-Modal-Tab)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class InterfaceDetail:
+    """Detail-Info pro Interface fuer den Device-Modal-Tab.
+
+    Unterscheidet Admin-Status (Config-Ebene, ``enabled``) von Link-
+    Status (Physik-Ebene, ``link_up``). Beides ist fuer die
+    Statuspunkt-Farbe relevant:
+    * ``enabled=false``     -> grau (deaktiviert, aus)
+    * ``enabled=true`` + ``link_up=true``  -> gruen (voll aktiv)
+    * ``enabled=true`` + ``link_up=false`` -> gelb (Kabel raus / no-carrier)
+    """
+
+    identifier: str        # "wan", "lan", "opt1"
+    description: str       # OPNsense-Description ("HQ WAN Uplink")
+    device: str            # OS-Device-Name ("em0", "igb1", "vtnet0")
+    enabled: bool          # Admin-Up
+    link_up: bool          # Physik-Link
+    status_raw: str        # Rohes Status-Wort von OPNsense (fuer Tooltip)
+    ipv4: str              # Primaere IPv4-Adresse
+    ipv4_subnetbits: int   # /24, /29, ...
+    ipv6: str              # Primaere IPv6-Adresse
+    ipv6_subnetbits: int
+    mtu: str               # OPNsense liefert das als String — wir uebernehmen 1:1
+    macaddr: str
+    media: str             # z. B. "1000baseTX <full-duplex>"
+
+
+@dataclass(frozen=True, slots=True)
+class InterfacesDetailResult:
+    reachable: bool
+    authenticated: bool
+    endpoint_available: bool
+    interfaces: tuple[InterfaceDetail, ...]
+    summary: str
+
+
+def _extract_first_ip(row: dict[str, Any], key: str) -> tuple[str, int]:
+    """Zieht die erste IPv4/IPv6-Adresse aus dem ipv4/ipv6-Feld.
+
+    OPNsense-Response-Variante 1: ``ipv4: [{"ipaddr": "1.2.3.4",
+    "subnetbits": 24}]`` (Liste).
+    Variante 2: direkt String ``"1.2.3.4/24"``.
+    Variante 3: Dict mit ``address``/``prefix``.
+    """
+    raw = row.get(key)
+    if isinstance(raw, list) and raw:
+        first = raw[0]
+        if isinstance(first, dict):
+            ip = str(first.get("ipaddr", first.get("address", ""))).strip()
+            bits_raw = first.get("subnetbits", first.get("prefix", ""))
+            try:
+                bits = int(str(bits_raw)) if bits_raw not in ("", None) else 0
+            except (TypeError, ValueError):
+                bits = 0
+            return ip, bits
+    if isinstance(raw, dict):
+        ip = str(raw.get("ipaddr", raw.get("address", ""))).strip()
+        bits_raw = raw.get("subnetbits", raw.get("prefix", ""))
+        try:
+            bits = int(str(bits_raw)) if bits_raw not in ("", None) else 0
+        except (TypeError, ValueError):
+            bits = 0
+        return ip, bits
+    if isinstance(raw, str) and "/" in raw:
+        ip_part, _, bits_part = raw.partition("/")
+        try:
+            return ip_part.strip(), int(bits_part)
+        except ValueError:
+            return ip_part.strip(), 0
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip(), 0
+    return "", 0
+
+
+def fetch_interfaces_detailed(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> InterfacesDetailResult:
+    """Vollstaendige Interface-Liste mit IP/MTU/MAC/Link-Status.
+
+    Nutzt denselben Endpoint wie ``fetch_interfaces_status``, extrahiert
+    aber alle sinnvollen Felder pro Zeile — fuer den Device-Modal-Tab.
+    """
+    reachable, authenticated, body, ep_available = _safe_fetch(
+        client, target, key, secret, INTERFACES_INFO_ENDPOINT, method="POST",
+    )
+    if not reachable or not authenticated or not ep_available:
+        summary = (
+            "Box nicht erreichbar" if not reachable
+            else "Auth abgelehnt" if not authenticated
+            else "Interfaces-Endpoint nicht verfuegbar"
+        )
+        return InterfacesDetailResult(
+            reachable=reachable, authenticated=authenticated,
+            endpoint_available=ep_available,
+            interfaces=(), summary=summary,
+        )
+
+    rows = _extract_rows(body)
+    entries: list[InterfaceDetail] = []
+    for row in rows:
+        identifier = (
+            str(row.get("identifier", ""))
+            or str(row.get("name", ""))
+        ).strip()
+        device = str(row.get("device", "")).strip()
+        # Zeilen ohne Identifier UND ohne Device sind Datenmuell.
+        if not identifier and not device:
+            continue
+
+        enabled = _as_bool(row.get("enabled", True))
+        status_val = str(row.get("status", "")).strip().lower()
+        link_val = str(row.get("link", "")).strip().lower()
+        link_up = (
+            status_val in {"up", "1", "active", "assoc"}
+            or link_val in {"up", "1", "active"}
+        )
+
+        ipv4, ipv4_bits = _extract_first_ip(row, "ipv4")
+        ipv6, ipv6_bits = _extract_first_ip(row, "ipv6")
+
+        entries.append(InterfaceDetail(
+            identifier=identifier,
+            description=str(row.get("description", "")).strip(),
+            device=device,
+            enabled=enabled,
+            link_up=link_up,
+            status_raw=str(row.get("status", "")).strip(),
+            ipv4=ipv4,
+            ipv4_subnetbits=ipv4_bits,
+            ipv6=ipv6,
+            ipv6_subnetbits=ipv6_bits,
+            mtu=str(row.get("mtu", "")).strip(),
+            macaddr=str(row.get("macaddr", "")).strip(),
+            media=str(row.get("media", "")).strip(),
+        ))
+
+    # Nach Identifier alphabetisch sortieren (wan, lan, opt1..); Interfaces
+    # ohne Identifier ans Ende.
+    entries.sort(key=lambda e: (not e.identifier, e.identifier.lower(), e.device))
+    return InterfacesDetailResult(
+        reachable=True, authenticated=True,
+        endpoint_available=True,
+        interfaces=tuple(entries),
+        summary=f"{len(entries)} Interface(s) live geladen.",
+    )
+
+
 __all__ = [
     "CARP_STATUS_ENDPOINT",
     "CarpStatus",
     "INTERFACES_INFO_ENDPOINT",
+    "InterfaceDetail",
+    "InterfacesDetailResult",
     "InterfacesStatus",
     "NTP_STATUS_ENDPOINT_CANDIDATES",
     "NtpStatus",
@@ -530,6 +687,7 @@ __all__ = [
     "STATE_WARN",
     "SYSTEM_INFO_ENDPOINT",
     "fetch_carp_status",
+    "fetch_interfaces_detailed",
     "fetch_interfaces_status",
     "fetch_ntp_status",
 ]

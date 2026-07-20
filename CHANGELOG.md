@@ -2,7 +2,35 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets
+## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab
+
+### Interfaces-Tab im Device-Modal
+
+Ergaenzung zum Kachel-Widget "Ports" (das nur `6/8` zeigt): neuer Tab
+**„Interfaces"** im Device-Modal listet alle Interfaces mit vollem
+Detail:
+
+- **Statuspunkt** links: gruen = admin-up + link-up, gelb = admin-up
+  + link-down (Kabel raus?), grau = admin-disabled.
+- **Identifier + Device**: ``wan (vtnet0)``, mono-font.
+- **Description**: OPNsense-User-Facing Beschreibung ("HQ WAN Uplink").
+- **IPv4 + IPv6** mit Netzbits: ``203.0.113.4/24``.
+- **Media**: OPNsense's Roh-Bezeichner (``1000baseTX <full-duplex>``).
+- **MTU + MAC**: rechts als kleine Mono-Zeile.
+- Deaktivierte Interfaces bleiben sichtbar (grauer Punkt) — anders als
+  im Kachel-Widget das sie ignoriert.
+
+**Filter-Input** oben durchsucht Identifier, Description, Device,
+IPv4/IPv6 und MAC-Adresse.
+
+**Endpoint**: `GET /api/inventory/devices/{id}/interfaces` — teilt sich
+den OPNsense-Endpoint `/api/interfaces/overview/interfacesInfo` mit dem
+Kachel-Widget, extrahiert aber alle sinnvollen Felder statt nur des
+Up-Count.
+
+**Neue Tests**: 7 Unit-Tests in `test_health_widgets.py`
+(TestInterfacesDetailed) fuer Voll-Detail-Parsing, Schema-Varianten,
+Sortierung, 404-Fallback.
 
 ### Kachel-Widgets: CARP/HA · Interfaces · NTP
 

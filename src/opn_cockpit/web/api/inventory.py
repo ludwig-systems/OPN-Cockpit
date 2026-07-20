@@ -128,6 +128,8 @@ from opn_cockpit.web.api.schemas import (
     RouteEntryResponse,
     RuleEntryResponse,
     SafetyNetTestResponse,
+    DeviceInterfacesResponse,
+    InterfaceDetailEntry,
     KachelWidgetsEntry,
     KachelWidgetsRequest,
     KachelWidgetsResponse,
@@ -515,6 +517,82 @@ def kachel_widgets(
         results = list(pool.map(_probe, targets))
     session.touch()
     return KachelWidgetsResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/interfaces  - Detail-Tab im Device-Modal
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/interfaces",
+    response_model=DeviceInterfacesResponse,
+)
+def get_device_interfaces(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> DeviceInterfacesResponse:
+    """Liefert die volle Interface-Liste einer Box mit IP/MTU/MAC/Link.
+
+    Nutzt denselben OPNsense-Endpoint wie das Kachel-Widget (``ports``),
+    liest aber ALLE relevanten Felder statt nur der Up-Count-Statistik.
+    Wird vom Device-Modal-Tab "Interfaces" abgefragt.
+    """
+    from opn_cockpit.core.health_widgets import (  # noqa: PLC0415
+        fetch_interfaces_detailed,
+    )
+
+    device = _resolve_device_or_404(session, device_id)
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    timestamp = _iso_now()
+
+    with HttpClient(targets=[tgt], tuning=tuning) as client:
+        result = fetch_interfaces_detailed(
+            client, tgt, device.api_key, device.api_secret,
+        )
+
+    session.touch()
+    if not result.reachable or not result.authenticated:
+        return DeviceInterfacesResponse(
+            device_id=device.id, device_name=device.name,
+            reachable=False, summary=f"Interfaces nicht ladbar: {result.summary}",
+            interfaces=[], checked_at_iso=timestamp,
+        )
+    if not result.endpoint_available:
+        return DeviceInterfacesResponse(
+            device_id=device.id, device_name=device.name,
+            reachable=True,
+            summary=(
+                "OPNsense-Version hat keinen "
+                "/api/interfaces/overview/interfacesInfo-Endpoint."
+            ),
+            interfaces=[], checked_at_iso=timestamp,
+        )
+    entries = [
+        InterfaceDetailEntry(
+            identifier=iface.identifier,
+            description=iface.description,
+            device=iface.device,
+            enabled=iface.enabled,
+            link_up=iface.link_up,
+            status_raw=iface.status_raw,
+            ipv4=iface.ipv4,
+            ipv4_subnetbits=iface.ipv4_subnetbits,
+            ipv6=iface.ipv6,
+            ipv6_subnetbits=iface.ipv6_subnetbits,
+            mtu=iface.mtu,
+            macaddr=iface.macaddr,
+            media=iface.media,
+        )
+        for iface in result.interfaces
+    ]
+    return DeviceInterfacesResponse(
+        device_id=device.id, device_name=device.name,
+        reachable=True, summary=result.summary,
+        interfaces=entries, checked_at_iso=timestamp,
+    )
 
 
 # ---------------------------------------------------------------------------

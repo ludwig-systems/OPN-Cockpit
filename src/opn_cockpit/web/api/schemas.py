@@ -1396,6 +1396,46 @@ class KachelWidgetsResponse(BaseModel):
     results: list[KachelWidgetsEntry]
 
 
+# ---------------------------------------------------------------------------
+# Interfaces-Detail (v0.11 Device-Modal-Tab)
+# ---------------------------------------------------------------------------
+
+
+class InterfaceDetailEntry(BaseModel):
+    """Ein physisches Interface eines Geraets mit vollem Detail-Set."""
+
+    identifier: str
+    description: str
+    device: str
+    enabled: bool
+    """Admin-Status (Config-Ebene)."""
+
+    link_up: bool
+    """Link-Status (Physik-Ebene)."""
+
+    status_raw: str
+    """OPNsense's Roh-Status-Wort fuer Tooltip."""
+
+    ipv4: str
+    ipv4_subnetbits: int
+    ipv6: str
+    ipv6_subnetbits: int
+    mtu: str
+    macaddr: str
+    media: str
+
+
+class DeviceInterfacesResponse(BaseModel):
+    """Antwort auf ``GET /api/inventory/devices/{id}/interfaces``."""
+
+    device_id: str
+    device_name: str
+    reachable: bool
+    summary: str
+    interfaces: list[InterfaceDetailEntry] = Field(default_factory=list)
+    checked_at_iso: str
+
+
 class PlannedActionResponse(BaseModel):
     device_id: str
     device_name: str

@@ -4231,3 +4231,88 @@ a.card-open-link { text-decoration: none; }
     background: rgba(232, 158, 76, 0.18);
   }
 }
+
+/* ===== Interfaces-Tab (v0.11 Device-Modal) ===== */
+
+.ifm-row {
+  display: grid;
+  grid-template-columns: 14px 110px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  font-size: 13px;
+}
+
+.ifm-row:last-child { border-bottom: none; }
+
+.ifm-row:hover {
+  background: rgba(132, 158, 76, 0.04);
+}
+
+.ifm-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-subtle);
+  justify-self: center;
+}
+
+.ifm-status-dot.up      { background: var(--accent); }
+.ifm-status-dot.no-link { background: #d4a04a; }
+.ifm-status-dot.off     { background: rgba(0, 0, 0, 0.18); }
+
+.ifm-identifier {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.ifm-identifier .ifm-device {
+  color: var(--text-subtle);
+  font-weight: normal;
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.ifm-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ifm-description {
+  color: var(--text-subtle);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ifm-ip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.ifm-ip .ifm-ip-v6 {
+  color: var(--text-subtle);
+  margin-left: 8px;
+}
+
+.ifm-tail {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-subtle);
+  line-height: 1.3;
+}
+
+.ifm-tail .ifm-media {
+  display: block;
+}
+
+.ifm-tail .ifm-mtu-mac {
+  display: block;
+}
