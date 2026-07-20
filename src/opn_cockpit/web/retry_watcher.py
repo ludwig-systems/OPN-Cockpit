@@ -341,6 +341,12 @@ class RetryWatcher:
             with tmp.open("w", encoding="utf-8") as fh:
                 json.dump(payload, fh, ensure_ascii=False, indent=2)
             os.replace(tmp, self._queue_path)
+            # D1 (SECURITY-AUDIT-v0.11): 0600. RetryWatcher haelt
+            # Session-Tokens im File - ohne restriktive Permissions kann
+            # ein lokaler Non-Cockpit-User damit die Session hijacken bis
+            # zu deren Ablauf.
+            with contextlib.suppress(OSError):
+                os.chmod(self._queue_path, 0o600)
         except OSError:
             _log.exception(
                 "RetryWatcher: Persistenz fehlgeschlagen (%s)",

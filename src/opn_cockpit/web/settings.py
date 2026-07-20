@@ -14,10 +14,21 @@ bleibt der empfohlene Endzustand.
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import shutil
 import sys
 from dataclasses import dataclass
+
+_log = logging.getLogger(__name__)
+
+# Whitelist fuer Service-Namen die in Restart-Subprozess-Shell-Zeilen
+# interpoliert werden (Windows nssm, Linux systemctl). Nur ASCII-Buchstaben,
+# Ziffern, Punkt, Bindestrich, Unterstrich - alles was Windows/Linux fuer
+# Service-Namen ohnehin erlauben.
+# Siehe SECURITY-AUDIT-v0.11.local.md Finding D2.
+_ALLOWED_SERVICE_NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 DEFAULT_HOST = "127.0.0.1"
 # 443 = HTTPS-Standardport. Zusammen mit HTTPS-by-default (v0.10) heisst
@@ -171,8 +182,24 @@ def service_name(env: dict[str, str] | None = None) -> str:
 
     Windows: ``OPNCOCKPIT_SERVICE_NAME`` oder Default ``OPN-Cockpit``.
     Linux: ``opn-cockpit.service`` (fix).
+
+    Der Name wird in ``server_control._spawn_restart`` in eine
+    Shell-Zeile interpoliert (``cmd /c "... nssm restart <name>"``).
+    Um Command-Injection ueber eine manipulierte Env-Var zu verhindern
+    (Defense-in-Depth — der Env-Var-Wert kommt vom Deploy-Betreiber, ist
+    aber trotzdem eine Whitelist wert), erzwingt diese Funktion ein
+    striktes ``[A-Za-z0-9._-]{1,64}``-Muster. Nicht-passende Werte
+    werden verworfen und der Default zurueckgegeben.
     """
     env = env if env is not None else dict(os.environ)
-    if sys.platform == "win32":
-        return env.get("OPNCOCKPIT_SERVICE_NAME") or "OPN-Cockpit"
-    return "opn-cockpit.service"
+    if sys.platform != "win32":
+        return "opn-cockpit.service"
+    raw = env.get("OPNCOCKPIT_SERVICE_NAME") or "OPN-Cockpit"
+    if not _ALLOWED_SERVICE_NAME.fullmatch(raw):
+        _log.warning(
+            "OPNCOCKPIT_SERVICE_NAME=%r matcht nicht [A-Za-z0-9._-]{1,64} - "
+            "fallback auf 'OPN-Cockpit'. (SECURITY-AUDIT-v0.11 D2)",
+            raw,
+        )
+        return "OPN-Cockpit"
+    return raw

@@ -137,6 +137,11 @@ def run(settings: WebSettings | None = None) -> int:
     # HTTPS-Fallback-Kette: Env-Cert -> Custom-Cert -> Auto-Cert -> HTTP.
     settings = _ensure_tls_or_http(settings)
 
+    # SECURITY-AUDIT-v0.11 D7: Boot-Audit-Event mit TLS-Modus, damit
+    # ein spaeter versehentlich aktiviertes OPNCOCKPIT_ALLOW_HTTP=1 im
+    # Audit-Log nachvollziehbar bleibt (nicht nur in stderr).
+    _audit_boot_tls_mode(settings)
+
     app = create_app()
     app.state.web_settings = settings   # damit Endpoints das lesen koennen
 
@@ -248,6 +253,42 @@ def _ensure_tls_or_http(settings: WebSettings) -> WebSettings:
         tls_key=str(auto_paths.key),
         tls_source=TLS_SOURCE_AUTO,
     )
+
+
+def _audit_boot_tls_mode(settings: WebSettings) -> None:
+    """Schreibt beim Server-Boot einen einmaligen Audit-Event mit TLS-Modus.
+
+    Verwendet ``SERVER_RESTARTED``-Event-Kind (existiert bereits fuer den
+    Restart-Endpoint) mit ``action="server_boot"``. So bleibt ein
+    versehentlich aktiviertes ``OPNCOCKPIT_ALLOW_HTTP=1`` im Audit-Log
+    nachvollziehbar — nicht nur in stderr das nach Log-Rotation weg ist.
+
+    Fehler beim Audit-Write duerfen den Server-Start nicht blockieren.
+    """
+    try:
+        from opn_cockpit.audit.backend import get_audit_backend  # noqa: PLC0415
+        from opn_cockpit.audit.log import AuditEventKind  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return
+    tls_summary = {
+        "env": "TLS aktiv (Env-Cert)",
+        "custom": "TLS aktiv (Custom-Cert)",
+        "auto": "TLS aktiv (Auto-generiertes Self-Signed)",
+        "none": "HTTP-only (OPNCOCKPIT_ALLOW_HTTP=1)",
+    }.get(settings.tls_source, f"TLS-Modus: {settings.tls_source}")
+    try:
+        get_audit_backend().append(
+            AuditEventKind.SERVER_RESTARTED,
+            actor="system",
+            action="server_boot",
+            summary=(
+                f"Server-Boot: {tls_summary}, bind {settings.host}:{settings.port}"
+            ),
+        )
+    except Exception:  # noqa: BLE001
+        # Audit-Backend nicht ansprechbar (Filesystem-Rechte, SQLite-Lock,
+        # o. ae.) -> nicht fatal, Server startet trotzdem.
+        pass
 
 
 def _schedule_browser_open(url: str) -> None:

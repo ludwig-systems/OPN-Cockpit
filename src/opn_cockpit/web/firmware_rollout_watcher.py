@@ -839,6 +839,12 @@ class FirmwareRolloutWatcher:
                 encoding="utf-8",
             )
             os.replace(tmp_path, self._queue_path)
+            # D1 (SECURITY-AUDIT-v0.11): 0600 damit lokale Non-Cockpit-User
+            # nicht den Vault-Pfad + Rollout-Metadaten lesen. Auf Windows
+            # ist chmod ein No-Op; die NTFS-ACL des Service-Users greift
+            # dort schon durch <app_data>-Owner.
+            with contextlib.suppress(OSError):
+                os.chmod(self._queue_path, 0o600)
         except OSError as exc:
             _log.warning(
                 "FirmwareRolloutWatcher: Persistenz fehlgeschlagen (%s)", exc,

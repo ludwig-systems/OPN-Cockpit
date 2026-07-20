@@ -2,7 +2,39 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling
+## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
+
+### Security-Audit-Refresh (Delta v0.8 → v0.11)
+
+Vollstaendiger Delta-Audit ueber alle Features die seit dem
+`SECURITY-AUDIT-FULL-0.8.local.md` neu ins Repo kamen: HTTPS by
+default, Auto-Cert-Rotation, Server-Restart-Endpoint, Firmware-
+Rollout + Scheduling, CSV-Import, Kachel-Widgets, Interfaces-Tab.
+
+**Ergebnis**: keine Critical/High-Findings. Drei Low-Findings mit
+Defense-in-Depth-Fix — alle im gleichen Zug umgesetzt:
+
+- **D1** — `chmod 0o600` auf allen drei Watcher-State-JSONs
+  (`retry-queue.json`, `safety-net-pending.json`,
+  `firmware-rollout.json`). Verhindert dass lokale Non-Cockpit-User
+  Session-Tokens (Retry-Watcher) oder Vault-Pfad-Metadaten lesen.
+  Windows-No-Op, Linux/Docker sauber.
+- **D2** — `service_name()` in `web/settings.py` validiert
+  `OPNCOCKPIT_SERVICE_NAME` gegen `[A-Za-z0-9._-]{1,64}`. Vermeidet
+  Command-Injection in der `nssm restart "<name>"`- bzw.
+  `systemctl restart <name>`-Shell-Zeile falls die Env-Var
+  manipuliert wird.
+- **D7** — Neuer Boot-Audit-Event beim Server-Start:
+  `SERVER_RESTARTED` mit `action="server_boot"` + TLS-Modus
+  (`env`/`custom`/`auto`/`none`). Ein versehentlich aktiviertes
+  `OPNCOCKPIT_ALLOW_HTTP=1` bleibt damit im Audit-Log
+  nachvollziehbar, nicht nur in stderr.
+
+Detail-Befunde inkl. akzeptierter Findings (D3–D10) in
+`docs/SECURITY-AUDIT-v0.11.local.md`. Public-Zusammenfassung in
+`docs/SECURITY-AUDIT.md`.
+
+Volle Suite: 1221 Tests gruen.
 
 ### Firmware-Rollout: Zeitplanung / Wartungsfenster
 
