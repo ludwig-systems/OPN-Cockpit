@@ -1259,6 +1259,71 @@ class UnboundForwardDeletePlanRequest(BaseModel):
     target_device_ids: list[str] = Field(..., min_length=1)
 
 
+# ---------------------------------------------------------------------------
+# CSV Import/Export fuer Unbound Host-Overrides + Query-Forwards
+# ---------------------------------------------------------------------------
+
+
+class UnboundImportRequest(BaseModel):
+    """Bulk-Import via CSV auf einem einzelnen Geraet.
+
+    Zwei-Phasen: erst mit ``dry_run=true`` die Preview holen (Server
+    berechnet welche Zeilen ADD/UPDATE/DELETE/SKIP werden), User
+    bestaetigt, dann ``dry_run=false`` fuer den Apply.
+
+    ``reconcile=true`` schaltet destruktives Loeschen ein: Eintraege die
+    live existieren aber im CSV fehlen werden geloescht. Default aus.
+    """
+
+    csv_content: str = Field(..., max_length=5_000_000)
+    reconcile: bool = False
+    dry_run: bool = True
+
+
+class UnboundImportAction(BaseModel):
+    """Eine einzelne Aktion im Import-Preview / Apply-Report."""
+
+    row_num: int
+    """Zeilennummer in der CSV (Header = 1). ``0`` fuer Reconcile-Delete
+    Eintraege die live existierten aber im CSV fehlten."""
+
+    action: str
+    """``add`` / ``update`` / ``delete`` / ``skip`` / ``failed``."""
+
+    identity: str
+    """User-facing Kurzbezeichnung, z. B. ``opnsense.lab.local`` oder
+    ``lab.local -> 1.1.1.1:853``."""
+
+    summary: str
+    """Erklaerung fuer Preview (was passiert) bzw. Apply (was passiert ist)."""
+
+
+class UnboundImportResponse(BaseModel):
+    """Antwort auf ``POST /.../unbound-{hosts,forwards}/import``."""
+
+    device_id: str
+    device_name: str
+    subsystem: str
+    """``unbound_hosts`` oder ``unbound_forwards``."""
+
+    reconcile: bool
+    dry_run: bool
+    applied: bool
+    """False bei Preview, True nach erfolgtem Apply."""
+
+    parse_errors: list[str] = Field(default_factory=list)
+    """CSV-Zeilenfehler (leer wenn Format valide)."""
+
+    actions: list[UnboundImportAction] = Field(default_factory=list)
+    add_count: int = 0
+    update_count: int = 0
+    delete_count: int = 0
+    skip_count: int = 0
+    failed_count: int = 0
+    executed_at_iso: str = ""
+    """ISO-Timestamp beim Apply. Leer im dry_run."""
+
+
 class PlannedActionResponse(BaseModel):
     device_id: str
     device_name: str

@@ -1137,6 +1137,8 @@
                   </svg>
                   <span>Neuer Host-Override</span>
                 </button>
+                <button class="btn-link btn-sm" id="unb-export-btn" title="Alle Host-Overrides als CSV herunterladen">CSV Export</button>
+                <button class="btn-link btn-sm" id="unb-import-btn" title="Host-Overrides aus CSV importieren">CSV Import…</button>
               </div>
               <div class="alm-list" id="unb-list"></div>
             </div>
@@ -1188,6 +1190,8 @@
                   </svg>
                   <span>Neue Abfrage-Weiterleitung</span>
                 </button>
+                <button class="btn-link btn-sm" id="fwd-export-btn" title="Alle Query-Forwards als CSV herunterladen">CSV Export</button>
+                <button class="btn-link btn-sm" id="fwd-import-btn" title="Query-Forwards aus CSV importieren">CSV Import…</button>
               </div>
               <div class="alm-list" id="fwd-list"></div>
             </div>
@@ -2598,6 +2602,68 @@
           <button class="btn-link btn-danger-text" id="plan-discard-btn" hidden>Plan verwerfen</button>
           <button class="btn-secondary" id="plan-back-btn" hidden>← Bearbeiten</button>
           <button class="btn-primary btn-primary-inline" id="plan-next-btn">Vorschau anzeigen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Unbound CSV-Import (Hosts + Forwards) ================ -->
+    <div class="modal-backdrop" id="unbound-import-modal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="unbound-import-modal-title">
+        <div class="modal-header">
+          <h2 id="unbound-import-modal-title">CSV-Import</h2>
+          <button class="icon-btn modal-close" id="unbound-import-modal-close" aria-label="Schließen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-hint" id="unbound-import-hint" style="margin-bottom:12px;">
+            CSV-Datei auswaehlen — der Server berechnet zuerst eine Preview
+            (welche Zeilen add / update / skip). Erst nach deiner
+            Bestaetigung werden Aenderungen ausgerollt (mit Pre-Apply-
+            Backup, wie bei allen Cockpit-Aktionen).
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="unbound-import-file">CSV-Datei</label>
+              <input id="unbound-import-file" type="file" accept=".csv,text/csv" />
+              <div class="form-hint" id="unbound-import-file-hint">Keine Datei gewaehlt.</div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-checkbox">
+                <input type="checkbox" id="unbound-import-reconcile" />
+                <span>Reconcile-Modus: nicht im CSV enthaltene Eintraege LOESCHEN</span>
+              </label>
+              <div class="form-hint" style="color: var(--danger, #d97767);">
+                Achtung: Reconcile ist destruktiv. Alle Live-Eintraege die
+                nicht im CSV auftauchen werden entfernt. Standard: aus
+                (nur additiv + Updates).
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top:8px;">
+            <button class="btn-secondary" id="unbound-import-preview-btn">Preview berechnen</button>
+          </div>
+
+          <div class="form-error" id="unbound-import-error" hidden></div>
+
+          <!-- Preview-Bereich (nach dem Preview-Klick sichtbar) -->
+          <div class="unbound-import-preview" id="unbound-import-preview" hidden>
+            <div class="unbound-import-summary" id="unbound-import-summary"></div>
+            <div class="unbound-import-parse-errors" id="unbound-import-parse-errors" hidden></div>
+            <div class="unbound-import-actions-list" id="unbound-import-actions-list"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="unbound-import-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="unbound-import-apply-btn" disabled>Anwenden</button>
         </div>
       </div>
     </div>

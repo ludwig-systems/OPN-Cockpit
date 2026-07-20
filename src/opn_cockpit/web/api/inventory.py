@@ -130,6 +130,9 @@ from opn_cockpit.web.api.schemas import (
     SafetyNetTestResponse,
     SyncAliasRequest,
     SyncAliasResponse,
+    UnboundImportAction,
+    UnboundImportRequest,
+    UnboundImportResponse,
     SyncUnboundHostRequest,
     SyncUnboundHostResponse,
     TagSummary,
@@ -1566,6 +1569,547 @@ def get_device_unbound_forwards(
         forwards=entries,
         checked_at_iso=timestamp,
     )
+
+
+# ---------------------------------------------------------------------------
+# CSV Export/Import fuer Unbound (v0.11 - Feature-Request 2026-07-20)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_device_or_404(session: Session, device_id: str):
+    """Gemeinsamer Lookup + Zugriffs-Check fuer die Unbound-CSV-Endpoints."""
+    device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None,
+    )
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(device, session)
+    return device
+
+
+def _fetch_live_unbound_hosts(client, target, key, secret):
+    """Alle Host-Overrides einer Box als UnboundHostSpec-Liste."""
+    from opn_cockpit.core.objects._endpoints import (  # noqa: PLC0415
+        UNBOUND_HOST_SEARCH,
+    )
+    from opn_cockpit.core.objects.unbound import UnboundHostSpec  # noqa: PLC0415
+    response = client.call(
+        target, key, secret,
+        "POST", UNBOUND_HOST_SEARCH,
+        json={"current": 1, "rowCount": -1},
+    )
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return []
+    specs = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        enabled_raw = str(row.get("enabled", "1"))
+        specs.append(UnboundHostSpec(
+            host=str(row.get("hostname", row.get("host", ""))).strip(),
+            domain=str(row.get("domain", "")).strip(),
+            server=str(row.get("server", row.get("rr", ""))).strip(),
+            description=str(row.get("description", row.get("descr", ""))).strip(),
+            enabled=enabled_raw not in ("", "0", "false", "False"),
+        ))
+    return specs
+
+
+def _fetch_live_unbound_forwards(client, target, key, secret):
+    """Alle Query-Forwards einer Box als UnboundForwardSpec-Liste."""
+    from opn_cockpit.core.objects._endpoints import (  # noqa: PLC0415
+        UNBOUND_FORWARD_SEARCH,
+    )
+    from opn_cockpit.core.objects.unbound import UnboundForwardSpec  # noqa: PLC0415
+    response = client.call(
+        target, key, secret,
+        "POST", UNBOUND_FORWARD_SEARCH,
+        json={"current": 1, "rowCount": -1},
+    )
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return []
+    specs = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        enabled_raw = str(row.get("enabled", "1"))
+        port_raw = row.get("port", "53")
+        try:
+            port = int(str(port_raw)) if port_raw not in ("", None) else 53
+        except (TypeError, ValueError):
+            port = 53
+        specs.append(UnboundForwardSpec(
+            domain=str(row.get("domain", "")).strip(),
+            server=str(row.get("server", row.get("forward_addr", ""))).strip(),
+            port=port,
+            type=(str(row.get("type", "forward")).strip() or "forward"),
+            verify=str(row.get("verify", "")).strip(),
+            description=str(row.get("description", row.get("descr", ""))).strip(),
+            enabled=enabled_raw not in ("", "0", "false", "False"),
+        ))
+    return specs
+
+
+# ----- Export -------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/unbound-hosts/export.csv",
+    response_class=Response,
+)
+def export_device_unbound_hosts_csv(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> Response:
+    """Liefert alle Host-Overrides eines Geraets als CSV-Download."""
+    from opn_cockpit.importers.unbound_csv import (  # noqa: PLC0415
+        write_unbound_hosts_csv,
+    )
+
+    device = _resolve_device_or_404(session, device_id)
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    with HttpClient(targets=[tgt], tuning=tuning) as client:
+        specs = _fetch_live_unbound_hosts(
+            client, tgt, device.api_key, device.api_secret,
+        )
+    csv_body = write_unbound_hosts_csv(specs)
+    session.touch()
+    safe_name = "".join(
+        c if c.isalnum() or c in "_-" else "_" for c in device.name
+    ) or "device"
+    filename = f"unbound-hosts-{safe_name}.csv"
+    return Response(
+        content=csv_body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(
+    "/devices/{device_id}/unbound-forwards/export.csv",
+    response_class=Response,
+)
+def export_device_unbound_forwards_csv(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> Response:
+    """Liefert alle Query-Forwards eines Geraets als CSV-Download."""
+    from opn_cockpit.importers.unbound_csv import (  # noqa: PLC0415
+        write_unbound_forwards_csv,
+    )
+
+    device = _resolve_device_or_404(session, device_id)
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    with HttpClient(targets=[tgt], tuning=tuning) as client:
+        specs = _fetch_live_unbound_forwards(
+            client, tgt, device.api_key, device.api_secret,
+        )
+    csv_body = write_unbound_forwards_csv(specs)
+    session.touch()
+    safe_name = "".join(
+        c if c.isalnum() or c in "_-" else "_" for c in device.name
+    ) or "device"
+    filename = f"unbound-forwards-{safe_name}.csv"
+    return Response(
+        content=csv_body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ----- Import (dry-run + apply) -------------------------------------------
+
+
+def _run_unbound_import(
+    *,
+    session: Session,
+    device,
+    payload: UnboundImportRequest,
+    subsystem: str,      # "unbound_hosts" | "unbound_forwards"
+) -> UnboundImportResponse:
+    """Gemeinsame Import-Logik fuer beide Subsystems.
+
+    Fuer jede CSV-Zeile berechnen wir Diff gegen den Live-Zustand:
+    ``add`` (nicht vorhanden), ``update`` (vorhanden aber andere Werte),
+    ``skip`` (identisch). Bei ``reconcile=true`` werden zusaetzlich
+    Live-only Entries als ``delete`` markiert.
+
+    Bei ``dry_run=false`` fuehrt der Server die Actions aus:
+    - Pre-Apply-Backup (blockierend, kein Erfolg => Abbruch)
+    - N add/update/delete-Calls
+    - **einmal** reconfigure am Ende
+    - Erfolgs/Fehler-Report pro Zeile
+    """
+    from opn_cockpit.core.device_info import download_backup  # noqa: PLC0415
+    from opn_cockpit.core.objects.base import RequestContext  # noqa: PLC0415
+    from opn_cockpit.importers.unbound_csv import (  # noqa: PLC0415
+        parse_unbound_forwards_csv,
+        parse_unbound_hosts_csv,
+    )
+    from opn_cockpit.orchestration.registry import get_binding  # noqa: PLC0415
+
+    if subsystem == "unbound_hosts":
+        parse_fn = parse_unbound_hosts_csv
+        fetch_fn = _fetch_live_unbound_hosts
+
+        def _identity(spec):
+            return (spec.host.lower(), spec.domain.lower())
+
+        def _label(spec) -> str:
+            return f"{spec.host}.{spec.domain}"
+
+        def _is_identical(a, b) -> bool:
+            return (
+                a.server == b.server
+                and (a.description or "") == (b.description or "")
+                and a.enabled == b.enabled
+            )
+    elif subsystem == "unbound_forwards":
+        parse_fn = parse_unbound_forwards_csv
+        fetch_fn = _fetch_live_unbound_forwards
+
+        def _identity(spec):
+            return (
+                (spec.domain or "").lower(),
+                spec.server.lower(),
+                int(spec.port),
+            )
+
+        def _label(spec) -> str:
+            dom = spec.domain or "(alle)"
+            return f"{dom} -> {spec.server}:{spec.port} ({spec.type})"
+
+        def _is_identical(a, b) -> bool:
+            return (
+                (a.type or "") == (b.type or "")
+                and (a.verify or "") == (b.verify or "")
+                and (a.description or "") == (b.description or "")
+                and a.enabled == b.enabled
+            )
+    else:
+        msg = f"Unbekannter subsystem: {subsystem!r}"
+        raise ValueError(msg)
+
+    binding = get_binding(subsystem)
+    adapter = binding.adapter
+    controller = binding.controller
+
+    parse_result = parse_fn(payload.csv_content)
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
+    ctx = RequestContext(
+        target=tgt, key=device.api_key, secret=device.api_secret,
+    )
+
+    with HttpClient(targets=[tgt], tuning=tuning) as client:
+        live_specs = fetch_fn(client, tgt, device.api_key, device.api_secret)
+        live_by_ident = {_identity(s): s for s in live_specs}
+
+        # ------ Preview aufbauen ------
+        actions: list[UnboundImportAction] = []
+        csv_idents: set = set()
+        for pos, spec in enumerate(parse_result.specs):
+            ident = _identity(spec)
+            csv_idents.add(ident)
+            row_num = pos + 2  # CSV: Zeile 1 = Header
+            current = live_by_ident.get(ident)
+            if current is None:
+                actions.append(UnboundImportAction(
+                    row_num=row_num, action="add",
+                    identity=_label(spec),
+                    summary=f"Neu: {_label(spec)}",
+                ))
+            elif _is_identical(current, spec):
+                actions.append(UnboundImportAction(
+                    row_num=row_num, action="skip",
+                    identity=_label(spec),
+                    summary="Identisch - uebersprungen.",
+                ))
+            else:
+                actions.append(UnboundImportAction(
+                    row_num=row_num, action="update",
+                    identity=_label(spec),
+                    summary=f"Update: {_label(spec)}",
+                ))
+
+        if payload.reconcile:
+            for ident, current in live_by_ident.items():
+                if ident in csv_idents:
+                    continue
+                actions.append(UnboundImportAction(
+                    row_num=0, action="delete",
+                    identity=_label(current),
+                    summary=f"Loeschen (Live-only): {_label(current)}",
+                ))
+
+        # ------ Zaehlungen ------
+        def _cnt(kind: str) -> int:
+            return sum(1 for a in actions if a.action == kind)
+
+        response = UnboundImportResponse(
+            device_id=device.id,
+            device_name=device.name,
+            subsystem=subsystem,
+            reconcile=payload.reconcile,
+            dry_run=payload.dry_run,
+            applied=False,
+            parse_errors=list(parse_result.errors),
+            actions=actions,
+            add_count=_cnt("add"),
+            update_count=_cnt("update"),
+            delete_count=_cnt("delete"),
+            skip_count=_cnt("skip"),
+            failed_count=0,
+        )
+
+        if payload.dry_run:
+            session.touch()
+            return response
+
+        # Parse-Fehler blockieren den Apply (Preview haette sie gezeigt).
+        if parse_result.errors:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"CSV enthaelt {len(parse_result.errors)} Parse-Fehler. "
+                    "Bitte erst korrigieren."
+                ),
+            )
+
+        # Pre-Apply-Backup ziehen (blockierend)
+        try:
+            content = download_backup(
+                client, tgt, device.api_key, device.api_secret,
+            )
+            backup_record = append_backup(
+                device.id,
+                content,
+                trigger="pre-apply",
+                device_name_at_creation=device.name,
+            )
+        except OpnCockpitError as exc:
+            get_audit_backend().append(
+                AuditEventKind.PRE_APPLY_BACKUP,
+                actor=audit_actor(session),
+                action="csv_import_pre_apply_backup_failed",
+                target_device_id=device.id,
+                target_device_name=device.name,
+                error_kind=exc.context.error_kind,
+                summary=(
+                    f"CSV-Import ({subsystem}) auf '{device.name}': "
+                    f"Pre-Apply-Backup gescheitert - Apply blockiert. "
+                    f"Grund: {exc.context.summary or exc.context.error_kind}"
+                ),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    "Pre-Apply-Backup konnte nicht gezogen werden - Import "
+                    "wurde abgebrochen (keine Aenderungen)."
+                ),
+            ) from exc
+        except BackupStoreError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Backup-Persistenz gescheitert: {exc}",
+            ) from exc
+
+        get_audit_backend().append(
+            AuditEventKind.PRE_APPLY_BACKUP,
+            actor=audit_actor(session),
+            action="csv_import_pre_apply_backup",
+            target_device_id=device.id,
+            target_device_name=device.name,
+            summary=(
+                f"CSV-Import ({subsystem}) auf '{device.name}': "
+                f"Pre-Apply-Backup {backup_record.id} gezogen."
+            ),
+        )
+
+        # Actions durchlaufen. Bei Fehler weitermachen, aber Zaehler
+        # incrementen — der User sieht am Ende welche Zeilen kaputt waren.
+        parsed_by_ident = {_identity(s): s for s in parse_result.specs}
+        live_by_ident_current = dict(live_by_ident)
+        any_write_success = False
+
+        for action_entry in actions:
+            if action_entry.action == "skip":
+                continue
+            try:
+                if action_entry.action in ("add", "update"):
+                    # Nach identity_label rueckwaerts das Spec finden.
+                    spec = _find_spec_by_label(
+                        parsed_by_ident, action_entry.identity, subsystem,
+                    )
+                    if spec is None:
+                        action_entry.action = "failed"
+                        action_entry.summary = "Interner Fehler: Spec verloren."
+                        continue
+                    if action_entry.action == "add":
+                        adapter.add(client, ctx, spec)
+                    else:
+                        adapter.update(client, ctx, spec)
+                    action_entry.summary = f"OK: {action_entry.identity}"
+                    any_write_success = True
+                elif action_entry.action == "delete":
+                    ident_key = _label_to_ident(
+                        action_entry.identity, live_by_ident_current, subsystem,
+                    )
+                    if ident_key is None:
+                        action_entry.action = "failed"
+                        action_entry.summary = (
+                            "Live-Entry nicht mehr gefunden (Race?)."
+                        )
+                        continue
+                    adapter.delete(client, ctx, _build_ident(ident_key, subsystem))
+                    action_entry.summary = f"Geloescht: {action_entry.identity}"
+                    any_write_success = True
+            except OpnCockpitError as exc:
+                reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+                action_entry.action = "failed"
+                action_entry.summary = f"Fehler: {reason}"
+
+        # Reconfigure einmalig, sofern es tatsaechlich Aenderungen gab
+        # (sonst spart der Reconfigure die Reload-Overhead auf der OPNsense).
+        if any_write_success:
+            try:
+                controller.reconfigure(client, ctx)
+            except OpnCockpitError as exc:
+                reason = exc.context.summary or exc.context.error_kind or "unbekannt"
+                # Rerun ist nicht zwingend, der User erfaehrt aber vom Fail.
+                for a in actions:
+                    if a.action in ("add", "update", "delete"):
+                        if a.summary.startswith("OK") or a.summary.startswith("Geloescht"):
+                            a.summary = f"{a.summary} — reconfigure gescheitert: {reason}"
+
+    # Response aktualisieren
+    response.applied = True
+    response.executed_at_iso = _iso_now()
+    response.failed_count = sum(1 for a in actions if a.action == "failed")
+    response.actions = actions
+
+    get_audit_backend().append(
+        AuditEventKind.APPLY_COMPLETED,
+        actor=audit_actor(session),
+        action=f"csv_import_{subsystem}",
+        target_device_id=device.id,
+        target_device_name=device.name,
+        target_count=len(actions),
+        summary=(
+            f"CSV-Import ({subsystem}) auf '{device.name}': "
+            f"{response.add_count} add / {response.update_count} update / "
+            f"{response.delete_count} delete / {response.skip_count} skip / "
+            f"{response.failed_count} failed"
+        ),
+    )
+    session.touch()
+    return response
+
+
+def _find_spec_by_label(parsed_by_ident, label: str, subsystem: str):
+    """Sucht das UnboundSpec-Objekt zurueck zum Preview-Label.
+
+    Weniger effizient als eine direkte Zuordnung, aber der Preview
+    baut nur eine flache Liste — die Rueckzuordnung geht ueber Iteration.
+    """
+    for spec in parsed_by_ident.values():
+        if subsystem == "unbound_hosts":
+            if f"{spec.host}.{spec.domain}" == label:
+                return spec
+        else:  # unbound_forwards
+            dom = spec.domain or "(alle)"
+            expected = f"{dom} -> {spec.server}:{spec.port} ({spec.type})"
+            if expected == label:
+                return spec
+    return None
+
+
+def _label_to_ident(label: str, live_by_ident, subsystem: str):
+    """Findet den Identity-Tupel zurueck zum Label — fuer delete."""
+    for ident_key, current in live_by_ident.items():
+        if subsystem == "unbound_hosts":
+            if f"{current.host}.{current.domain}" == label:
+                return ident_key
+        else:
+            dom = current.domain or "(alle)"
+            expected = f"{dom} -> {current.server}:{current.port} ({current.type})"
+            if expected == label:
+                return ident_key
+    return None
+
+
+def _build_ident(ident_tuple, subsystem: str):
+    """Baut ein Identity-Objekt aus dem tuple-Key."""
+    from opn_cockpit.core.objects.unbound import (  # noqa: PLC0415
+        UnboundForwardIdentity,
+        UnboundHostIdentity,
+    )
+    if subsystem == "unbound_hosts":
+        host, domain = ident_tuple
+        return UnboundHostIdentity(host=host, domain=domain)
+    domain, server, port = ident_tuple
+    return UnboundForwardIdentity(domain=domain, server=server, port=port)
+
+
+@router.post(
+    "/devices/{device_id}/unbound-hosts/import",
+    response_model=UnboundImportResponse,
+)
+def import_device_unbound_hosts(
+    device_id: str,
+    payload: UnboundImportRequest,
+    session: Session = Depends(require_session),
+) -> UnboundImportResponse:
+    """CSV-Bulk-Import fuer Host-Overrides.
+
+    Zwei-Phasen (siehe :class:`UnboundImportRequest`): erst
+    ``dry_run=true`` fuer Preview, dann ``dry_run=false`` fuer Apply.
+    Apply zieht Pre-Apply-Backup, fuehrt alle Actions aus, macht
+    einmal reconfigure am Ende.
+    """
+    require_write_role(session)
+    device = _resolve_device_or_404(session, device_id)
+    return _run_unbound_import(
+        session=session, device=device, payload=payload,
+        subsystem="unbound_hosts",
+    )
+
+
+@router.post(
+    "/devices/{device_id}/unbound-forwards/import",
+    response_model=UnboundImportResponse,
+)
+def import_device_unbound_forwards(
+    device_id: str,
+    payload: UnboundImportRequest,
+    session: Session = Depends(require_session),
+) -> UnboundImportResponse:
+    """CSV-Bulk-Import fuer Query-Forwards."""
+    require_write_role(session)
+    device = _resolve_device_or_404(session, device_id)
+    return _run_unbound_import(
+        session=session, device=device, payload=payload,
+        subsystem="unbound_forwards",
+    )
+
 
 
 # ---------------------------------------------------------------------------

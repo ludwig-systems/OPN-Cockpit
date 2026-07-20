@@ -2,7 +2,73 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware-Rollout
+## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV Bulk-Import
+
+### CSV Import/Export fuer Unbound DNS
+
+User-Feedback nach der v0.11-Session: 124 Query-Forwards manuell im
+Modal einzutippen war "sehr muehsam". Ab jetzt gibt es pro Sub-Tab
+(Host-Overrides + Abfrage-Weiterleitungen) einen **CSV Export**- und
+**CSV Import**-Weg — der User kann die Live-Liste in Excel oeffnen,
+Zeilen ergaenzen/aendern und zurueckspielen.
+
+**Export**:
+- Neuer Endpoint `GET /api/inventory/devices/{id}/unbound-hosts/export.csv`
+  bzw. `.../unbound-forwards/export.csv`.
+- CSV in UTF-8 mit BOM (Excel-freundlich, kein Umlaut-Chaos).
+- Datei-Name enthaelt den Geraete-Namen: `unbound-hosts-HQ-Berlin.csv`.
+- Header-Zeile mit den Spec-Feldern, ``enabled`` als ``true``/``false``.
+
+**Import (Zwei-Phasen)**:
+- Neuer Endpoint `POST /api/inventory/devices/{id}/unbound-hosts/import`
+  bzw. `.../unbound-forwards/import` mit Body
+  `{csv_content, reconcile, dry_run}`.
+- **Phase 1 (dry_run=true)**: Server parst CSV, holt Live-Zustand,
+  berechnet pro Zeile **add / update / skip**. Bei `reconcile=true`
+  zusaetzlich **delete** fuer Live-Eintraege die im CSV fehlen.
+  Antwort enthaelt Parse-Fehler + Action-Liste — der User sieht die
+  Preview im Modal.
+- **Phase 2 (dry_run=false)**: Server zieht **Pre-Apply-Backup**, laesst
+  alle Actions durch, macht **einmal** reconfigure am Ende. Report
+  markiert jede Zeile als ok / failed.
+
+**Reconcile-Modus** ist bewusst opt-in via Checkbox — destruktives
+Loeschen bleibt eine explizite Wahl. Text im Modal warnt in rot,
+Default aus (nur additiv + Updates).
+
+**UI**:
+- Sub-Tabs "Host-Overrides" und "Abfrage-Weiterleitungen" im
+  Device-Modal → Toolbar bekommt zwei neue Text-Buttons **"CSV Export"**
+  und **"CSV Import…"** rechts neben dem "Neuer …"-Add-Button.
+- Neues Modal `#unbound-import-modal`: File-Picker, Reconcile-Checkbox,
+  Preview-Button. Nach dem Preview-Klick erscheint ein Preview-Panel
+  mit Badges (`5 neu · 3 update · 2 skip`), Parse-Fehler-Block (falls
+  vorhanden) und Actions-Liste. Apply-Button ist nur enabled bei
+  valider Preview + tatsaechlichen Aenderungen.
+
+**Format-Details** (siehe `importers/unbound_csv.py` Docstring):
+- Host-Overrides: `host,domain,server,description,enabled`
+  (Pflicht: host+domain+server)
+- Query-Forwards: `domain,server,port,type,verify,description,enabled`
+  (Pflicht: server; `domain` leer = alle Queries; `type` = `forward`
+  oder `dot`)
+- Header-Reihenfolge egal, case-insensitive; `enabled` akzeptiert
+  `true`/`false`/`1`/`0`/`ja`/`nein`; `#`-Zeilen und Leerzeilen skippen;
+  UTF-8-BOM wird toleriert.
+- Zeilen-Fehler brechen den Import nicht ab — alle Fehler landen im
+  Preview mit Zeilennummer, User kann in Excel korrigieren.
+
+**Nicht dabei**:
+- Multi-Device-Import (Ziel-Liste im gleichen Modal) — kommt spaeter
+  wenn Bedarf da ist. Aktuell **pro Gerät** im DNS-Tab.
+- Bulk-Import fuer Domain-Overrides — Site-spezifisch, selten in
+  grosser Zahl. Bei Bedarf kann das Muster 1:1 dupliziert werden.
+
+**Neue Tests**: 16 Unit-Tests in
+`tests/unit/importers/test_unbound_csv.py` — Round-Trip, Header-
+Validierung, Enabled-Varianten, Port/Type-Fehlerpfade, BOM-Handling.
+
+Volle Suite: **1190 gruen** (vorher 1163 + 16 CSV + weitere).
 
 ### Firmware-Rollout: Sammelaktion pro Tag-Gruppe (Iteration B)
 

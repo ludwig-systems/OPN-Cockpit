@@ -182,6 +182,55 @@ beim Edit gesperrt, Typ/Verify/Beschreibung/Aktiv-Flag sind editierbar.
 Endpoints: `POST /api/unbound/settings/{addForward, setForward/{uuid},
 delForward/{uuid}}`.
 
+### CSV Export/Import (Host-Overrides + Query-Forwards)
+
+Für den Bulk-Fall („ich habe 124 Zeilen in einer Kalkulation aufgebaut"):
+
+**Export**:
+
+- Sub-Tab „Host-Overrides" bzw. „Abfrage-Weiterleitungen" hat rechts
+  einen **„CSV Export"**-Text-Button. Klick lädt die Live-Liste als
+  UTF-8-CSV mit BOM (Excel-freundlich) — Datei-Name enthält den
+  Geräte-Namen.
+- Header-Reihenfolge fest (host/domain/… bzw. domain/server/port/…),
+  `enabled` als `true`/`false`.
+
+**Import (zwei Phasen)**:
+
+1. Klick auf **„CSV Import…"** → Modal öffnet.
+2. **CSV-Datei wählen** (Client liest UTF-8 lokal).
+3. **„Reconcile-Modus"**-Checkbox (Default aus): destruktives Löschen
+   von Live-Einträgen die nicht im CSV stehen. Rote Warnung im Modal.
+4. **„Preview berechnen"** → Server parst CSV, holt Live-Zustand, gibt
+   Diff zurück: Badges `5 neu · 3 update · 2 skip` und pro Zeile
+   `add`/`update`/`delete`/`skip` mit Identität und Kurztext.
+   Parse-Fehler landen im roten Block darüber, mit Zeilennummer.
+5. **„Anwenden"** (nur enabled wenn Preview valide und Änderungen ≠ 0):
+   Confirm-Dialog → Server zieht **Pre-Apply-Backup**, führt Actions,
+   macht **einmal** reconfigure am Ende. Report zeigt pro Zeile
+   ok/failed.
+
+**Format-Details** (Header case-insensitive, Reihenfolge egal):
+
+- Host-Overrides: `host,domain,server,description,enabled`
+  — Pflicht: host+domain+server.
+- Query-Forwards: `domain,server,port,type,verify,description,enabled`
+  — Pflicht: server. `domain` leer = alle Queries.
+  `type` = `forward` (Plain-DNS) oder `dot` (DNS-over-TLS).
+- `enabled` akzeptiert `true`/`false`/`1`/`0`/`ja`/`nein`; leer → `true`.
+- Zeilen die mit `#` beginnen werden als Kommentar ignoriert.
+- Zeilen-Fehler brechen den Import nicht ab — alle landen mit
+  Zeilennummer in der Preview, User kann korrigieren.
+
+**API-Endpoints:**
+
+- `GET  /api/inventory/devices/{id}/unbound-hosts/export.csv`
+- `GET  /api/inventory/devices/{id}/unbound-forwards/export.csv`
+- `POST /api/inventory/devices/{id}/unbound-hosts/import`
+- `POST /api/inventory/devices/{id}/unbound-forwards/import`
+  — Body `{csv_content, reconcile, dry_run}`; Response mit
+  Preview-Actions + Zählungen.
+
 ---
 
 ## Firmware-Update installieren

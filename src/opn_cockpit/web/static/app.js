@@ -3376,6 +3376,229 @@
     box.hidden = false;
   }
 
+  // ---------------------------------------------------------------------------
+  // Unbound CSV Import/Export (Feature-Request 2026-07-20)
+  // ---------------------------------------------------------------------------
+
+  // Der aktuell im Import-Modal gewaehlte Sub-Typ (hosts | forwards).
+  let unboundImportSubsystem = null;
+
+  function exportUnboundHostsCsv() {
+    if (!currentDeviceId) return;
+    // Download-Trick: File wird per Browser-Navigation geholt, mit
+    // credentials same-origin (Cookies/Session-Token via wie sonst).
+    const url = `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/unbound-hosts/export.csv`;
+    triggerAuthedDownload(url);
+  }
+
+  function exportUnboundForwardsCsv() {
+    if (!currentDeviceId) return;
+    const url = `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/unbound-forwards/export.csv`;
+    triggerAuthedDownload(url);
+  }
+
+  async function triggerAuthedDownload(url) {
+    // apiGet + Blob-Path damit der Session-Token in den Header kommt.
+    try {
+      const response = await apiGet(url);
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${response.status}`, true);
+        return;
+      }
+      const disposition = response.headers.get('content-disposition') || '';
+      let filename = 'download.csv';
+      const match = /filename="([^"]+)"/.exec(disposition);
+      if (match) filename = match[1];
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  function openUnboundImportModal(subsystem) {
+    if (!currentDeviceId) return;
+    unboundImportSubsystem = subsystem;
+    const isHosts = subsystem === 'hosts';
+    $('#unbound-import-modal-title').textContent = isHosts
+      ? 'CSV-Import: Host-Overrides'
+      : 'CSV-Import: Abfrage-Weiterleitungen';
+    $('#unbound-import-hint').innerHTML = isHosts
+      ? 'CSV-Format: <code>host,domain,server,description,enabled</code>. '
+        + 'Erste Zeile Header, Spalten-Reihenfolge egal.'
+      : 'CSV-Format: <code>domain,server,port,type,verify,description,enabled</code>. '
+        + '<code>domain</code> leer = alle Queries. <code>type</code> = <code>forward</code> oder <code>dot</code>.';
+    $('#unbound-import-file').value = '';
+    $('#unbound-import-file-hint').textContent = 'Keine Datei gewaehlt.';
+    $('#unbound-import-reconcile').checked = false;
+    $('#unbound-import-error').hidden = true;
+    $('#unbound-import-preview').hidden = true;
+    $('#unbound-import-apply-btn').disabled = true;
+    $('#unbound-import-modal').hidden = false;
+  }
+
+  function closeUnboundImportModal() {
+    $('#unbound-import-modal').hidden = true;
+    unboundImportSubsystem = null;
+  }
+
+  async function readImportFileAsText() {
+    const input = $('#unbound-import-file');
+    const file = input.files && input.files[0];
+    if (!file) return null;
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Datei konnte nicht gelesen werden.'));
+      reader.readAsText(file, 'utf-8');
+    });
+  }
+
+  function importEndpointPath(subsystem) {
+    const suffix = subsystem === 'hosts' ? 'unbound-hosts' : 'unbound-forwards';
+    return `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/${suffix}/import`;
+  }
+
+  async function submitUnboundImport(dryRun) {
+    const errBox = $('#unbound-import-error');
+    errBox.hidden = true;
+    if (!unboundImportSubsystem || !currentDeviceId) {
+      errBox.textContent = 'Modal-Zustand verloren - bitte neu oeffnen.';
+      errBox.hidden = false;
+      return;
+    }
+    const csvText = await readImportFileAsText();
+    if (csvText === null) {
+      errBox.textContent = 'Bitte erst eine CSV-Datei waehlen.';
+      errBox.hidden = false;
+      return;
+    }
+    const reconcile = $('#unbound-import-reconcile').checked;
+    const button = dryRun
+      ? $('#unbound-import-preview-btn')
+      : $('#unbound-import-apply-btn');
+    button.disabled = true;
+    const originalText = button.textContent;
+    button.textContent = dryRun ? 'Berechne…' : 'Wende an…';
+    try {
+      const response = await apiPost(importEndpointPath(unboundImportSubsystem), {
+        csv_content: csvText,
+        reconcile,
+        dry_run: dryRun,
+      });
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        errBox.textContent = body.detail || `Fehler ${response.status}`;
+        errBox.hidden = false;
+        return;
+      }
+      const data = await response.json();
+      renderUnboundImportPreview(data);
+      if (!dryRun && data.applied) {
+        showToast(
+          `Import fertig: ${data.add_count} neu · ${data.update_count} update`
+          + ` · ${data.delete_count} delete · ${data.failed_count} Fehler`,
+        );
+        // Live-Liste neu laden, damit die UI die neuen Eintraege zeigt.
+        if (unboundImportSubsystem === 'hosts') {
+          unbLoadedForDeviceId = null;
+          loadUnboundTab(true).catch(() => {});
+        } else {
+          fwdLoadedForDeviceId = null;
+          loadUnboundForwardsTab(true).catch(() => {});
+        }
+        // Wenn keine Fehler: Modal schliessen. Sonst offen lassen damit
+        // der User die Fehlermeldungen sieht.
+        if (data.failed_count === 0) {
+          setTimeout(closeUnboundImportModal, 800);
+        }
+      }
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+
+  function renderUnboundImportPreview(data) {
+    $('#unbound-import-preview').hidden = false;
+
+    // Summary + Badges
+    const summary = $('#unbound-import-summary');
+    summary.innerHTML = '';
+    const badges = [
+      ['add', data.add_count, 'neu'],
+      ['update', data.update_count, 'update'],
+      ['delete', data.delete_count, 'delete'],
+      ['skip', data.skip_count, 'skip'],
+    ];
+    if (data.applied) badges.push(['failed', data.failed_count, 'Fehler']);
+    for (const [kind, count, label] of badges) {
+      if (!count && kind !== 'failed') continue;
+      if (kind === 'failed' && !data.applied) continue;
+      const b = document.createElement('span');
+      b.className = `badge ${kind}`;
+      b.textContent = `${count} ${label}`;
+      summary.appendChild(b);
+    }
+    const totalText = document.createElement('span');
+    totalText.style.color = 'var(--text-subtle)';
+    totalText.textContent = data.applied
+      ? `Angewendet: ${data.executed_at_iso || 'jetzt'}`
+      : `Preview - keine Aenderungen ausgefuehrt.`;
+    summary.appendChild(totalText);
+
+    // Parse-Errors
+    const errBox = $('#unbound-import-parse-errors');
+    if (data.parse_errors && data.parse_errors.length) {
+      errBox.hidden = false;
+      errBox.textContent =
+        `CSV-Fehler (bitte korrigieren, dann erneut Preview):\n\n`
+        + data.parse_errors.join('\n');
+    } else {
+      errBox.hidden = true;
+    }
+
+    // Actions-Liste
+    const list = $('#unbound-import-actions-list');
+    list.innerHTML = '';
+    for (const a of (data.actions || [])) {
+      const row = document.createElement('div');
+      row.className = 'unbound-import-action-row';
+      const kind = document.createElement('span');
+      kind.className = `kind ${a.action}`;
+      kind.textContent = a.action;
+      row.appendChild(kind);
+      const ident = document.createElement('span');
+      ident.className = 'identity';
+      ident.textContent = a.identity;
+      row.appendChild(ident);
+      const summ = document.createElement('span');
+      summ.className = 'summary';
+      summ.textContent = a.summary || '';
+      row.appendChild(summ);
+      list.appendChild(row);
+    }
+
+    // Apply-Button aktivieren wenn Preview valid + noch nicht angewendet
+    const canApply = !data.applied
+      && (!data.parse_errors || data.parse_errors.length === 0)
+      && (data.add_count + data.update_count + data.delete_count) > 0;
+    $('#unbound-import-apply-btn').disabled = !canApply;
+  }
+
   async function deleteForwardFromManager(forward) {
     if (!currentDeviceId) return;
     const device = state.devices.find((d) => d.id === currentDeviceId);
@@ -8576,6 +8799,58 @@
     if (fwdConfirm) fwdConfirm.addEventListener('click', () => {
       submitForwardModal().catch((err) => showForwardModalError(err.message));
     });
+
+    // Unbound CSV Import/Export (Sub-Tab-Buttons + Modal)
+    const unbExportBtn = $('#unb-export-btn');
+    if (unbExportBtn) unbExportBtn.addEventListener('click', exportUnboundHostsCsv);
+    const unbImportBtn = $('#unb-import-btn');
+    if (unbImportBtn) unbImportBtn.addEventListener('click', () => openUnboundImportModal('hosts'));
+    const fwdExportBtn = $('#fwd-export-btn');
+    if (fwdExportBtn) fwdExportBtn.addEventListener('click', exportUnboundForwardsCsv);
+    const fwdImportBtn = $('#fwd-import-btn');
+    if (fwdImportBtn) fwdImportBtn.addEventListener('click', () => openUnboundImportModal('forwards'));
+    const impClose = $('#unbound-import-modal-close');
+    if (impClose) impClose.addEventListener('click', closeUnboundImportModal);
+    const impCancel = $('#unbound-import-cancel');
+    if (impCancel) impCancel.addEventListener('click', closeUnboundImportModal);
+    const impFile = $('#unbound-import-file');
+    if (impFile) {
+      impFile.addEventListener('change', () => {
+        const f = impFile.files && impFile.files[0];
+        $('#unbound-import-file-hint').textContent = f
+          ? `${f.name} (${Math.round(f.size / 1024)} KB)`
+          : 'Keine Datei gewaehlt.';
+        // Preview zuruecksetzen — nach Datei-Wechsel muss neu berechnet werden.
+        $('#unbound-import-preview').hidden = true;
+        $('#unbound-import-apply-btn').disabled = true;
+      });
+    }
+    const impReconcile = $('#unbound-import-reconcile');
+    if (impReconcile) {
+      impReconcile.addEventListener('change', () => {
+        // Reconcile-Toggle bricht die berechnete Preview - user muss neu preview'n
+        $('#unbound-import-preview').hidden = true;
+        $('#unbound-import-apply-btn').disabled = true;
+      });
+    }
+    const impPreview = $('#unbound-import-preview-btn');
+    if (impPreview) {
+      impPreview.addEventListener('click', () => {
+        submitUnboundImport(true).catch((err) => showToast(err.message, true));
+      });
+    }
+    const impApply = $('#unbound-import-apply-btn');
+    if (impApply) {
+      impApply.addEventListener('click', () => {
+        if (!window.confirm(
+          'Import jetzt anwenden?\n\n'
+          + 'Pre-Apply-Backup wird gezogen, dann werden alle Actions '
+          + 'ausgefuehrt. Reconcile-Modus loescht Live-Eintraege die '
+          + 'nicht im CSV stehen.',
+        )) return;
+        submitUnboundImport(false).catch((err) => showToast(err.message, true));
+      });
+    }
     // Safety-Net Banner-Close
     const snBannerClose = $('#pl-safety-net-banner-close');
     if (snBannerClose) snBannerClose.addEventListener('click', () => {
