@@ -8,6 +8,7 @@ Inhalt:
 - [Statische Routen](#statische-routen)
 - [Firewall-Filter-Regeln](#firewall-filter-regeln)
 - [Unbound-DNS Host-Overrides](#unbound-dns-host-overrides)
+- [Firmware-Update installieren](#firmware-update-installieren)
 - [Config-Compare zwischen Geräten](#config-compare-zwischen-geraeten)
 - [Auto-Backup vor + nach Apply](#auto-backup-vor--nach-apply)
 - [Config-Drift-Erkennung](#config-drift-erkennung)
@@ -180,6 +181,54 @@ beim Edit gesperrt, Typ/Verify/Beschreibung/Aktiv-Flag sind editierbar.
 
 Endpoints: `POST /api/unbound/settings/{addForward, setForward/{uuid},
 delForward/{uuid}}`.
+
+---
+
+## Firmware-Update installieren
+
+**Voraussetzung:** Der API-User in OPNsense braucht das Privileg
+**`System: Firmware`** (schon in der Standard-Rechte-Liste im
+[README](../README.md#api-key-und-secret-in-opnsense-erzeugen) enthalten).
+
+**Ablauf pro Gerät:**
+
+1. Karte anklicken → Device-Modal öffnet
+2. **„Updates suchen"** klicken — Cockpit ruft OPNsense's
+   `/api/core/firmware/check` auf und wartet auf das Ergebnis (~5-15 s).
+   Die Kachel zeigt danach ein „Update verfügbar: v..."-Badge, wenn
+   OPNsense etwas gefunden hat.
+3. Neben „Updates suchen" erscheint **„Update installieren"**. Bei einem
+   Major-Release-Wechsel steht dort stattdessen
+   **„Major-Upgrade installieren (Reboot!)"** — Cockpit erkennt das am
+   OPNsense-Status-Wort (`update` vs `upgrade`).
+4. Confirm-Dialog zeigt Zielversion und explizite Reboot-Warnung.
+   Bestätigen startet die Aktion.
+5. **Progress-Panel** im Modal zeigt den Live-Log (5-Sekunden-Poll).
+   Bei Major-Upgrades ist die Box während des Reboots ~1-2 Minuten
+   unerreichbar — das Panel zeigt „Box gerade nicht erreichbar,
+   warte weiter…" und pollt weiter.
+6. Ende: Panel wird grün, Cockpit holt automatisch den neuen
+   Firmware-Status → Badge verschwindet.
+
+**Was Cockpit nicht macht (Iteration A):**
+
+- **Sammelaktion** über mehrere Boxen: kommt in einem späteren Update
+  (mit persistentem Rollout-Watcher). Aktuell muss der Admin pro Box
+  klicken.
+- **Post-Reboot-Recovery über Cockpit-Restart hinweg**: wenn das
+  Cockpit selbst neustartet während ein Update auf einer Box läuft,
+  geht der Live-Poll verloren. Der Update-Job auf OPNsense läuft
+  aber weiter — beim nächsten „Updates suchen" wird das Ergebnis
+  sichtbar.
+
+**API-Endpoints:**
+
+- `POST /api/inventory/devices/{id}/firmware-update` mit Body
+  `{"mode": "update"}` oder `{"mode": "upgrade"}`
+- `GET /api/inventory/devices/{id}/firmware-upgrade-status` — pollt
+  OPNsense's `upgradestatus`, liefert `running`/`done`/`error`/`unknown`
+  plus Log-Text
+- Audit-Events: `FIRMWARE_UPDATE_STARTED`, `FIRMWARE_UPDATE_FAILED`
 
 ---
 

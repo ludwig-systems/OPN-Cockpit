@@ -611,6 +611,51 @@ class FirmwareStatusResponse(BaseModel):
     results: list[FirmwareStatusEntry]
 
 
+class FirmwareTriggerRequest(BaseModel):
+    """Optionaler Body fuer den Firmware-Trigger-Endpoint.
+
+    ``mode="update"`` startet nur Package-Aktualisierungen (kein Reboot).
+    ``mode="upgrade"`` startet den Major-Release-Wechsel (Reboot noetig).
+    Default ist ``update`` - der User muss upgrade explizit anfordern.
+    """
+
+    mode: str = Field("update", pattern="^(update|upgrade)$")
+
+
+class FirmwareTriggerResponse(BaseModel):
+    """Antwort auf ``POST /api/inventory/devices/{id}/firmware-update``."""
+
+    device_id: str
+    mode: str
+    """``update`` oder ``upgrade``."""
+
+    success: bool
+    """True = OPNsense hat den Trigger akzeptiert. False = Fehler beim Anstossen."""
+
+    message: str
+    """Kurze User-facing Beschreibung des Ergebnisses."""
+
+    started_at_iso: str
+
+
+class FirmwareUpgradeStatusResponse(BaseModel):
+    """Antwort auf ``GET /api/inventory/devices/{id}/firmware-upgrade-status``.
+
+    ``status`` ist eine der Konstanten aus ``core.device_info``:
+    ``running`` / ``done`` / ``error`` / ``unknown``. ``log`` ist die
+    Roh-Log-Ausgabe von OPNsense (mehrere Zeilen) - Frontend zeigt das
+    im Progress-Panel als scrollbaren Block.
+    """
+
+    device_id: str
+    reachable: bool
+    authenticated: bool
+    status: str
+    log: str
+    summary: str
+    checked_at_iso: str
+
+
 # ---------------------------------------------------------------------------
 # Cert-Inventur (v0.7 Safety-Net #3)
 # ---------------------------------------------------------------------------

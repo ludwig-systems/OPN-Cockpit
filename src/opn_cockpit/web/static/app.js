@@ -2519,6 +2519,15 @@
     resetDeleteButton();
     // Default: Info-Tab aktiv beim Oeffnen.
     switchDeviceTab('info');
+    // Firmware-Install-Button-Sichtbarkeit anhand des zuletzt gecachten
+    // Firmware-Status. Kein Auto-Check hier - der User klickt "Updates
+    // suchen" bewusst, um den API-Call abzusetzen.
+    updateFirmwareInstallButton();
+    // Falls beim vorherigen Oeffnen ein Update-Poll fuer ein anderes
+    // Geraet lief, den brechen wir ab. Progress-Panel bleibt versteckt.
+    if (fwPollDeviceId && fwPollDeviceId !== deviceId) {
+      hideFirmwareProgress();
+    }
     $('#device-modal').hidden = false;
   }
 
@@ -2593,6 +2602,9 @@
     almCurrentDevice = null;
     bhLoadedForDeviceId = null;
     currentBackupDeviceId = null;
+    // Firmware-Progress-Poll stoppen. Das Update laeuft in OPNsense
+    // weiter - beim naechsten Oeffnen holt "Updates suchen" den Stand.
+    hideFirmwareProgress();
   }
 
   // -------------------- Aliase als Tab im Device-Modal --------------------
@@ -4051,6 +4063,196 @@
     } finally {
       btn.disabled = false;
       if (labelSpan) labelSpan.textContent = originalLabel;
+      // Nach jedem Update-Check auch den Install-Button sichtbarkeitsmaessig
+      // neu bewerten (kommt neu / verschwindet je nach Ergebnis).
+      updateFirmwareInstallButton();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Firmware-Install (Iteration A: Single-Device Update / Upgrade)
+  // ---------------------------------------------------------------------------
+
+  let fwPollTimer = null;
+  let fwPollDeviceId = null;
+
+  function updateFirmwareInstallButton() {
+    // Ruft aktuellen Firmware-Zustand ab und toggelt den Install-Button
+    // im Detail-Bereich. Aufgerufen aus openDeviceModal + doFirmwareCheck.
+    const btn = document.getElementById('device-firmware-install-btn');
+    if (!btn) return;
+    if (!currentDeviceId) {
+      btn.hidden = true;
+      return;
+    }
+    const fw = state.firmware[currentDeviceId];
+    const canInstall = fw && fw.update_available === true && fw.reachable === true;
+    btn.hidden = !canInstall;
+    // Semantik pflegen: bei Major-Upgrade Warntext im Label.
+    const labelSpan = btn.querySelector('span');
+    if (labelSpan && canInstall) {
+      if (fw.status === 'upgrade') {
+        labelSpan.textContent = 'Major-Upgrade installieren (Reboot!)';
+      } else {
+        labelSpan.textContent = 'Update installieren';
+      }
+    }
+  }
+
+  async function doFirmwareInstall() {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    if (!device) return;
+    const fw = state.firmware[currentDeviceId];
+    if (!fw || !fw.update_available) {
+      showToast('Kein Update verfuegbar - erst "Updates suchen" klicken.', true);
+      return;
+    }
+    // Modus aus dem OPNsense-Status-Wort ableiten. Major-Upgrade -> Reboot.
+    const isUpgrade = fw.status === 'upgrade';
+    const mode = isUpgrade ? 'upgrade' : 'update';
+
+    // Confirm-Dialog. Bei Major-Upgrade explizite Reboot-Warnung.
+    const targetLine = fw.new_version
+      ? `\n\nZielversion: v${fw.new_version}`
+      : '';
+    const rebootLine = isUpgrade
+      ? '\n\n⚠ REBOOT: Die Box wird nach dem Upgrade neu starten. '
+        + 'Dauer typischerweise 5-10 Minuten. Waehrenddessen ist die '
+        + 'Firewall nicht erreichbar.'
+      : '\n\nKein Reboot noetig (nur Package-Aktualisierung).';
+    const prompt =
+      `Firmware-${isUpgrade ? 'Upgrade' : 'Update'} auf "${device.name}" starten?`
+      + targetLine
+      + rebootLine
+      + '\n\nOK = starten, Abbrechen = nichts tun.';
+    if (!window.confirm(prompt)) return;
+
+    const btn = document.getElementById('device-firmware-install-btn');
+    btn.disabled = true;
+    const labelSpan = btn.querySelector('span');
+    const originalLabel = labelSpan ? labelSpan.textContent : '';
+    if (labelSpan) labelSpan.textContent = 'Starte…';
+
+    try {
+      const response = await apiPost(
+        `/api/inventory/devices/${encodeURIComponent(currentDeviceId)}/firmware-update`,
+        { mode },
+      );
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        showToast(body.detail || `Trigger fehlgeschlagen (${response.status})`, true);
+        return;
+      }
+      const data = await response.json();
+      showFirmwareProgress({
+        deviceId: currentDeviceId,
+        deviceName: device.name,
+        mode,
+        summary: data.message || 'Update gestartet.',
+      });
+      startFirmwarePolling(currentDeviceId);
+      showToast(data.message || 'Update gestartet.');
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      if (labelSpan) labelSpan.textContent = originalLabel;
+    }
+  }
+
+  function showFirmwareProgress({ deviceId, deviceName, mode, summary }) {
+    const panel = document.getElementById('device-firmware-progress');
+    if (!panel) return;
+    panel.hidden = false;
+    panel.dataset.status = 'running';
+    panel.dataset.deviceId = deviceId;
+    const title = document.getElementById('fw-progress-title');
+    if (title) {
+      title.textContent = mode === 'upgrade'
+        ? `Major-Upgrade auf ${deviceName} laeuft…`
+        : `Update auf ${deviceName} laeuft…`;
+    }
+    const status = document.getElementById('fw-progress-status');
+    if (status) status.textContent = 'running';
+    const sum = document.getElementById('fw-progress-summary');
+    if (sum) sum.textContent = summary;
+    const log = document.getElementById('fw-progress-log');
+    if (log) log.textContent = '';
+  }
+
+  function hideFirmwareProgress() {
+    const panel = document.getElementById('device-firmware-progress');
+    if (panel) panel.hidden = true;
+    stopFirmwarePolling();
+  }
+
+  function startFirmwarePolling(deviceId) {
+    stopFirmwarePolling();
+    fwPollDeviceId = deviceId;
+    // Erster Poll sofort, danach alle 5s.
+    pollFirmwareOnce().catch(() => {});
+    fwPollTimer = setInterval(() => {
+      pollFirmwareOnce().catch(() => {});
+    }, 5000);
+  }
+
+  function stopFirmwarePolling() {
+    if (fwPollTimer) {
+      clearInterval(fwPollTimer);
+      fwPollTimer = null;
+    }
+    fwPollDeviceId = null;
+  }
+
+  async function pollFirmwareOnce() {
+    if (!fwPollDeviceId) return;
+    const deviceId = fwPollDeviceId;
+    try {
+      const response = await apiGet(
+        `/api/inventory/devices/${encodeURIComponent(deviceId)}/firmware-upgrade-status`,
+      );
+      if (response.status === 401) { handleSessionLost(); return; }
+      if (!response.ok) return; // nicht abbrechen, weiter pollen
+      const data = await response.json();
+      renderFirmwareProgress(data);
+      if (data.status === 'done' || data.status === 'error') {
+        stopFirmwarePolling();
+        // Nach done: Firmware-Status neu holen damit Kachel + Button
+        // auf "Aktuell" wechseln.
+        if (data.status === 'done' && currentDeviceId === deviceId) {
+          setTimeout(() => {
+            doFirmwareCheck().catch(() => {});
+          }, 1500);
+        }
+      }
+    } catch (_err) {
+      // stumme Retry-Toleranz - waehrend eines Major-Upgrade-Reboots
+      // ist die Box kurz unerreichbar. Nur Log-Feld nicht ueberschreiben.
+    }
+  }
+
+  function renderFirmwareProgress(data) {
+    const panel = document.getElementById('device-firmware-progress');
+    if (!panel) return;
+    if (panel.hidden) return;
+    if (panel.dataset.deviceId !== data.device_id) return;
+    panel.dataset.status = data.status || 'running';
+    const status = document.getElementById('fw-progress-status');
+    if (status) status.textContent = data.status || 'running';
+    const sum = document.getElementById('fw-progress-summary');
+    if (sum) {
+      if (!data.reachable) {
+        sum.textContent = 'Box gerade nicht erreichbar - wahrscheinlich mitten im Reboot. Warte weiter…';
+      } else {
+        sum.textContent = data.summary || '';
+      }
+    }
+    const log = document.getElementById('fw-progress-log');
+    if (log && data.log) {
+      log.textContent = data.log;
+      log.scrollTop = log.scrollHeight;
     }
   }
 
@@ -7933,6 +8135,22 @@
       await loadBackupsTab(true);
     });
     $('#device-update-check-btn').addEventListener('click', doFirmwareCheck);
+    // Firmware-Install-Button + Panel-Hide-Button (Iteration A)
+    const fwInstallBtn = document.getElementById('device-firmware-install-btn');
+    if (fwInstallBtn) {
+      fwInstallBtn.addEventListener('click', () => {
+        doFirmwareInstall().catch((err) => showToast(err.message, true));
+      });
+    }
+    const fwHideBtn = document.getElementById('fw-progress-hide');
+    if (fwHideBtn) {
+      fwHideBtn.addEventListener('click', () => {
+        // Panel ausblenden, Polling stoppen. Das Update laeuft in
+        // OPNsense weiter - Cockpit macht sich nichts kaputt, es
+        // holt nur beim naechsten "Updates suchen" den neuen Stand.
+        hideFirmwareProgress();
+      });
+    }
     // Aliase-Tab im Device-Modal: Filter-Input
     const almFilter = $('#alm-filter');
     if (almFilter) almFilter.addEventListener('input', renderAliasManagerList);

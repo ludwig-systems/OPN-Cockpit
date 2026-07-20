@@ -952,6 +952,30 @@
                 </svg>
                 <span>Updates suchen</span>
               </button>
+              <button class="btn-secondary action-row-btn" id="device-firmware-install-btn" hidden>
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6.5 1v7"/>
+                  <polyline points="3.5 5 6.5 8 9.5 5"/>
+                  <path d="M2 10.5h9"/>
+                </svg>
+                <span>Update installieren</span>
+              </button>
+            </div>
+
+            <!-- Firmware-Progress-Panel: nur waehrend eines aktiven
+                 Update/Upgrade sichtbar. Live-Poll gegen upgradestatus. -->
+            <div id="device-firmware-progress" class="fw-progress" hidden>
+              <div class="fw-progress-header">
+                <strong id="fw-progress-title">Update laeuft…</strong>
+                <span class="fw-progress-status" id="fw-progress-status">running</span>
+              </div>
+              <div class="fw-progress-summary" id="fw-progress-summary">
+                OPNsense installiert die Aktualisierung. Bitte nicht schliessen.
+              </div>
+              <pre class="fw-progress-log" id="fw-progress-log"></pre>
+              <div class="fw-progress-footer">
+                <button class="btn-link" id="fw-progress-hide">Panel ausblenden</button>
+              </div>
             </div>
 
             <div class="form-hint" id="device-test-result"></div>

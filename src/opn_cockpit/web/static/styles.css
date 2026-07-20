@@ -3797,3 +3797,90 @@ a.card-open-link { text-decoration: none; }
 .totp-fallback-details[open] > summary {
   margin-bottom: 0.4em;
 }
+
+/* ===== Firmware-Progress-Panel (Iteration A) ===== */
+
+.fw-progress {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    100deg,
+    rgba(132, 158, 76, 0.10),
+    rgba(132, 158, 76, 0.02) 70%
+  );
+}
+
+.fw-progress[hidden] { display: none !important; }
+
+.fw-progress[data-status="done"] {
+  background: linear-gradient(
+    100deg,
+    rgba(132, 158, 76, 0.18),
+    rgba(132, 158, 76, 0.04) 70%
+  );
+  border-color: var(--accent);
+}
+
+.fw-progress[data-status="error"] {
+  background: var(--danger-bg);
+  border-color: var(--danger, #d97767);
+}
+
+.fw-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.fw-progress-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.05);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.fw-progress[data-status="done"] .fw-progress-status {
+  background: rgba(132, 158, 76, 0.24);
+  color: var(--accent);
+}
+
+.fw-progress[data-status="error"] .fw-progress-status {
+  background: rgba(229, 113, 100, 0.24);
+  color: var(--danger, #d97767);
+}
+
+.fw-progress-summary {
+  font-size: 13px;
+  color: var(--text-subtle);
+  margin-bottom: 8px;
+}
+
+.fw-progress-log {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: auto;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 8px 10px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0 0 8px 0;
+}
+
+.fw-progress-log:empty { display: none; }
+
+.fw-progress-footer {
+  display: flex;
+  justify-content: flex-end;
+}

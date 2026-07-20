@@ -76,6 +76,13 @@ class AuditEventKind(StrEnum):
     TLS_CERT_EXPIRY_WARNING = "tls_cert_expiry_warning"
     TLS_CERT_EXPIRY_CRITICAL = "tls_cert_expiry_critical"
     SERVER_RESTARTED = "server_restarted"
+    # v0.11 Firmware-Rollout
+    FIRMWARE_UPDATE_STARTED = "firmware_update_started"
+    FIRMWARE_UPDATE_COMPLETED = "firmware_update_completed"
+    FIRMWARE_UPDATE_FAILED = "firmware_update_failed"
+    FIRMWARE_ROLLOUT_STARTED = "firmware_rollout_started"
+    FIRMWARE_ROLLOUT_COMPLETED = "firmware_rollout_completed"
+    FIRMWARE_ROLLOUT_CANCELLED = "firmware_rollout_cancelled"
 
 
 # ---------------------------------------------------------------------------

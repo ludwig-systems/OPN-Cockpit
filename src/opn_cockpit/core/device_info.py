@@ -40,6 +40,9 @@ from opn_cockpit.core.http_client import HttpClient, HttpTarget
 
 FIRMWARE_STATUS_ENDPOINT = "/api/core/firmware/status"
 FIRMWARE_CHECK_ENDPOINT = "/api/core/firmware/check"
+FIRMWARE_UPDATE_ENDPOINT = "/api/core/firmware/update"
+FIRMWARE_UPGRADE_ENDPOINT = "/api/core/firmware/upgrade"
+FIRMWARE_UPGRADE_STATUS_ENDPOINT = "/api/core/firmware/upgradestatus"
 BACKUP_DOWNLOAD_ENDPOINT = "/api/core/backup/download/this"
 CERT_SEARCH_ENDPOINT = "/api/trust/cert/search"
 CERT_GET_ENDPOINT_FMT = "/api/trust/cert/get/{uuid}"
@@ -257,6 +260,204 @@ def trigger_firmware_check(
         if isinstance(status_str, str) and status_str.lower() in {"ok", "running"}:
             return True, "Check angestossen."
     return True, "Check angestossen."
+
+
+# ---------------------------------------------------------------------------
+# Firmware-Update/Upgrade + Status-Poll (v0.11)
+# ---------------------------------------------------------------------------
+#
+# OPNsense unterscheidet zwei Aktionen:
+#
+# * ``/update``  = Package-Aktualisierung (Sicherheitspatches, Bugfixes),
+#                  bleibt in der aktuellen Major-Version, kein Reboot.
+# * ``/upgrade`` = Major-Release-Wechsel (z. B. 25.7 -> 26.1), Reboot noetig.
+#
+# Beide sind asynchron - der Trigger liefert sofort zurueck, das eigentliche
+# Update laeuft im Hintergrund. Cockpit pollt ``upgradestatus`` bis
+# ``done`` oder ``error``.
+
+
+UPGRADE_STATUS_RUNNING = "running"
+UPGRADE_STATUS_DONE = "done"
+UPGRADE_STATUS_ERROR = "error"
+UPGRADE_STATUS_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class UpgradeStatus:
+    """Antwort auf ``GET /api/core/firmware/upgradestatus``.
+
+    ``status`` ist eine der oben definierten Konstanten. ``log`` ist die
+    Roh-Ausgabe des Upgrade-Prozesses (mehrere Zeilen), Frontend zeigt
+    das im Progress-Banner als scrollbaren Block.
+
+    ``reachable=False`` heisst der HTTP-Request kam nicht durch — bei
+    Package-Updates ohne Reboot ein echtes Problem, bei Major-Upgrades
+    ist "kurz nicht erreichbar" waehrend des Reboots erwartet und der
+    Aufrufer entscheidet ueber Retry.
+    """
+
+    reachable: bool
+    authenticated: bool
+    status: str
+    log: str
+    summary: str
+
+
+def _trigger_firmware_action(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+    *,
+    endpoint: str,
+    action_name: str,
+) -> tuple[bool, str]:
+    """Gemeinsame Fehlerbehandlung fuer /update und /upgrade."""
+    try:
+        response = client.call(target, key, secret, "POST", endpoint)
+    except AuthError as exc:
+        return False, f"Auth abgelehnt: {exc.context.summary or 'Schluessel/Secret falsch'}"
+    except UnreachableError as exc:
+        if exc.context.error_kind == "tls":
+            reason = exc.context.summary or "Cert ungueltig"
+            return False, f"TLS-Verifikation fehlgeschlagen: {reason}"
+        return False, f"nicht erreichbar: {exc.context.summary or exc.context.error_kind}"
+    except OpnCockpitError as exc:
+        return False, f"Antwort ungewoehnlich: {exc.context.error_kind}"
+
+    # Body pruefen - manche Versionen liefern {"status": "ok"}, andere leer.
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict):
+        raw = body.get("status")
+        if isinstance(raw, str) and raw.strip().lower() not in {"ok", "running", ""}:
+            return False, f"{action_name} abgelehnt: {raw}"
+    return True, f"{action_name} angestossen."
+
+
+def trigger_firmware_update(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> tuple[bool, str]:
+    """Package-Update starten (kein Major-Release, kein Reboot).
+
+    Liefert ``(success, message)``. Bei ``success=True`` bitte danach
+    :func:`fetch_upgrade_status` pollen bis ``status == "done"``.
+    """
+    return _trigger_firmware_action(
+        client, target, key, secret,
+        endpoint=FIRMWARE_UPDATE_ENDPOINT,
+        action_name="Update",
+    )
+
+
+def trigger_firmware_upgrade(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> tuple[bool, str]:
+    """Major-Release-Upgrade starten. Die Box rebootet nach Abschluss.
+
+    Reboot-typisch dauert der komplette Vorgang 3-10 Minuten. Der
+    Aufrufer sollte robust gegen zwischenzeitliche Unreachable-Faelle
+    sein (Health-Check-Loop mit Retry-Toleranz).
+    """
+    return _trigger_firmware_action(
+        client, target, key, secret,
+        endpoint=FIRMWARE_UPGRADE_ENDPOINT,
+        action_name="Upgrade",
+    )
+
+
+def _classify_upgrade_status(raw: str) -> str:
+    """OPNsense liefert je nach Version ``running``/``in-progress``/
+    ``done``/``ok``/``error``/``failed``. Auf Cockpit-Konstanten normieren."""
+    val = raw.strip().lower()
+    if val in {"running", "in-progress", "busy"}:
+        return UPGRADE_STATUS_RUNNING
+    if val in {"done", "ok", "complete", "completed", "reboot"}:
+        return UPGRADE_STATUS_DONE
+    if val in {"error", "failed", "failure"}:
+        return UPGRADE_STATUS_ERROR
+    return UPGRADE_STATUS_UNKNOWN
+
+
+def fetch_upgrade_status(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> UpgradeStatus:
+    """Pollt ``/api/core/firmware/upgradestatus`` und normalisiert.
+
+    Wirft nie — leere Antwort / Auth-Fehler / Unreachable landen in den
+    ``reachable``/``authenticated``/``summary``-Feldern. Der Watcher
+    behandelt Unreachable waehrend eines Upgrades (Reboot) als erwarteten
+    Zwischenstand und wartet weiter.
+    """
+    try:
+        response = client.call(
+            target, key, secret, "GET", FIRMWARE_UPGRADE_STATUS_ENDPOINT,
+        )
+    except AuthError as exc:
+        return UpgradeStatus(
+            reachable=True, authenticated=False,
+            status=UPGRADE_STATUS_UNKNOWN, log="",
+            summary=f"Auth abgelehnt: {exc.context.summary or 'Schluessel/Secret falsch'}",
+        )
+    except UnreachableError as exc:
+        if exc.context.error_kind == "tls":
+            reason = exc.context.summary or "Cert ungueltig"
+            return UpgradeStatus(
+                reachable=True, authenticated=False,
+                status=UPGRADE_STATUS_UNKNOWN, log="",
+                summary=f"TLS-Verifikation fehlgeschlagen: {reason}",
+            )
+        return UpgradeStatus(
+            reachable=False, authenticated=False,
+            status=UPGRADE_STATUS_UNKNOWN, log="",
+            summary=f"nicht erreichbar: {exc.context.summary or exc.context.error_kind}",
+        )
+    except OpnCockpitError as exc:
+        return UpgradeStatus(
+            reachable=True, authenticated=False,
+            status=UPGRADE_STATUS_UNKNOWN, log="",
+            summary=f"Antwort ungewoehnlich: {exc.context.error_kind}",
+        )
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+
+    if not isinstance(body, dict):
+        return UpgradeStatus(
+            reachable=True, authenticated=True,
+            status=UPGRADE_STATUS_UNKNOWN, log="",
+            summary="Antwort unlesbar (kein JSON-Dict)",
+        )
+
+    raw_status = str(body.get("status", "")).strip()
+    normalized = _classify_upgrade_status(raw_status)
+    log_text = str(body.get("log", "") or "")
+
+    summary_map = {
+        UPGRADE_STATUS_RUNNING: "Update laeuft",
+        UPGRADE_STATUS_DONE: "Update fertig",
+        UPGRADE_STATUS_ERROR: "Update fehlgeschlagen",
+        UPGRADE_STATUS_UNKNOWN: f"Unbekannter Status: {raw_status or '(leer)'}",
+    }
+    return UpgradeStatus(
+        reachable=True, authenticated=True,
+        status=normalized, log=log_text,
+        summary=summary_map[normalized],
+    )
 
 
 def download_backup(

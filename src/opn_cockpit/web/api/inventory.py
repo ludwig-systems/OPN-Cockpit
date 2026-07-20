@@ -55,10 +55,14 @@ from opn_cockpit.core.config_drift import compute_drift_hash
 from opn_cockpit.core.device_info import (
     CertificateStatus,
     FirmwareStatus,
+    UpgradeStatus,
     download_backup,
     fetch_certificates,
     fetch_firmware_status,
+    fetch_upgrade_status,
     trigger_firmware_check,
+    trigger_firmware_update,
+    trigger_firmware_upgrade,
 )
 from opn_cockpit.core.errors import (
     ApiError,
@@ -110,6 +114,9 @@ from opn_cockpit.web.api.schemas import (
     FirmwareStatusEntry,
     FirmwareStatusRequest,
     FirmwareStatusResponse,
+    FirmwareTriggerRequest,
+    FirmwareTriggerResponse,
+    FirmwareUpgradeStatusResponse,
     HeartbeatEntry,
     HeartbeatRequest,
     HeartbeatResponse,
@@ -1667,6 +1674,163 @@ def _wait_for_firmware_check(
         time.sleep(FIRMWARE_CHECK_POLL_INTERVAL_S)
         fw = fetch_firmware_status(client, target, key, secret)
     return fw
+
+
+# ---------------------------------------------------------------------------
+# POST /api/inventory/devices/{id}/firmware-update  - Iteration A: Single-Device
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/devices/{device_id}/firmware-update",
+    response_model=FirmwareTriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def trigger_device_firmware_update(
+    device_id: str,
+    payload: FirmwareTriggerRequest | None = None,
+    session: Session = Depends(require_session),
+) -> FirmwareTriggerResponse:
+    """Startet auf einer Box das Firmware-Update.
+
+    Zwei Modi (siehe :class:`FirmwareTriggerRequest`):
+
+    * ``update`` — Package-Aktualisierung, kein Reboot (Default).
+    * ``upgrade`` — Major-Release-Wechsel, Reboot noetig.
+
+    Der Aufruf ist ``fire-and-return``: Cockpit stoesst OPNsense's
+    Upgrade-Job an und antwortet sofort mit HTTP 202. Der Client pollt
+    danach ``GET /firmware-upgrade-status`` bis ``status="done"`` oder
+    ``status="error"``. Bei Major-Upgrade wird die Box zwischendurch
+    unerreichbar - das ist erwartet, der Poll-Loop im UI toleriert das.
+
+    Rolle: write (operator+admin). Bewusst nicht admin-only, weil die
+    tatsaechliche Update-Freigabe ohnehin durch OPNsense's eigene
+    API-Rechte gesteuert wird.
+    """
+    require_write_role(session)
+    if payload is None:
+        payload = FirmwareTriggerRequest()
+
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None,
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+
+    target = HttpTarget(
+        host=vault_device.host,
+        port=vault_device.port,
+        verify=vault_device.tls_verify,
+    )
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    timestamp = _iso_now()
+
+    with HttpClient(targets=[target], tuning=tuning) as client:
+        if payload.mode == "upgrade":
+            ok, msg = trigger_firmware_upgrade(
+                client, target, vault_device.api_key, vault_device.api_secret,
+            )
+        else:
+            ok, msg = trigger_firmware_update(
+                client, target, vault_device.api_key, vault_device.api_secret,
+            )
+
+    audit_kind = (
+        AuditEventKind.FIRMWARE_UPDATE_STARTED if ok
+        else AuditEventKind.FIRMWARE_UPDATE_FAILED
+    )
+    audit_action = (
+        f"firmware_{payload.mode}_started" if ok
+        else f"firmware_{payload.mode}_trigger_failed"
+    )
+    get_audit_backend().append(
+        audit_kind,
+        actor=audit_actor(session),
+        action=audit_action,
+        target_device_id=vault_device.id,
+        target_device_name=vault_device.name,
+        summary=f"{payload.mode} auf {vault_device.name}: {msg}",
+    )
+
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Trigger fehlgeschlagen: {msg}",
+        )
+
+    session.touch()
+    return FirmwareTriggerResponse(
+        device_id=vault_device.id,
+        mode=payload.mode,
+        success=True,
+        message=msg,
+        started_at_iso=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/inventory/devices/{id}/firmware-upgrade-status
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/devices/{device_id}/firmware-upgrade-status",
+    response_model=FirmwareUpgradeStatusResponse,
+)
+def get_device_firmware_upgrade_status(
+    device_id: str,
+    session: Session = Depends(require_session),
+) -> FirmwareUpgradeStatusResponse:
+    """Pollt ``/api/core/firmware/upgradestatus`` auf einer Box.
+
+    Wird vom UI im 5-Sekunden-Rhythmus abgefragt solange das Progress-
+    Panel offen ist. Antwort ist idempotent - der Endpoint macht selbst
+    keine Aktion, nur ein Read.
+
+    Waehrend eines Major-Upgrade-Reboots kann die Box kurz unerreichbar
+    sein - das reflektiert sich in ``reachable=false`` und der Client
+    weiss dann: "Reboot laeuft, weiter warten". OPNsense meldet nach
+    Reboot wieder ``status="done"``.
+    """
+    vault_device = next(
+        (d for d in session.opened.data.devices if d.id == device_id), None,
+    )
+    if vault_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
+        )
+    require_device_access(vault_device, session)
+
+    target = HttpTarget(
+        host=vault_device.host,
+        port=vault_device.port,
+        verify=vault_device.tls_verify,
+    )
+    settings = session.opened.data.settings
+    tuning = tuning_from_settings(settings)
+    timestamp = _iso_now()
+
+    with HttpClient(targets=[target], tuning=tuning) as client:
+        us: UpgradeStatus = fetch_upgrade_status(
+            client, target, vault_device.api_key, vault_device.api_secret,
+        )
+    session.touch()
+    return FirmwareUpgradeStatusResponse(
+        device_id=vault_device.id,
+        reachable=us.reachable,
+        authenticated=us.authenticated,
+        status=us.status,
+        log=us.log,
+        summary=us.summary,
+        checked_at_iso=timestamp,
+    )
 
 
 # ---------------------------------------------------------------------------

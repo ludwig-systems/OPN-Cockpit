@@ -2,7 +2,51 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.11.0 — in Arbeit — Unbound CRUD + HTTPS-Standard-Port 443
+## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware-Install (Iteration A)
+
+### Firmware-Install: Single-Device (Iteration A)
+
+Cockpit konnte bisher Firmware-Updates nur *anzeigen* („Update
+verfuegbar"-Badge nach Klick auf „Updates suchen"). Ab v0.11 kann die
+Aktualisierung auch **installiert** werden — pro Box, mit
+Reboot-Warnung bei Major-Upgrade, Live-Progress im Modal.
+
+**Neue Endpoints:**
+- `POST /api/inventory/devices/{id}/firmware-update` mit optionalem
+  Body `{"mode": "update" | "upgrade"}` — startet OPNsense's
+  `/api/core/firmware/update` (Package-Aktualisierung, kein Reboot)
+  bzw. `/upgrade` (Major-Release-Wechsel, Reboot). Rolle: `write`
+  (operator + admin).
+- `GET /api/inventory/devices/{id}/firmware-upgrade-status` — pollt
+  OPNsense's `upgradestatus`. Antwortet mit normiertem
+  `running`/`done`/`error`/`unknown` + Roh-Log fuer die UI-Anzeige.
+
+**UI-Flow:**
+1. Im Device-Modal → „Updates suchen" klicken → Kachel zeigt Badge
+2. Neuer Button „Update installieren" (bzw. „Major-Upgrade installieren
+   (Reboot!)" bei Major-Wechsel) → Confirm-Dialog mit Zielversion
+   und Reboot-Warnung
+3. Progress-Panel im Modal zeigt Live-Log (5s-Poll), gruen bei
+   Erfolg, rot bei Fehler
+4. Nach `done` triggert Cockpit automatisch einen neuen
+   Firmware-Status-Check → Badge verschwindet
+
+**Nicht in Iteration A:**
+- Sammelaktion pro Tag-Gruppe („alle Zweigstellen updaten") →
+  kommt in Iteration B mit persistentem Rollout-Watcher
+- Post-Reboot-Recovery-Poll ueber Cockpit-Restart hinweg → auch
+  Iteration B (braucht Persistenz im `<app_data>/state/`-Store)
+
+**Neue Audit-Events:**
+`FIRMWARE_UPDATE_STARTED`, `FIRMWARE_UPDATE_COMPLETED`,
+`FIRMWARE_UPDATE_FAILED`, `FIRMWARE_ROLLOUT_STARTED`,
+`FIRMWARE_ROLLOUT_COMPLETED`, `FIRMWARE_ROLLOUT_CANCELLED`
+(letztere drei fuer Iteration B).
+
+**Tests:** 13 neue Unit-Tests in
+`tests/unit/core/test_device_info_firmware.py` fuer Trigger +
+Status-Klassifikation. Volle Suite bleibt bei 1150 (test-Datei ist
+gitignored, laeuft nur lokal).
 
 ### Port 443 einheitlich (Linux + Windows + Docker)
 
