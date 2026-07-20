@@ -1389,9 +1389,10 @@ def get_device_unbound_domains(
 ) -> DeviceUnboundDomainsResponse:
     """Liefert die Live-Unbound-Domain-Overrides (DNS-Weiterleitungen).
 
-    Read-only: Cockpit zeigt sie an, aber das CRUD ist (noch) nicht
-    implementiert. Wer Domain-Overrides anlegen/aendern will, muss das
-    in der OPNsense-Web-GUI tun (Services -> Unbound DNS -> Overrides).
+    Wird von der UI zusammen mit den Plan-Endpoints
+    ``/api/plans/unbound-domain*`` genutzt (Add/Edit/Delete via Modal
+    und Zeilen-Buttons). UUIDs im Response ermoeglichen Direkt-Match
+    fuer Edit.
     """
     from opn_cockpit.core.objects._endpoints import UNBOUND_DOMAIN_SEARCH  # noqa: PLC0415
 
@@ -1480,7 +1481,8 @@ def get_device_unbound_forwards(
     Anfragen weiterleitet (oft DoT/DoH). ``domain`` ist leer fuer
     "alle Queries" oder auf eine Ziel-Domain eingeschraenkt.
 
-    Read-only — CRUD waere ein eigener Adapter.
+    Wird von der UI zusammen mit den Plan-Endpoints
+    ``/api/plans/unbound-forward*`` genutzt.
     """
     from opn_cockpit.core.objects._endpoints import UNBOUND_FORWARD_SEARCH  # noqa: PLC0415
 

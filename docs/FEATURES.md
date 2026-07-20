@@ -135,24 +135,51 @@ Beschreibung + Aktiv-Flag sind editierbar. Identische Werte → SKIP.
 
 Aus *Services → Unbound DNS → Overrides → Domain Overrides*: leiten
 DNS-Queries für eine bestimmte Domain an einen anderen Resolver weiter
-(typisch: AD-DNS für die interne AD-Zone). **Read-only** im Cockpit
-(`POST /api/unbound/settings/searchDomainOverride`) — CRUD wäre ein
-eigenes Subsystem.
+(typisch: AD-DNS für die interne AD-Zone). **CRUD wird unterstützt.**
+
+**Anlegen:** Tab → **„Neue Domain-Weiterleitung"**. Felder:
+
+| Feld | Beschreibung |
+|---|---|
+| Domain | Ziel-Zone (z. B. `corp.example.com`) |
+| Ziel-Resolver | IP des Resolvers (IPv4-Validierung inline) |
+| Aktiv | Checkbox |
+| Beschreibung | freier Text |
+
+**Identität = `domain`.** Beim Edit ist das Feld gesperrt (Rename via
+Delete + Add). Ziel-Resolver + Beschreibung + Aktiv-Flag sind editierbar.
+Identische Werte → SKIP im Diff.
+
+Endpoints: `POST /api/unbound/settings/{addDomainOverride,
+setDomainOverride/{uuid}, delDomainOverride/{uuid}}`. Reconfigure teilt
+sich mit den anderen Unbound-Subsystemen den einen
+`/api/unbound/service/reconfigure`-Endpoint.
 
 ### Sub-Tab: Abfrage-Weiterleitungen (Query-Forwards)
 
-Aus *Services → Unbound DNS → Query Forwarding*: die **globalen**
-Forward-Server (oft DoT/DoH), an die Unbound *alle* nicht lokal
-auflösbaren DNS-Anfragen reicht. **Read-only** im Cockpit
-(`POST /api/unbound/settings/searchForward`).
+Aus *Services → Unbound DNS → Query Forwarding*: Forward-Server (oft
+DoT), an die Unbound entweder **alle** Queries (`domain` leer =
+globaler Upstream) oder **selektiv** Queries für eine bestimmte Zone
+weiterleitet. **CRUD wird unterstützt.**
 
-Pro Eintrag: Domain (leer = global), Resolver-IP, Port,
-Type (`forward`/`dot`/`doh`), Verify-Hostname, Beschreibung.
+**Anlegen:** Tab → **„Neue Abfrage-Weiterleitung"**. Felder:
 
-> Falls dein OPNsense den Tab leer zeigt obwohl du Forwards eingerichtet
-> hast: ältere OPNsense-Versionen hatten leicht abweichende
-> XML-/API-Pfade. Wir decken die gängigen ab; bitte melden falls etwas
-> fehlt.
+| Feld | Beschreibung |
+|---|---|
+| Domain | leer = alle Queries; sonst nur diese Zone weiterleiten |
+| Upstream-Server | Resolver-IP |
+| Port | Default 53; für DoT typisch 853 |
+| Typ | `forward` (Plain-DNS) oder `dot` (DNS-over-TLS) |
+| Verify-CN | Bei DoT: Server-Name für Cert-Verify (z. B. `cloudflare-dns.com`) |
+| Aktiv | Checkbox |
+| Beschreibung | freier Text |
+
+**Identität = `(domain, server, port)`.** Failover-Ketten (mehrere
+Forwards für dieselbe Domain) bleiben so machbar; die drei Felder sind
+beim Edit gesperrt, Typ/Verify/Beschreibung/Aktiv-Flag sind editierbar.
+
+Endpoints: `POST /api/unbound/settings/{addForward, setForward/{uuid},
+delForward/{uuid}}`.
 
 ---
 
@@ -189,8 +216,10 @@ flow-string; DNS: server + descr).
 **„Sync ←"** — erzeugt einen Plan vom Master zu allen anderen Spalten
 (`add_alias` bzw. `add_unbound_host`), springt direkt in die Preview.
 Vorhandene identische Einträge werden im Plan als SKIP markiert (keine
-Doppelanlage). Für Routen/Rules/DNS-Overrides/Weiterleitungen ist
-Sync derzeit nicht verfügbar — die brauchen einen eigenen CRUD-Adapter.
+Doppelanlage). Für Routen, Rules, DNS-Overrides und Query-Forwards ist
+Master-Sync **bewusst nicht** verfügbar: die zeigen als Compare-Matrix
+zwar Drift, sind aber typisch site-spezifisch (lokale Resolver,
+per-Site-Upstreams) — Add/Edit/Delete bitte pro Gerät im DNS-Tab.
 
 **Rules-Quelle:** Cockpit liest Regeln für den Compare aus dem
 **Konfig-XML** (`download_backup`), nicht aus der os-firewall-API.

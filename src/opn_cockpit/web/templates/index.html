@@ -1097,7 +1097,16 @@
                 <em>Services &rarr; Unbound DNS &rarr; Overrides &rarr;
                 Domain Overrides</em>. Leiten DNS-Queries fuer eine
                 spezifische Domain an einen Resolver weiter
-                (z. B. Active-Directory-DNS). Read-only.
+                (z. B. Active-Directory-DNS).
+              </div>
+              <div class="form-row" style="margin-bottom:12px;">
+                <button class="btn-secondary action-row-btn" id="dom-add-btn">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="6.5" y1="2" x2="6.5" y2="11"/>
+                    <line x1="2" y1="6.5" x2="11" y2="6.5"/>
+                  </svg>
+                  <span>Neue Domain-Weiterleitung</span>
+                </button>
               </div>
               <div class="alm-list" id="dom-list"></div>
             </div>
@@ -1113,7 +1122,16 @@
                 Abfrage-Weiterleitungen aus
                 <em>Services &rarr; Unbound DNS &rarr; Query Forwarding</em>:
                 die globalen Forward-Server (oft DoT/DoH), an die Unbound
-                alle DNS-Anfragen reicht. Read-only.
+                alle DNS-Anfragen reicht.
+              </div>
+              <div class="form-row" style="margin-bottom:12px;">
+                <button class="btn-secondary action-row-btn" id="fwd-add-btn">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="6.5" y1="2" x2="6.5" y2="11"/>
+                    <line x1="2" y1="6.5" x2="11" y2="6.5"/>
+                  </svg>
+                  <span>Neue Abfrage-Weiterleitung</span>
+                </button>
               </div>
               <div class="alm-list" id="fwd-list"></div>
             </div>
@@ -1201,6 +1219,126 @@
         <div class="modal-footer">
           <button class="btn-link" id="unbound-modal-cancel">Abbrechen</button>
           <button class="btn-primary btn-primary-inline" id="unbound-modal-confirm">Plan erzeugen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Domain-Override (Add / Edit) ================ -->
+    <div class="modal-backdrop" id="domain-modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="domain-modal-title">
+        <div class="modal-header">
+          <h2 id="domain-modal-title">Domain-Weiterleitung</h2>
+          <button class="icon-btn modal-close" id="domain-modal-close" aria-label="Schließen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-hint" style="margin-bottom:12px;">
+            Leitet ALLE DNS-Queries fuer eine Domain (z. B.
+            <code>internal.example.com</code>) an einen bestimmten
+            Resolver weiter. Ausgerollt via Cockpit-Plan/Apply
+            (Pre-Apply-Backup automatisch).
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="dom-domain">Domain</label>
+              <input id="dom-domain" class="form-input" type="text" placeholder="internal.example.com" />
+            </div>
+            <div class="form-col">
+              <label class="form-checkbox" style="margin-top:24px;">
+                <input type="checkbox" id="dom-enabled" checked />
+                <span>Aktiv</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="dom-server">Ziel-Resolver (IP)</label>
+              <input id="dom-server" class="form-input" type="text" placeholder="10.0.0.53" data-validate="ipv4" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="dom-descr">Beschreibung</label>
+              <input id="dom-descr" class="form-input" type="text" placeholder="" />
+            </div>
+          </div>
+          <div class="form-error" id="domain-modal-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="domain-modal-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="domain-modal-confirm">Plan erzeugen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================ MODAL: Query-Forward (Add / Edit) ================ -->
+    <div class="modal-backdrop" id="forward-modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="forward-modal-title">
+        <div class="modal-header">
+          <h2 id="forward-modal-title">Abfrage-Weiterleitung</h2>
+          <button class="icon-btn modal-close" id="forward-modal-close" aria-label="Schließen">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="3" y1="3" x2="11" y2="11"/>
+              <line x1="11" y1="3" x2="3" y2="11"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-hint" style="margin-bottom:12px;">
+            Query-Forward zu einem Upstream-Resolver (Plain-DNS oder DoT).
+            Leerlassen bei "Domain" = <em>alle</em> Queries weiterleiten
+            (globaler Upstream). Sonst nur Queries fuer diese Domain.
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="fwd-domain">Domain (leer = alle)</label>
+              <input id="fwd-domain" class="form-input" type="text" placeholder="(leer fuer alle Queries)" />
+            </div>
+            <div class="form-col">
+              <label class="form-checkbox" style="margin-top:24px;">
+                <input type="checkbox" id="fwd-enabled" checked />
+                <span>Aktiv</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="fwd-server">Upstream-Server</label>
+              <input id="fwd-server" class="form-input" type="text" placeholder="1.1.1.1" data-validate="ipv4" />
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="fwd-port">Port</label>
+              <input id="fwd-port" class="form-input" type="number" min="1" max="65535" value="53" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="fwd-type">Typ</label>
+              <select id="fwd-type" class="form-input">
+                <option value="forward">Plain DNS (Port 53)</option>
+                <option value="dot">DNS-over-TLS (Port 853)</option>
+              </select>
+            </div>
+            <div class="form-col">
+              <label class="form-label" for="fwd-verify">Verify-CN (bei DoT)</label>
+              <input id="fwd-verify" class="form-input" type="text" placeholder="cloudflare-dns.com" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label class="form-label" for="fwd-descr">Beschreibung</label>
+              <input id="fwd-descr" class="form-input" type="text" placeholder="" />
+            </div>
+          </div>
+          <div class="form-error" id="forward-modal-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" id="forward-modal-cancel">Abbrechen</button>
+          <button class="btn-primary btn-primary-inline" id="forward-modal-confirm">Plan erzeugen</button>
         </div>
       </div>
     </div>

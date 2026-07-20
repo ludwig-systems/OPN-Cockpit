@@ -2,6 +2,65 @@
 
 Alle nennenswerten Änderungen pro Release.
 
+## v0.11.0 — in Arbeit — Unbound Query-Forwards + Domain-Overrides CRUD
+
+Die zwei Read-only-Ansichten aus dem Device-Modal (Sub-Tabs
+„Domain-Overrides" und „Abfrage-Weiterleitungen") sind jetzt vollwertig
+editierbar. Wer Query-Forwarding einer Zone (`internal.example.com` →
+interner AD-Resolver) oder einen globalen Upstream (z. B. Cloudflare
+DoT auf `1.1.1.1:853`) hinterlegen will, klickt es im Cockpit an — der
+gewohnte Plan/Apply-Flow inkl. Pre-Apply-Backup zieht durch.
+
+### Neue Subsystems im Registry
+
+`unbound_domains` und `unbound_forwards` teilen sich den
+`/api/unbound/service/reconfigure`-Endpoint mit den bestehenden
+Host-Overrides (`unbound_hosts`), sind aber eigene Bindings — das
+Executor-Gruping bleibt sauber pro Objekt-Typ.
+
+### Neue Plan-Endpoints
+
+- `POST /api/plans/unbound-domain` / `-update` / `-delete`
+- `POST /api/plans/unbound-forward` / `-update` / `-delete`
+
+Identity bei Domain-Overrides = `domain` (unique). Identity bei
+Query-Forwards = `(domain, server, port)` — Failover-Ketten mit
+mehreren Forwards für dieselbe Domain bleiben so machbar.
+
+### Query-Forward: DoT-First
+
+Der Forward-Modal wählt zwischen Plain-DNS (Port 53) und
+DNS-over-TLS (Port 853). Bei DoT nimmt das Feld „Verify-CN" den
+Server-Namen entgegen, den Unbound gegen das Upstream-Zertifikat
+verifiziert (z. B. `cloudflare-dns.com`). Beschreibung + Aktiv-Flag
+sind wie bei Host-Overrides editierbar; die Identity bleibt beim
+Update fest — Rename via Delete + Add.
+
+### UI
+
+- Sub-Tabs „Domain-Overrides" und „Abfrage-Weiterleitungen" haben
+  jetzt einen Add-Button („Neue Domain-Weiterleitung",
+  „Neue Abfrage-Weiterleitung") und pro Zeile die Buttons
+  „Bearbeiten" und „Löschen".
+- Zwei neue Modals: `#domain-modal` und `#forward-modal`, konsistent
+  zum bestehenden `#unbound-modal` (Host-Override) gestaltet.
+- Nach jedem Add/Edit/Delete öffnet automatisch die Plan-Preview,
+  wie bei den anderen CRUD-Aktionen.
+
+### Was bewusst nicht gemacht wurde
+
+- **Kein Compare-Sync** für Domain-Overrides / Forwards — die Werte
+  sind Site-spezifisch (Standort-Resolver, per-Site-Upstreams), ein
+  „Master → alle"-Sync würde meistens falsche Daten kopieren.
+- **Kein CSV/JSON-Bulk-Import** — die Datenmengen pro Box sind klein
+  genug für Einzel-Edits.
+
+### Neue Tests
+
+`tests/unit/core/test_objects_unbound.py` — 32 Tests für die zwei
+neuen Adapter (Spec-Round-Trip, Payload, Diff, CRUD, Controller,
+Registry-Binding). Volle Suite: 1148 grün (vorher 1116).
+
 ## v0.10.0 — in Arbeit — HTTPS by default (Self-Signed + Auto-Rotation)
 
 ### Cockpit läuft ab jetzt immer HTTPS

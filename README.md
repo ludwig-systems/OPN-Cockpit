@@ -133,10 +133,13 @@ minimalen Rechten.
 - **Regeln** — Live-Liste der Automation-Filter-Regeln (Firewall →
   Automation → Filter), Add/Edit/Delete. Klassische „Firewall → Rules"
   (Legacy-XML-Editor) sind nicht API-zugänglich und werden nicht angezeigt.
-- **DNS** mit drei Sub-Tabs: **Host-Overrides** (CRUD),
-  **Domain-Overrides** (read-only, `searchDomainOverride`),
-  **Abfrage-Weiterleitungen** (read-only, `searchForward` — DoT/DoH-Forwarder)
-- **DNS** — Live-Liste der Unbound-Host-Overrides, Add/Edit/Delete
+- **DNS** mit drei Sub-Tabs — Live-Listen mit Filter, jeweils
+  Add/Edit/Delete pro Zeile:
+  **Host-Overrides** (single-Record-Mappings),
+  **Domain-Overrides** (Zone-Weiterleitung an internen Resolver, z. B.
+  Active-Directory-DNS) und
+  **Abfrage-Weiterleitungen** (globale bzw. selektive Query-Forwards,
+  Plain-DNS oder DNS-over-TLS mit Cert-Verify-CN)
 
 ### Plan/Apply-Flow
 - Drei-Phasen-Modal: Eingabe → Vorschau → Result-Matrix

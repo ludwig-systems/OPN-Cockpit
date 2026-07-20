@@ -836,8 +836,7 @@ class DeviceUnboundHostsResponse(BaseModel):
 class UnboundDomainEntryResponse(BaseModel):
     """Ein Unbound-Domain-Override (Weiterleitung): Domain -> Resolver.
 
-    Wird derzeit nur read-only ausgeliefert (kein CRUD im Cockpit). Live-
-    UUID damit eine spaetere Edit-Implementation drauf aufsetzen kann.
+    Live-UUID zum Andocken an CRUD-Plan-Endpoints (Edit / Delete).
     """
 
     uuid: str
@@ -1078,6 +1077,77 @@ class UnboundHostDeletePlanRequest(BaseModel):
 
     host: str = Field(..., min_length=1, max_length=120)
     domain: str = Field(..., min_length=1, max_length=180)
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class _UnboundDomainPayloadBase(BaseModel):
+    """Gemeinsame Felder eines Domain-Override-Add/Update-Plans."""
+
+    enabled: bool = True
+    domain: str = Field(..., min_length=1, max_length=180)
+    server: str = Field(..., min_length=1, max_length=80)
+    description: str = Field("", max_length=200)
+
+
+class UnboundDomainPlanRequest(_UnboundDomainPayloadBase):
+    """Plan-Erzeugung fuer einen neuen Unbound-Domain-Override."""
+
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class UnboundDomainUpdatePlanRequest(_UnboundDomainPayloadBase):
+    """Plan-Erzeugung fuer einen Unbound-Domain-Override-Edit.
+
+    Identitaet = ``domain``. Server, Beschreibung und Enabled-Flag sind
+    editierbar; die Domain selbst bleibt fest (fuer Rename bitte
+    Delete + neuer Add).
+    """
+
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class UnboundDomainDeletePlanRequest(BaseModel):
+    """Plan-Erzeugung fuer Unbound-Domain-Override-Delete."""
+
+    domain: str = Field(..., min_length=1, max_length=180)
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class _UnboundForwardPayloadBase(BaseModel):
+    """Gemeinsame Felder eines Query-Forward-Add/Update-Plans."""
+
+    enabled: bool = True
+    domain: str = Field("", max_length=180)          # leer = "alle Queries"
+    server: str = Field(..., min_length=1, max_length=80)
+    port: int = Field(53, ge=1, le=65535)
+    type: str = Field("forward", min_length=1, max_length=16)
+    verify: str = Field("", max_length=180)          # DoT: Server-Name-Verify
+    description: str = Field("", max_length=200)
+
+
+class UnboundForwardPlanRequest(_UnboundForwardPayloadBase):
+    """Plan-Erzeugung fuer einen neuen Query-Forward."""
+
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class UnboundForwardUpdatePlanRequest(_UnboundForwardPayloadBase):
+    """Plan-Erzeugung fuer einen Query-Forward-Edit.
+
+    Identitaet = ``(domain, server, port)``. Editierbar sind ``type``,
+    ``verify``, ``description``, ``enabled``. Rename der Identity via
+    Delete + Add.
+    """
+
+    target_device_ids: list[str] = Field(..., min_length=1)
+
+
+class UnboundForwardDeletePlanRequest(BaseModel):
+    """Plan-Erzeugung fuer Query-Forward-Delete."""
+
+    domain: str = Field("", max_length=180)
+    server: str = Field(..., min_length=1, max_length=80)
+    port: int = Field(53, ge=1, le=65535)
     target_device_ids: list[str] = Field(..., min_length=1)
 
 

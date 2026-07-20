@@ -23,7 +23,11 @@ from opn_cockpit.core.objects.aliases import AliasSpec
 from opn_cockpit.core.objects.base import ActionKind
 from opn_cockpit.core.objects.firewall_rules import RuleSpec
 from opn_cockpit.core.objects.routes import RouteSpec
-from opn_cockpit.core.objects.unbound import UnboundHostSpec
+from opn_cockpit.core.objects.unbound import (
+    UnboundDomainSpec,
+    UnboundForwardSpec,
+    UnboundHostSpec,
+)
 from opn_cockpit.core.result import RolloutReport, Status
 from opn_cockpit.core.validation import (
     parse_cidr,
@@ -65,6 +69,12 @@ from opn_cockpit.web.api.schemas import (
     RuleUpdatePlanRequest,
     SafetyNetEntryResponse,
     SafetyNetStatusResponse,
+    UnboundDomainDeletePlanRequest,
+    UnboundDomainPlanRequest,
+    UnboundDomainUpdatePlanRequest,
+    UnboundForwardDeletePlanRequest,
+    UnboundForwardPlanRequest,
+    UnboundForwardUpdatePlanRequest,
     UnboundHostDeletePlanRequest,
     UnboundHostPlanRequest,
     UnboundHostUpdatePlanRequest,
@@ -430,6 +440,199 @@ def plan_unbound_host_delete(
         session=session,
         action="delete_unbound_host",
         subsystem="unbound_hosts",
+        spec=spec,
+        devices=devices,
+        action_kind=ActionKind.DELETE,
+    )
+    return _plan_to_response(plan)
+
+
+# ---------------------------------------------------------------------------
+# Unbound-DNS Domain-Overrides
+# ---------------------------------------------------------------------------
+
+
+def _unbound_domain_spec(payload: object) -> UnboundDomainSpec:
+    return UnboundDomainSpec(
+        domain=payload.domain,        # type: ignore[attr-defined]
+        server=getattr(payload, "server", ""),
+        description=getattr(payload, "description", ""),
+        enabled=getattr(payload, "enabled", True),
+    )
+
+
+@router.post(
+    "/unbound-domain",
+    response_model=PlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def plan_unbound_domain(
+    payload: UnboundDomainPlanRequest,
+    session: Session = Depends(require_session),
+) -> PlanResponse:
+    """Plan: neuer Unbound-Domain-Override auf den gewaehlten Geraeten."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
+    devices = _devices_or_404(session, payload.target_device_ids)
+    plan = _generate_and_save_plan(
+        session=session,
+        action="add_unbound_domain",
+        subsystem="unbound_domains",
+        spec=_unbound_domain_spec(payload),
+        devices=devices,
+        action_kind=ActionKind.ADD,
+    )
+    return _plan_to_response(plan)
+
+
+@router.post(
+    "/unbound-domain-update",
+    response_model=PlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def plan_unbound_domain_update(
+    payload: UnboundDomainUpdatePlanRequest,
+    session: Session = Depends(require_session),
+) -> PlanResponse:
+    """Plan: Unbound-Domain-Override-Edit. Identitaet = domain."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
+    devices = _devices_or_404(session, payload.target_device_ids)
+    plan = _generate_and_save_plan(
+        session=session,
+        action="update_unbound_domain",
+        subsystem="unbound_domains",
+        spec=_unbound_domain_spec(payload),
+        devices=devices,
+        action_kind=ActionKind.UPDATE,
+    )
+    return _plan_to_response(plan)
+
+
+@router.post(
+    "/unbound-domain-delete",
+    response_model=PlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def plan_unbound_domain_delete(
+    payload: UnboundDomainDeletePlanRequest,
+    session: Session = Depends(require_session),
+) -> PlanResponse:
+    """Plan: Unbound-Domain-Override-Delete. Identitaet = domain."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
+    devices = _devices_or_404(session, payload.target_device_ids)
+    spec = UnboundDomainSpec(domain=payload.domain, server="placeholder")
+    plan = _generate_and_save_plan(
+        session=session,
+        action="delete_unbound_domain",
+        subsystem="unbound_domains",
+        spec=spec,
+        devices=devices,
+        action_kind=ActionKind.DELETE,
+    )
+    return _plan_to_response(plan)
+
+
+# ---------------------------------------------------------------------------
+# Unbound-DNS Query-Forwards
+# ---------------------------------------------------------------------------
+
+
+def _unbound_forward_spec(payload: object) -> UnboundForwardSpec:
+    return UnboundForwardSpec(
+        domain=getattr(payload, "domain", ""),
+        server=getattr(payload, "server", ""),
+        port=int(getattr(payload, "port", 53)),
+        type=getattr(payload, "type", "forward") or "forward",
+        verify=getattr(payload, "verify", ""),
+        description=getattr(payload, "description", ""),
+        enabled=getattr(payload, "enabled", True),
+    )
+
+
+@router.post(
+    "/unbound-forward",
+    response_model=PlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def plan_unbound_forward(
+    payload: UnboundForwardPlanRequest,
+    session: Session = Depends(require_session),
+) -> PlanResponse:
+    """Plan: neuer Unbound-Query-Forward auf den gewaehlten Geraeten."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
+    devices = _devices_or_404(session, payload.target_device_ids)
+    plan = _generate_and_save_plan(
+        session=session,
+        action="add_unbound_forward",
+        subsystem="unbound_forwards",
+        spec=_unbound_forward_spec(payload),
+        devices=devices,
+        action_kind=ActionKind.ADD,
+    )
+    return _plan_to_response(plan)
+
+
+@router.post(
+    "/unbound-forward-update",
+    response_model=PlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def plan_unbound_forward_update(
+    payload: UnboundForwardUpdatePlanRequest,
+    session: Session = Depends(require_session),
+) -> PlanResponse:
+    """Plan: Query-Forward-Edit. Identitaet = (domain, server, port)."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
+    devices = _devices_or_404(session, payload.target_device_ids)
+    plan = _generate_and_save_plan(
+        session=session,
+        action="update_unbound_forward",
+        subsystem="unbound_forwards",
+        spec=_unbound_forward_spec(payload),
+        devices=devices,
+        action_kind=ActionKind.UPDATE,
+    )
+    return _plan_to_response(plan)
+
+
+@router.post(
+    "/unbound-forward-delete",
+    response_model=PlanResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def plan_unbound_forward_delete(
+    payload: UnboundForwardDeletePlanRequest,
+    session: Session = Depends(require_session),
+) -> PlanResponse:
+    """Plan: Query-Forward-Delete. Identitaet = (domain, server, port)."""
+    require_plan_role(session)
+    require_device_ids_accessible(
+        payload.target_device_ids, session.opened.data.devices, session,
+    )
+    devices = _devices_or_404(session, payload.target_device_ids)
+    spec = UnboundForwardSpec(
+        domain=payload.domain,
+        server=payload.server,
+        port=payload.port,
+    )
+    plan = _generate_and_save_plan(
+        session=session,
+        action="delete_unbound_forward",
+        subsystem="unbound_forwards",
         spec=spec,
         devices=devices,
         action_kind=ActionKind.DELETE,

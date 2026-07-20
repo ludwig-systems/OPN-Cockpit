@@ -55,16 +55,21 @@ UNBOUND_HOST_DEL = "/api/unbound/settings/delHostOverride/{uuid}"
 UNBOUND_RECONFIGURE = "/api/unbound/service/reconfigure"
 
 # Unbound-DNS Domain-Overrides (Weiterleitungen): leiten alle Queries fuer
-# eine Domain an einen externen Resolver weiter. Read-only-Anzeige (CRUD
-# kann spaeter folgen).
+# eine Domain an einen externen Resolver weiter.
+UNBOUND_DOMAIN_ADD = "/api/unbound/settings/addDomainOverride"
 UNBOUND_DOMAIN_SEARCH = "/api/unbound/settings/searchDomainOverride"
 UNBOUND_DOMAIN_GET = "/api/unbound/settings/getDomainOverride/{uuid}"
+UNBOUND_DOMAIN_SET = "/api/unbound/settings/setDomainOverride/{uuid}"
+UNBOUND_DOMAIN_DEL = "/api/unbound/settings/delDomainOverride/{uuid}"
 
 # Unbound-DNS Query-Forwards (UI-Tab "Query Forwarding"): die globalen
 # Forward-Server (oft DoT/DoH), an die ALLE Queries (oder fuer eine
-# bestimmte Domain) weitergegeben werden. Read-only-Anzeige.
+# bestimmte Domain) weitergegeben werden.
+UNBOUND_FORWARD_ADD = "/api/unbound/settings/addForward"
 UNBOUND_FORWARD_SEARCH = "/api/unbound/settings/searchForward"
 UNBOUND_FORWARD_GET = "/api/unbound/settings/getForward/{uuid}"
+UNBOUND_FORWARD_SET = "/api/unbound/settings/setForward/{uuid}"
+UNBOUND_FORWARD_DEL = "/api/unbound/settings/delForward/{uuid}"
 
 # ---------------------------------------------------------------------------
 # Discovery (v1.1)

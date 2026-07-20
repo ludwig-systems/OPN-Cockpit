@@ -2911,11 +2911,17 @@
   let unbEditOriginalDomain = '';
   let unbTargetDeviceId = '';
 
-  // Domain-Overrides + Query-Forwards - read-only Sub-Tabs.
+  // Domain-Overrides + Query-Forwards - jetzt mit CRUD.
   let domRawDomains = [];
   let domLoadedForDeviceId = null;
+  let domEditMode = 'add';           // 'add' | 'update'
+  let domEditOriginalDomain = '';    // Identity beim Edit (Domain kann nicht geaendert werden)
+  let domTargetDeviceId = '';
   let fwdRawForwards = [];
   let fwdLoadedForDeviceId = null;
+  let fwdEditMode = 'add';           // 'add' | 'update'
+  let fwdEditOriginal = null;        // {domain, server, port} als Identity beim Edit
+  let fwdTargetDeviceId = '';
   let dnsActiveSub = 'hosts';
 
   function switchDnsSubtab(sub) {
@@ -3037,6 +3043,21 @@
         descr.textContent = f.description;
         row.appendChild(descr);
       }
+      const actions = document.createElement('div');
+      actions.className = 'alm-actions';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn-secondary';
+      editBtn.textContent = 'Bearbeiten';
+      editBtn.addEventListener('click', () => openForwardEditModal(f));
+      actions.appendChild(editBtn);
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn-danger';
+      delBtn.textContent = 'Loeschen';
+      delBtn.addEventListener('click', () => deleteForwardFromManager(f));
+      actions.appendChild(delBtn);
+      row.appendChild(actions);
       list.appendChild(row);
     }
   }
@@ -3083,7 +3104,295 @@
         descr.textContent = d.description;
         row.appendChild(descr);
       }
+      const actions = document.createElement('div');
+      actions.className = 'alm-actions';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn-secondary';
+      editBtn.textContent = 'Bearbeiten';
+      editBtn.addEventListener('click', () => openDomainEditModal(d));
+      actions.appendChild(editBtn);
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn-danger';
+      delBtn.textContent = 'Loeschen';
+      delBtn.addEventListener('click', () => deleteDomainFromManager(d));
+      actions.appendChild(delBtn);
+      row.appendChild(actions);
       list.appendChild(row);
+    }
+  }
+
+  // -------------------- Domain-Override-Modal (Add / Edit / Delete) --------------------
+
+  function openDomainAddModal() {
+    if (!currentDeviceId) return;
+    domEditMode = 'add';
+    domEditOriginalDomain = '';
+    domTargetDeviceId = currentDeviceId;
+    $('#domain-modal-title').textContent = 'Neue Domain-Weiterleitung';
+    $('#dom-domain').value = '';
+    $('#dom-domain').readOnly = false;
+    $('#dom-server').value = '';
+    $('#dom-enabled').checked = true;
+    $('#dom-descr').value = '';
+    $('#domain-modal-error').hidden = true;
+    $('#domain-modal').hidden = false;
+    setTimeout(() => $('#dom-domain').focus(), 0);
+  }
+
+  function openDomainEditModal(domain) {
+    if (!currentDeviceId) return;
+    domEditMode = 'update';
+    domEditOriginalDomain = domain.domain;
+    domTargetDeviceId = currentDeviceId;
+    $('#domain-modal-title').textContent =
+      'Domain-Weiterleitung bearbeiten (' + domain.domain + ')';
+    $('#dom-domain').value = domain.domain;
+    $('#dom-domain').readOnly = true;
+    $('#dom-server').value = domain.server || '';
+    $('#dom-enabled').checked = !!domain.enabled;
+    $('#dom-descr').value = domain.description || '';
+    $('#domain-modal-error').hidden = true;
+    $('#domain-modal').hidden = false;
+    setTimeout(() => $('#dom-server').focus(), 0);
+  }
+
+  function closeDomainModal() {
+    $('#domain-modal').hidden = true;
+    $('#dom-domain').readOnly = false;
+    domEditMode = 'add';
+    domEditOriginalDomain = '';
+    domTargetDeviceId = '';
+  }
+
+  async function submitDomainModal() {
+    if (!domTargetDeviceId) {
+      showDomainModalError('Kein Ziel-Geraet bekannt - Modal neu oeffnen.');
+      return;
+    }
+    const domain = $('#dom-domain').value.trim();
+    const server = $('#dom-server').value.trim();
+    if (!domain || !server) {
+      showDomainModalError('Domain und Ziel-Resolver sind Pflichtfelder.');
+      return;
+    }
+    const payload = {
+      domain, server,
+      enabled: $('#dom-enabled').checked,
+      description: $('#dom-descr').value.trim(),
+      target_device_ids: [domTargetDeviceId],
+    };
+    const url = domEditMode === 'update'
+      ? '/api/plans/unbound-domain-update'
+      : '/api/plans/unbound-domain';
+    const confirm = $('#domain-modal-confirm');
+    confirm.disabled = true;
+    confirm.textContent = 'Erzeuge Plan…';
+    try {
+      const r = await apiPost(url, payload);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showDomainModalError(body.detail || `Fehler ${r.status}`);
+        return;
+      }
+      const plan = await r.json();
+      closeDomainModal();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showDomainModalError(err.message);
+    } finally {
+      confirm.disabled = false;
+      confirm.textContent = 'Plan erzeugen';
+    }
+  }
+
+  function showDomainModalError(msg) {
+    const box = $('#domain-modal-error');
+    box.textContent = msg;
+    box.hidden = false;
+  }
+
+  async function deleteDomainFromManager(domainOverride) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    const devName = device ? device.name : currentDeviceId;
+    const ok = window.confirm(
+      'Domain-Weiterleitung "' + domainOverride.domain + '" wirklich auf '
+      + devName + ' loeschen?\n\n'
+      + 'Pre-Apply-Backup wird gezogen; ein Rollback ist via Backup-Tab moeglich.',
+    );
+    if (!ok) return;
+    try {
+      const r = await apiPost('/api/plans/unbound-domain-delete', {
+        domain: domainOverride.domain,
+        target_device_ids: [currentDeviceId],
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${r.status}`, true);
+        return;
+      }
+      const plan = await r.json();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  // -------------------- Query-Forward-Modal (Add / Edit / Delete) --------------------
+
+  function openForwardAddModal() {
+    if (!currentDeviceId) return;
+    fwdEditMode = 'add';
+    fwdEditOriginal = null;
+    fwdTargetDeviceId = currentDeviceId;
+    $('#forward-modal-title').textContent = 'Neue Abfrage-Weiterleitung';
+    $('#fwd-domain').value = '';
+    $('#fwd-domain').readOnly = false;
+    $('#fwd-server').value = '';
+    $('#fwd-server').readOnly = false;
+    $('#fwd-port').value = '53';
+    $('#fwd-port').readOnly = false;
+    $('#fwd-type').value = 'forward';
+    $('#fwd-verify').value = '';
+    $('#fwd-enabled').checked = true;
+    $('#fwd-descr').value = '';
+    $('#forward-modal-error').hidden = true;
+    $('#forward-modal').hidden = false;
+    setTimeout(() => $('#fwd-server').focus(), 0);
+  }
+
+  function openForwardEditModal(forward) {
+    if (!currentDeviceId) return;
+    fwdEditMode = 'update';
+    fwdEditOriginal = {
+      domain: forward.domain || '',
+      server: forward.server || '',
+      port: Number(forward.port) || 53,
+    };
+    fwdTargetDeviceId = currentDeviceId;
+    const label = (forward.domain || '(alle)')
+      + ' → ' + (forward.server || '') + ':' + (forward.port || 53);
+    $('#forward-modal-title').textContent =
+      'Abfrage-Weiterleitung bearbeiten (' + label + ')';
+    $('#fwd-domain').value = forward.domain || '';
+    $('#fwd-domain').readOnly = true;
+    $('#fwd-server').value = forward.server || '';
+    $('#fwd-server').readOnly = true;
+    $('#fwd-port').value = String(forward.port || 53);
+    $('#fwd-port').readOnly = true;
+    $('#fwd-type').value = forward.type || 'forward';
+    $('#fwd-verify').value = forward.verify || '';
+    $('#fwd-enabled').checked = !!forward.enabled;
+    $('#fwd-descr').value = forward.description || '';
+    $('#forward-modal-error').hidden = true;
+    $('#forward-modal').hidden = false;
+    setTimeout(() => $('#fwd-type').focus(), 0);
+  }
+
+  function closeForwardModal() {
+    $('#forward-modal').hidden = true;
+    $('#fwd-domain').readOnly = false;
+    $('#fwd-server').readOnly = false;
+    $('#fwd-port').readOnly = false;
+    fwdEditMode = 'add';
+    fwdEditOriginal = null;
+    fwdTargetDeviceId = '';
+  }
+
+  async function submitForwardModal() {
+    if (!fwdTargetDeviceId) {
+      showForwardModalError('Kein Ziel-Geraet bekannt - Modal neu oeffnen.');
+      return;
+    }
+    const server = $('#fwd-server').value.trim();
+    const portRaw = $('#fwd-port').value.trim();
+    const port = Number(portRaw);
+    if (!server) {
+      showForwardModalError('Upstream-Server ist ein Pflichtfeld.');
+      return;
+    }
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+      showForwardModalError('Port muss zwischen 1 und 65535 liegen.');
+      return;
+    }
+    const payload = {
+      domain: $('#fwd-domain').value.trim(),
+      server,
+      port,
+      type: $('#fwd-type').value || 'forward',
+      verify: $('#fwd-verify').value.trim(),
+      enabled: $('#fwd-enabled').checked,
+      description: $('#fwd-descr').value.trim(),
+      target_device_ids: [fwdTargetDeviceId],
+    };
+    const url = fwdEditMode === 'update'
+      ? '/api/plans/unbound-forward-update'
+      : '/api/plans/unbound-forward';
+    const confirm = $('#forward-modal-confirm');
+    confirm.disabled = true;
+    confirm.textContent = 'Erzeuge Plan…';
+    try {
+      const r = await apiPost(url, payload);
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showForwardModalError(body.detail || `Fehler ${r.status}`);
+        return;
+      }
+      const plan = await r.json();
+      closeForwardModal();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showForwardModalError(err.message);
+    } finally {
+      confirm.disabled = false;
+      confirm.textContent = 'Plan erzeugen';
+    }
+  }
+
+  function showForwardModalError(msg) {
+    const box = $('#forward-modal-error');
+    box.textContent = msg;
+    box.hidden = false;
+  }
+
+  async function deleteForwardFromManager(forward) {
+    if (!currentDeviceId) return;
+    const device = state.devices.find((d) => d.id === currentDeviceId);
+    const devName = device ? device.name : currentDeviceId;
+    const dom = forward.domain || '(alle)';
+    const label = dom + ' → ' + forward.server + ':' + (forward.port || 53);
+    const ok = window.confirm(
+      'Abfrage-Weiterleitung "' + label + '" wirklich auf '
+      + devName + ' loeschen?\n\n'
+      + 'Pre-Apply-Backup wird gezogen; ein Rollback ist via Backup-Tab moeglich.',
+    );
+    if (!ok) return;
+    try {
+      const r = await apiPost('/api/plans/unbound-forward-delete', {
+        domain: forward.domain || '',
+        server: forward.server || '',
+        port: Number(forward.port) || 53,
+        target_device_ids: [currentDeviceId],
+      });
+      if (r.status === 401) { handleSessionLost(); return; }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        showToast(body.detail || `Fehler ${r.status}`, true);
+        return;
+      }
+      const plan = await r.json();
+      closeDeviceModal();
+      openExistingPlanInPreview(plan.plan_id);
+    } catch (err) {
+      showToast(err.message, true);
     }
   }
 
@@ -7646,6 +7955,10 @@
     if (domFilter) domFilter.addEventListener('input', renderDomainList);
     const fwdFilter = $('#fwd-filter');
     if (fwdFilter) fwdFilter.addEventListener('input', renderForwardList);
+    const domAdd = $('#dom-add-btn');
+    if (domAdd) domAdd.addEventListener('click', openDomainAddModal);
+    const fwdAdd = $('#fwd-add-btn');
+    if (fwdAdd) fwdAdd.addEventListener('click', openForwardAddModal);
     const unbCancel = $('#unbound-modal-cancel');
     if (unbCancel) unbCancel.addEventListener('click', closeUnboundModal);
     const unbClose = $('#unbound-modal-close');
@@ -7653,6 +7966,24 @@
     const unbConfirm = $('#unbound-modal-confirm');
     if (unbConfirm) unbConfirm.addEventListener('click', () => {
       submitUnboundModal().catch((err) => showUnboundModalError(err.message));
+    });
+    // Domain-Override-Modal
+    const domCancel = $('#domain-modal-cancel');
+    if (domCancel) domCancel.addEventListener('click', closeDomainModal);
+    const domClose = $('#domain-modal-close');
+    if (domClose) domClose.addEventListener('click', closeDomainModal);
+    const domConfirm = $('#domain-modal-confirm');
+    if (domConfirm) domConfirm.addEventListener('click', () => {
+      submitDomainModal().catch((err) => showDomainModalError(err.message));
+    });
+    // Query-Forward-Modal
+    const fwdCancel = $('#forward-modal-cancel');
+    if (fwdCancel) fwdCancel.addEventListener('click', closeForwardModal);
+    const fwdClose = $('#forward-modal-close');
+    if (fwdClose) fwdClose.addEventListener('click', closeForwardModal);
+    const fwdConfirm = $('#forward-modal-confirm');
+    if (fwdConfirm) fwdConfirm.addEventListener('click', () => {
+      submitForwardModal().catch((err) => showForwardModalError(err.message));
     });
     // Safety-Net Banner-Close
     const snBannerClose = $('#pl-safety-net-banner-close');

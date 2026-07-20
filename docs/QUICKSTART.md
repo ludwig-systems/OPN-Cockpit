@@ -137,15 +137,22 @@ Klick auf eine Karte → Device-Modal mit sechs Tabs:
   OPNsense 23.7 in Core integriert (vorher als `os-firewall`-Plugin).
   Klassische „Firewall → Rules" (Legacy-XML) sind nicht API-zugänglich
   und werden nicht angezeigt
-- **DNS** — drei Sub-Tabs: **Host-Overrides** (CRUD, „Neuer
-  Host-Override" / Bearbeiten / Löschen), **Domain-Overrides**
-  (read-only) und **Abfrage-Weiterleitungen** (read-only — die
-  globalen Query-Forwards inkl. DoT/DoH)
+- **DNS** — drei Sub-Tabs mit Add/Edit/Delete pro Zeile:
+  **Host-Overrides** (Single-Record-Mappings),
+  **Domain-Overrides** (leiten eine Zone an einen internen
+  Resolver, z. B. AD-DNS) und
+  **Abfrage-Weiterleitungen** (globale oder selektive
+  Query-Forwards; Plain-DNS oder DNS-over-TLS mit Cert-Verify-CN)
 
 Bearbeiten/Löschen läuft immer durch den Plan/Apply-Flow:
 Vorschau → Bestätigen → Apply mit Pre-Apply-Backup + Audit-Eintrag.
-Identitäts-Felder (Alias-Name, Netz+Gateway, host+domain) sind beim
-Edit gesperrt, um aus einer Aktion zwei zu machen.
+Identitäts-Felder sind beim Edit gesperrt, um aus einer Aktion
+zwei zu machen:
+- Alias-Name (Aliase)
+- Netz + Gateway (Routen)
+- Host + Domain (DNS-Host-Overrides)
+- Domain (DNS-Domain-Overrides)
+- Domain + Server + Port (DNS-Abfrage-Weiterleitungen)
 
 ## 11. Config-Compare zwischen Geräten
 
