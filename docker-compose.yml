@@ -5,7 +5,12 @@
 # Stop:     docker compose down
 # Update:   docker compose build --no-cache && docker compose up -d
 #
-# Test der UI nach Start: http://localhost:9876
+# Test der UI nach Start: https://localhost   (HTTPS-Standard-Port 443)
+#
+# Port-Mapping: extern 443 (HTTPS-Standard), intern 9876 (unprivileged, damit
+# der non-root Container-User binden kann - kein CAP_NET_BIND_SERVICE noetig).
+# Wenn Port 443 auf dem Host schon belegt ist, hier auf "8443:9876" o.ae.
+# aendern und via https://<host>:8443 zugreifen.
 #
 # Daten liegen im Named-Volume "opncockpit-data". Per Default ueberlebt das
 # `docker compose down`. Mit `docker compose down -v` waere es geloescht.
@@ -17,7 +22,7 @@ services:
     container_name: opn-cockpit
     restart: unless-stopped
     ports:
-      - "9876:9876"
+      - "443:9876"
     volumes:
       - opncockpit-data:/data
     environment:

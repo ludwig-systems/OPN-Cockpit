@@ -20,13 +20,21 @@ Environment="OPNCOCKPIT_DATA_DIR=/var/lib/opn-cockpit"
 Environment="OPNCOCKPIT_VAULT_DIR=/var/lib/opn-cockpit"
 Environment="OPNCOCKPIT_VAULT_PATH=/var/lib/opn-cockpit/firewalls.opnvault"
 Environment="OPNCOCKPIT_HOST=0.0.0.0"
-Environment="OPNCOCKPIT_PORT=9876"
+# Port 443 = HTTPS-Standard, damit Nutzer die URL ohne :port aufrufen
+# koennen. Der Service laeuft als non-root User; CAP_NET_BIND_SERVICE
+# unten erlaubt das Binden von privilegierten Ports.
+Environment="OPNCOCKPIT_PORT=443"
 Environment="OPNCOCKPIT_NO_BROWSER=1"
 Environment="OPNCOCKPIT_AUTH_BACKEND=user-db"
 Environment="OPNCOCKPIT_DEPLOYMENT_MODE=multi-server"
 Environment="OPNCOCKPIT_STORAGE_BACKEND=sqlite"
 Environment="PYTHONUNBUFFERED=1"
 Environment="TZ=Europe/Berlin"
+
+# Capabilities: nur CAP_NET_BIND_SERVICE, damit der non-root Service-User
+# Port 443 binden kann. Alle anderen Root-Faehigkeiten sind gestrichen.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 # Hardening
 NoNewPrivileges=true

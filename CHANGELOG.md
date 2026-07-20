@@ -2,7 +2,47 @@
 
 Alle nennenswerten Änderungen pro Release.
 
-## v0.11.0 — in Arbeit — Unbound Query-Forwards + Domain-Overrides CRUD
+## v0.11.0 — in Arbeit — Unbound CRUD + HTTPS-Standard-Port 443
+
+### Port 443 einheitlich (Linux + Windows + Docker)
+
+Der Cockpit-Server bindet ab sofort auf **Port 443** (HTTPS-Standard) statt
+wie bisher auf 9876. Damit lässt sich das UI ohne :port-Suffix aufrufen —
+`https://cockpit.lab` statt `https://cockpit.lab:9876`. Das war der letzte
+sichtbare Bruch zwischen „Cockpit HTTPS-by-default" (v0.10) und einer
+normalen Web-App.
+
+- **Linux systemd-Unit** (`installer/linux/opn-cockpit.service`): setzt
+  `AmbientCapabilities=CAP_NET_BIND_SERVICE` (mit `CapabilityBoundingSet` als
+  Hardening-Cap), damit der non-root `opncockpit`-User Port 443 binden darf.
+  Env `OPNCOCKPIT_PORT=443`.
+- **Windows-Service** (`scripts/install-service.ps1` + NSSM): Env-Block
+  setzt `OPNCOCKPIT_PORT=443`. `LOCAL_SERVICE` darf privilegierte Ports
+  ohnehin binden, kein extra-Setup nötig.
+- **Docker**: `docker-compose.yml` mapped `443:9876` — Container läuft
+  intern weiter auf 9876 (kein CAP-Setcap im Image nötig), nach außen ist
+  Port 443 gemappt.
+- **Python-Default** (`WebSettings.DEFAULT_PORT`): 443. Wer im Dev-Mode
+  einen unprivileged Port braucht, setzt `OPNCOCKPIT_PORT=9876` oder
+  ähnlich.
+- **`base_url`-Property**: Standard-Ports (443/HTTPS, 80/HTTP) werden im
+  User-facing base_url weggelassen — Bookmarks bleiben sauber.
+- **Alle URL-Ausgaben** (install.sh, proxmox-helper.sh Update-Infobild,
+  Inno-Setup-Shortcuts, Windows-Service-Konsolen-Output, alle READMEs)
+  zeigen jetzt `https://<host>` ohne `:9876`.
+
+**Breaking Change bei Update:** Wer sich `https://…:9876` gebookmarked
+hatte, muss den Bookmark anpassen. Windows-Installer aktualisiert das
+Start-Menu- und Desktop-Shortcut, Linux-Installer gibt die neue URL am
+Ende der Installation aus, Proxmox-Helper zeigt sie im „Update
+fertig"-Whiptail-Dialog.
+
+**Windows-Kollision:** Wenn auf dem Windows-Server bereits IIS (oder ein
+anderer Service) auf Port 443 lauscht, blockiert das den Cockpit-Service-
+Start. Fix: entweder IIS-Site auf einen anderen Port verlegen oder
+`OPNCOCKPIT_PORT=8443` (o. ä.) in der NSSM-Env setzen.
+
+### Unbound Query-Forwards + Domain-Overrides CRUD
 
 Die zwei Read-only-Ansichten aus dem Device-Modal (Sub-Tabs
 „Domain-Overrides" und „Abfrage-Weiterleitungen") sind jetzt vollwertig

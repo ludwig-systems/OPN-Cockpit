@@ -20,7 +20,12 @@ import sys
 from dataclasses import dataclass
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 9876
+# 443 = HTTPS-Standardport. Zusammen mit HTTPS-by-default (v0.10) heisst
+# das: Cockpit-URL ist einfach ``https://<host>`` ohne :port-Suffix. Auf
+# Linux erlaubt CAP_NET_BIND_SERVICE (systemd-Unit) dem non-root Service-
+# User das Binden; Windows / Dev-Mode braucht Admin- bzw. keine
+# Restrictions. Override via ``OPNCOCKPIT_PORT=<n>``.
+DEFAULT_PORT = 443
 
 # TLS-Source-Marker fuers Boot-Log (nicht endpoint-relevant, aber
 # hilfreich in stderr).
@@ -113,12 +118,14 @@ class WebSettings:
     def base_url(self) -> str:
         # Wenn TLS gesetzt oder wir HTTPS-by-default gehen (allow_http_fallback
         # ausgeschaltet), ist der User-facing Scheme https. Sonst http.
-        if self.tls_cert and self.tls_key:
-            return f"https://{self.host}:{self.port}"
-        if not self.allow_http_fallback:
-            # HTTPS ist Default; Auto-Cert wird erst spaeter im Boot gesetzt.
-            return f"https://{self.host}:{self.port}"
-        return f"http://{self.host}:{self.port}"
+        # Standard-Ports (443/HTTPS, 80/HTTP) werden weggelassen — das ist
+        # URL-Convention und macht Bookmarks lesbarer.
+        use_https = bool(self.tls_cert and self.tls_key) or not self.allow_http_fallback
+        if use_https:
+            suffix = "" if self.port == 443 else f":{self.port}"
+            return f"https://{self.host}{suffix}"
+        suffix = "" if self.port == 80 else f":{self.port}"
+        return f"http://{self.host}{suffix}"
 
     @property
     def is_loopback_only(self) -> bool:

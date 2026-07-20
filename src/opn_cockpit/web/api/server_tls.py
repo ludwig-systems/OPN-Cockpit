@@ -2,7 +2,7 @@
 
 Im Gegensatz zum Custom-Trust-Store (der OUTGOING TLS-Pruefung gegen
 OPNsense-Boxen beeinflusst), regelt dieses Endpoint das INGOING TLS:
-das Zertifikat unter dem Cockpit-User auf ``https://cockpit.lab:9876``
+das Zertifikat unter dem Cockpit-User auf ``https://cockpit.lab``
 zugreifen.
 
 Pfade liegen in ``%APPDATA%/OPN-Cockpit/settings.json`` (AppSettings) -

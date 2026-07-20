@@ -18,7 +18,8 @@ docker compose up -d
 ```
 
 Daten landen im Named-Volume `opn-cockpit-data` (Vault + User-DB + Audit + Settings).
-Port `9876` ist nach außen gemappt.
+Port `443` (HTTPS) ist nach außen gemappt — die UI ist unter `https://<host-ip>`
+ohne :port-Suffix erreichbar.
 
 ## Variante 2: Direkt auf Debian-/Ubuntu-Host als systemd-Service
 
@@ -37,7 +38,7 @@ Was passiert:
 - Verzeichnisse: `/opt/opn-cockpit` (Code) + `/var/lib/opn-cockpit` (Daten)
 - Python-venv unter `/opt/opn-cockpit/.venv`
 - systemd-Unit aktiviert und gestartet
-- Bind auf `0.0.0.0:9876`
+- Bind auf `0.0.0.0:443` (HTTPS-Standard, via CAP_NET_BIND_SERVICE)
 
 Konfigurierbare Pfade per Env überschreibbar:
 ```bash
@@ -100,7 +101,7 @@ Was passiert:
 - LXC-Container wird angelegt (unprivileged, nesting=1)
 - Container startet
 - `install.sh` läuft im Container, OPN-Cockpit ist als systemd-Service aktiv
-- IP wird gemeldet → UI ist sofort unter `http://<container-ip>:9876` erreichbar
+- IP wird gemeldet → UI ist sofort unter `https://<container-ip>` erreichbar
 
 Anschließend:
 ```bash
@@ -111,7 +112,9 @@ pct stop <ct-id>                                     # Stop
 
 ## Erster Login
 
-Browser auf `http://<host-or-container-ip>:9876` öffnen. Der Setup-Wizard
+Browser auf `https://<host-or-container-ip>` öffnen (Self-Signed-Cert,
+Browser-Warnung einmal akzeptieren — Fingerprint via
+`journalctl -u opn-cockpit -n 200`). Der Setup-Wizard
 zeigt **einen** Schritt mit zwei Sektionen:
 
 **1. Admin-Login (Default-Admin):**
@@ -148,7 +151,7 @@ Variablen direkt darin anpassen:
 | `OPNCOCKPIT_DEPLOYMENT_MODE` | `multi-server` | Server-Mode |
 | `OPNCOCKPIT_STORAGE_BACKEND` | `sqlite` | SQLite für Audit + Plans (statt JSONL) |
 | `OPNCOCKPIT_HOST` | `0.0.0.0` | Bind-Interface |
-| `OPNCOCKPIT_PORT` | `9876` | Port |
+| `OPNCOCKPIT_PORT` | `443` | HTTPS-Standardport (Cap `NET_BIND_SERVICE`) |
 | `OPNCOCKPIT_NO_BROWSER` | `1` | Kein Browser-Auto-Open auf einem Server |
 
 Nach Änderung:

@@ -6,8 +6,9 @@ Erzeugt einen Windows-Installer mit zwei Installations-Modi:
 - **Single-User**: Desktop-Verknüpfung, manueller Start per Doppelklick.
   Der User entscheidet wann der Server läuft.
 - **Multi-User-Server**: Windows-Dienst (NSSM-basiert) mit Autostart. Im
-  Netzwerk erreichbar (Standard-Port 9876), Single-File-Backup möglich
-  (SQLite-Backends via `OPNCOCKPIT_STORAGE_BACKEND=sqlite`).
+  Netzwerk erreichbar (HTTPS-Standard-Port 443, `https://<host>` ohne
+  :port-Suffix), Single-File-Backup möglich (SQLite-Backends via
+  `OPNCOCKPIT_STORAGE_BACKEND=sqlite`).
 
 Seit v0.6.0 ist der **gesamte Python-Interpreter inkl. Dependencies im
 Installer enthalten**. Auf dem Zielsystem muss kein System-Python mehr

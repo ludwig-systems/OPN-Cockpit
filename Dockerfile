@@ -6,7 +6,13 @@
 # Konfiguration:
 #   OPNCOCKPIT_DATA_DIR=/data    - alle Tresor- + Audit-Daten liegen in /data
 #   OPNCOCKPIT_HOST=0.0.0.0      - im Container immer auf alle Interfaces
-#   OPNCOCKPIT_PORT=9876         - default
+#   OPNCOCKPIT_PORT=9876         - INTERN 9876 (unprivileged). docker-compose
+#                                  mapped den nach aussen auf 443 (HTTPS-Std).
+#                                  Grund: Der Container-User ist non-root und
+#                                  duerfte 443 intern nicht binden — statt
+#                                  CAP_NET_BIND_SERVICE zu setzen (fragil,
+#                                  deaktiviert LD_LIBRARY_PATH) macht das
+#                                  Docker-Port-Mapping das sauber.
 #   OPNCOCKPIT_NO_BROWSER=1      - im Container natuerlich kein Browser-Auto-Open
 #
 # Volumes:

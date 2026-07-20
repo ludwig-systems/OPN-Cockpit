@@ -67,7 +67,8 @@ in [SERVICE-MODE.md](SERVICE-MODE.md).
 ## Erststart (Single-User)
 
 1. Desktop-Verknüpfung **OPN-Cockpit** doppelklicken.
-2. Browser öffnet automatisch `http://localhost:9876`.
+2. Browser öffnet automatisch `https://localhost` (HTTPS-Standard-Port 443,
+   Self-Signed-Cert — Warnung einmal akzeptieren).
 3. **„Neuen Tresor anlegen…"** klicken.
 4. Speicherort und Master-Passwort (min. 12 Zeichen) festlegen.
 5. Tresor wird angelegt, du landest auf der leeren Inventar-Ansicht.

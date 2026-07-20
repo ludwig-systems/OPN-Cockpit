@@ -12,7 +12,8 @@
 #   - Verzeichnisse: /opt/opn-cockpit, /var/lib/opn-cockpit
 #   - Python venv + pip install -e .
 #   - systemd-Unit aktiviert, gestartet
-#   - Bind auf 0.0.0.0:9876 (Default), Daten in /var/lib/opn-cockpit
+#   - Bind auf 0.0.0.0:443 (HTTPS-Standard, via CAP_NET_BIND_SERVICE),
+#     Daten in /var/lib/opn-cockpit
 
 set -euo pipefail
 
@@ -136,7 +137,7 @@ if systemctl is-active --quiet opn-cockpit.service; then
     echo
     log "Installation fertig. Service laeuft."
     echo
-    echo "  URL:           https://${HOST_IP}:9876"
+    echo "  URL:           https://${HOST_IP}"
     echo "                 (Self-Signed-Cert - Browser-Warnung akzeptieren; Fingerprint via 'journalctl -u opn-cockpit -n 200')"
     echo "  Default-Login: admin / OPN-Cockpit!  (Pflicht-PW-Wechsel beim Erst-Login)"
     echo

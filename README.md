@@ -48,14 +48,14 @@ Lizenz: **Apache License 2.0** (siehe [LICENSE](LICENSE) und
 | Variante | Wer | So gehts |
 |---|---|---|
 | **Windows Single-User** | Ein Admin am eigenen PAW | `Install-OPN-Cockpit-X.Y.Z.exe` von [Releases](https://github.com/ludwig-systems/opn-cockpit/releases) → Doppelklick → Single-User wählen |
-| **Windows Multi-User-Server** | Team auf Windows-Server | Selber Installer, im Wizard „Multi-User-Server" wählen — registriert NSSM-Dienst, Autostart, Bind auf `0.0.0.0:9876` |
+| **Windows Multi-User-Server** | Team auf Windows-Server | Selber Installer, im Wizard „Multi-User-Server" wählen — registriert NSSM-Dienst, Autostart, Bind auf `0.0.0.0:443` (HTTPS-Standard) |
 | **Linux-Server (Debian/Ubuntu)** | Team auf Linux-Server | `git clone … && sudo bash installer/linux/install.sh --source .` — systemd-Unit mit Hardening-Flags |
 | **Proxmox-LXC** | Team auf PVE-Cluster | Auf dem PVE-Host: `bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"` — whiptail-TUI führt durch CT-ID, Storage, Bridge, Netz; derselbe Befehl im Container = Update |
 | **Docker** | Container-First-Setup | Image im Quelltree (`Dockerfile`, `docker-compose.yml`) |
 
 Beim ersten Start in jeder Variante:
 
-1. Browser auf `http://<host>:9876`
+1. Browser auf `https://<host>` (Self-Signed-Warnung einmal akzeptieren)
 2. Login `admin` / `OPN-Cockpit!` (Default-Admin, **erzwingt Passwort-Wechsel beim ersten Login**)
 3. Tresor-Pfad + Master-Passwort setzen
 4. Geräte hinzufügen — einzeln oder Bulk-CSV/JSON
@@ -204,8 +204,9 @@ minimalen Rechten.
 ## Tech-Stack
 
 - **Sprache:** Python 3.11+
-- **Web-Backend:** FastAPI + Uvicorn — bind `127.0.0.1:9876` (Single-User)
-  oder `0.0.0.0:9876` (Multi-User-Server)
+- **Web-Backend:** FastAPI + Uvicorn — bind `127.0.0.1:443` (Single-User)
+  oder `0.0.0.0:443` (Multi-User-Server). HTTPS-Standardport, damit
+  Nutzer die URL ohne :port-Suffix aufrufen können.
 - **Frontend:** Vanilla HTML/CSS/JS, kein Build-Step
 - **HTTP zur OPNsense:** `httpx` (synchron) + `ThreadPoolExecutor` für
   parallelen Rollout

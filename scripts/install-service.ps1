@@ -15,7 +15,7 @@
 #   - Display:     OPN-Cockpit Multi-Site-Management
 #   - Startup:     Automatic
 #   - ObjectName:  NT AUTHORITY\LocalService
-#   - Bindung:     0.0.0.0:9876 (per Env)
+#   - Bindung:     0.0.0.0:443 (HTTPS-Standard, per Env)
 #   - Logs:        %ProgramData%\OPN-Cockpit\logs\
 #   - Token-File:  %ProgramData%\OPN-Cockpit\BOOTSTRAP-TOKEN.txt
 #
@@ -117,7 +117,7 @@ Write-Host ("Installiere Dienst '" + $ServiceName + "'...")
 & $nssm install $ServiceName $python "-m" "opn_cockpit"
 & $nssm set $ServiceName AppDirectory $InstallDir
 & $nssm set $ServiceName DisplayName $DisplayName
-& $nssm set $ServiceName Description "OPN-Cockpit Multi-Site-Management fuer OPNsense (Web-Server, Port 9876)"
+& $nssm set $ServiceName Description "OPN-Cockpit Multi-Site-Management fuer OPNsense (Web-Server, HTTPS Port 443)"
 & $nssm set $ServiceName Start SERVICE_AUTO_START
 & $nssm set $ServiceName ObjectName "NT AUTHORITY\LocalService"
 
@@ -127,7 +127,7 @@ Write-Host ("Installiere Dienst '" + $ServiceName + "'...")
 $vaultPath = Join-Path $dataDir "firewalls.opnvault"
 $envBlock = @(
     "OPNCOCKPIT_HOST=0.0.0.0",
-    "OPNCOCKPIT_PORT=9876",
+    "OPNCOCKPIT_PORT=443",
     "OPNCOCKPIT_NO_BROWSER=1",
     "OPNCOCKPIT_DATA_DIR=$dataDir",
     "OPNCOCKPIT_AUTH_BACKEND=user-db",
@@ -173,7 +173,7 @@ if (Test-Path $oldTokenFile) {
 Write-Host ""
 Write-Host "===================================================="
 Write-Host "  OPN-Cockpit laeuft jetzt als Windows-Dienst."
-Write-Host "  Browser:  http://localhost:9876"
+Write-Host "  Browser:  https://localhost"
 Write-Host "  Logs:     $LogDir"
 Write-Host ""
 Write-Host "  Default-Admin (beim Erst-Login Pflicht-PW-Wechsel):"
@@ -187,4 +187,4 @@ Write-Host "===================================================="
 # Bewusst kein WinForms-Popup mehr (Runde 6 Test-Feedback): Default-User
 # und -Passwort stehen ohnehin im Setup-Wizard direkt sichtbar. Konsolen-
 # Ausgabe oben reicht — der Inno-Setup-Postinstall-Step oeffnet den Browser
-# automatisch auf http://localhost:9876.
+# automatisch auf https://localhost.

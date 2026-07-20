@@ -24,7 +24,8 @@ uv sync                              # erzeugt .venv\ + installiert Runtime + De
 uv run python -m opn_cockpit
 ```
 
-- Startet den lokalen FastAPI-Server auf `https://127.0.0.1:9876`.
+- Startet den lokalen FastAPI-Server auf `https://127.0.0.1`
+  (HTTPS-Standard-Port 443).
   Beim allerersten Start generiert Cockpit ein Self-Signed-Zertifikat;
   der Browser zeigt die übliche „nicht vertrauenswürdig"-Warnung, die
   einmal akzeptiert werden muss. Fingerprint zum Vergleich steht im
@@ -189,7 +190,7 @@ Wer eine interne CA betreibt, hat zwei Hebel im **Tresor-Einstellungen**-Modal:
   einfügen → Cockpit akzeptiert alle damit ausgestellten OPNsense-Certs
   ohne pro-Gerät-`tls_verify=false`. Inspect-Preview vor Save.
 - **Cockpit HTTPS-Zertifikat** — eigenes Server-Cert + Key für Cockpit
-  selbst hinterlegen, damit `https://cockpit.lab:9876` ohne Warnung
+  selbst hinterlegen, damit `https://cockpit.lab` ohne Warnung
   funktioniert. App-weit (in `settings.json`, nicht im Tresor),
   Restart erforderlich.
 
@@ -279,6 +280,7 @@ per CLI ausrollen, oder umgekehrt.
   Session automatisch.
 - TCP-Heartbeat erzeugt keine Auth-Logs auf der OPNsense.
 - Audit-Log enthält maskierte Antworten, keine vollständigen HTTP-Bodies.
-- Server bindet auf `127.0.0.1:9876` (Loopback). Multi-User-Erweiterung
+- Server bindet auf `127.0.0.1:443` (Loopback, HTTPS-Standard).
+  Multi-User-Erweiterung
   ist im Schema vorbereitet (Token-Auth pro Session), aber v2.0 ist
   Single-User-PAW.

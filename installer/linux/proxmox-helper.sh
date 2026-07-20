@@ -178,7 +178,7 @@ Vorher:    $CURRENT_TAG  (Commit $CURRENT_COMMIT)
 Jetzt:     $NEW_TAG  (Commit $NEW_COMMIT)
 
 Service:   running
-URL:       http://${HOST_IP}:9876
+URL:       https://${HOST_IP}
 
 *** WICHTIG: Browser hart neu laden! ***
 
@@ -554,7 +554,7 @@ CT_DESCRIPTION=$(cat <<EOF
 </div>
 
 ### Zugang
-- **Web-UI:** [http://${CT_IP}:9876](http://${CT_IP}:9876)
+- **Web-UI:** [https://${CT_IP}](https://${CT_IP})
 - **Default-Login:** \`admin\` / \`OPN-Cockpit!\`
   (Pflicht-PW-Wechsel beim ersten Login)
 
@@ -598,7 +598,7 @@ SUCCESS="OPN-Cockpit ist installiert und gestartet.
 Container-ID:  $CT_ID
 Hostname:      $CT_HOSTNAME
 IP:            $CT_IP
-URL:           http://${CT_IP}:9876
+URL:           https://${CT_IP}
 
 OPN-Cockpit-Login: admin / OPN-Cockpit!
 Beim ersten Login MUSS das Admin-PW gewechselt werden.
@@ -618,7 +618,7 @@ echo
 echo "  Container-ID:  $CT_ID"
 echo "  Hostname:      $CT_HOSTNAME"
 echo "  IP:            $CT_IP"
-echo "  URL:           http://${CT_IP}:9876"
+echo "  URL:           https://${CT_IP}"
 echo
 echo "  OPN-Cockpit-Login: admin / OPN-Cockpit!  (Pflicht-PW-Wechsel beim Erst-Login)"
 echo "  $PW_HINT"
