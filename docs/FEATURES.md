@@ -891,7 +891,8 @@ Rotation, ändert sich der Fingerprint nicht.
 
 Für Reverse-Proxy-Setups (nginx/traefik terminieren TLS): `OPNCOCKPIT_ALLOW_HTTP=1`
 setzen. Cockpit läuft dann auf `http://…` und schreibt eine deutliche
-Warnung ins Boot-Log.
+Warnung ins Boot-Log. Ausführlicher Setup-Guide für nginx / Caddy /
+Traefik + Beispiel mit Authelia-SSO davor: [REVERSE-PROXY.md](REVERSE-PROXY.md).
 
 ### Auto-Rotation ohne Reboot
 

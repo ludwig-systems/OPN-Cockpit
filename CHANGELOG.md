@@ -4,6 +4,15 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Reverse-Proxy-Setup-Guide
+
+Neue Doku [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md) — praktische
+Anleitung fuer Deployments hinter nginx / Caddy / Traefik mit
+Beispiel-Configs, Let's-Encrypt-Hinweisen, SSO/OIDC-Muster
+(Authelia), Bind-Adresse-Empfehlung (127.0.0.1 statt public), und
+Troubleshooting-Sektion (Client-IP im Audit, CSRF-Cookies).
+Cross-Ref in FEATURES.md.
+
 ### Firmware-Rollout V2: Wartungsfenster mit Multi-Day-Iteration
 
 Der Firmware-Rollout kann optional an ein **wiederkehrendes Wartungs-
