@@ -152,6 +152,23 @@ Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
     log "Python-Dependencies aktualisieren..."
     runuser -u opncockpit -- "$INSTALL_DIR/.venv/bin/pip" install --quiet --upgrade -e "$INSTALL_DIR"
 
+    # systemd-Unit + polkit-Rule aus dem Repo refreshen — sonst laufen
+    # neue Deployments (z. B. Port 443 + CAP_NET_BIND_SERVICE) im Update
+    # nicht an, weil /etc/systemd/system/opn-cockpit.service noch der
+    # alten Version entspricht. Wenn User /etc/systemd/system/... manuell
+    # gepatcht hat, wird das ueberschrieben — das ist ok, weil Env-Overrides
+    # gehoeren in ein systemd-Override (systemctl edit) nicht in die
+    # Unit selbst.
+    log "systemd-Unit + polkit-Rule aus Repo aktualisieren..."
+    cp "$INSTALL_DIR/installer/linux/opn-cockpit.service" /etc/systemd/system/
+    sed -i "s|/var/lib/opn-cockpit|$DATA_DIR|g" /etc/systemd/system/opn-cockpit.service
+    if [[ -d /etc/polkit-1/rules.d ]]; then
+        cp "$INSTALL_DIR/installer/linux/50-opn-cockpit.rules" \
+           /etc/polkit-1/rules.d/50-opn-cockpit.rules
+        chmod 644 /etc/polkit-1/rules.d/50-opn-cockpit.rules
+    fi
+    systemctl daemon-reload
+
     log "Service starten (Migrations laufen automatisch)..."
     systemctl start opn-cockpit.service
 
