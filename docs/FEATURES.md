@@ -231,6 +231,42 @@ Für den Bulk-Fall („ich habe 124 Zeilen in einer Kalkulation aufgebaut"):
   — Body `{csv_content, reconcile, dry_run}`; Response mit
   Preview-Actions + Zählungen.
 
+### Multi-Device-Import (dieselbe CSV auf N Gateways)
+
+Wenn die DNS-Config auf mehreren Standorten gleich sein soll (Central-
+Site + N Branches), rollst du dieselbe CSV in einem Rutsch aus:
+
+1. CSV-Import-Modal öffnen (aus Host-Overrides oder Query-Forwards).
+   Aktuelles Device ist vorausgewählt.
+2. Im **Ziel-Gateway-Widget** oben zusätzliche Gateways abhaken (oder
+   „alle" / „keins" Toggle nutzen).
+3. Bei genau einem Ziel läuft der bisherige Single-Endpoint weiter;
+   bei ≥ 2 Zielen ruft der Client
+   `POST /api/inventory/unbound/import-multi`.
+4. **Preview** zeigt eine aggregierte Zusammenfassung
+   (`3/3 Gateways · 12 neu · 4 update · 2 skip`) plus eine Pro-Device-
+   Box mit aufklappbarer Action-Liste. Pro-Device-Fehler (Kein
+   Zugriff, Pre-Apply-Backup-Fail, Netzwerk) sind isoliert markiert
+   und blockieren die anderen Gateways nicht.
+5. **Apply** zieht **pro Gateway** ein eigenes Pre-Apply-Backup und
+   macht einmal reconfigure am Ende. Kein Cross-Device-Rollback —
+   jedes Gateway hat seine eigene Backup-Line im Backup-Tab.
+
+**API**: `POST /api/inventory/unbound/import-multi` mit
+`{device_ids: [...], subsystem: "unbound_hosts"|"unbound_forwards",
+csv_content, reconcile, dry_run}`. Response enthält aggregierte
+Counts + `results`-Liste mit `{device_id, device_name, ok,
+error_summary, report}` pro Gateway.
+
+**Grenzen:**
+
+- CSV wird pro Gateway frisch geparst (nur ein Parse-Result
+  aggregiert an den Top-Level, weil die Fehler ja für alle gleich
+  sind).
+- Läuft sequenziell — bei sehr vielen Gateways können das mehrere
+  Sekunden pro Ziel werden. Multi-Threading kommt wenn die Latenz
+  sich als konkretes Problem zeigt.
+
 ---
 
 ## Firmware-Update installieren
@@ -322,13 +358,226 @@ dem nächsten Vault-Unlock und arbeitet weiter, wo er aufgehört hat.
 
 **API-Endpoints (Sammelaktion):**
 
-- `POST /api/firmware/rollout` mit `{device_ids, mode, continue_on_error}`
+- `POST /api/firmware/rollout` mit `{device_ids, mode, continue_on_error,
+  scheduled_start_at_ms?, window_start_hhmm?, window_end_hhmm?}`
 - `GET /api/firmware/rollout` — Banner-Poll (aktueller Zustand)
 - `POST /api/firmware/rollout/cancel` — laufenden Rollout abbrechen
 - `DELETE /api/firmware/rollout` — terminierten Rollout aus Banner raus
 - Audit-Events: `FIRMWARE_ROLLOUT_STARTED`, `FIRMWARE_ROLLOUT_COMPLETED`
   (mit Endzustand), `FIRMWARE_ROLLOUT_CANCELLED`, pro Box zusätzlich
   `FIRMWARE_UPDATE_STARTED/COMPLETED/FAILED`.
+
+### Zeitplanung (Wartungsfenster à la Cisco `reload at`)
+
+Statt sofortigem Start kannst du einen konkreten Zeitpunkt setzen:
+
+- **Radio-Buttons im Rollout-Modal**: „Sofort" / „Heute Nacht 02:00" /
+  „Geplant zu…" (mit `datetime-local`-Feld).
+- Der Rollout landet dann im State **`scheduled`** und wartet still
+  bis `scheduled_start_at_ms` erreicht ist. Banner rendert den
+  Zeitpunkt + Live-Countdown („noch 4h 12min").
+- **Cancel im `scheduled`-State**: sofortiger Übergang zu `cancelled`,
+  keine Box wird angepackt — der Rollout „hebt einfach nicht ab".
+- UI-Uhr-Skew: Werte in der Vergangenheit werden bewusst als „sofort"
+  behandelt (kein Fehler), damit ein Client mit falsch gestellter Uhr
+  den Rollout nicht komplett blockiert.
+
+### Wiederkehrendes Wartungsfenster (Multi-Day-Iteration)
+
+Für den Fall „12 Boxen updaten, aber nur nachts zwischen 22:00 und
+06:00, was in einer Nacht nicht fertig wird → am nächsten Fenster-
+Beginn weitermachen":
+
+- **Checkbox** „Nur im Wartungsfenster arbeiten" im Rollout-Modal
+  blendet zwei `time`-Inputs ein (Default 22:00 / 06:00, editierbar).
+- Server-lokale Zeitzone. Overnight-Fenster (Start > Ende, z.B.
+  22:00–06:00) werden über Mitternacht korrekt behandelt.
+- **Semantik**: Bevor eine neue Box getriggert wird, prüft der Watcher
+  ob wir gerade im Fenster sind. Wenn nein → State **`paused`**,
+  `paused_until_ms` zeigt den nächsten Fenster-Beginn. Der Banner
+  rendert in Amber „Wartet bis 2026-07-22 22:00 · noch 8h 14min".
+- **Devices die gerade laufen** (`triggered/running/rebooting/verifying`)
+  laufen zu Ende — der Fenster-Check greift nur zwischen Boxen. So
+  gibt's keine „Box mitten im Reboot verlassen"-Szenarien.
+- **Beim nächsten Fenster-Beginn**: automatischer Übergang
+  `paused → running`, nächste queued Box wird angepackt.
+- **6h-Total-Cap**: bei aktivem Fenster deaktiviert. Multi-Day-Rollouts
+  laufen so lange bis alle Boxen durch oder Cancel gedrückt.
+- **Cancel im `paused`-State**: sofortiger Übergang zu `cancelled`,
+  alle noch queued Devices werden `skipped`.
+- **Kombinierbar mit Zeitplanung**: „Start in einer Stunde, dann nur
+  im Fenster arbeiten" ist gültig — der Rollout wird `scheduled`,
+  danach `running`/`paused` je nach Fenster-Status.
+
+### E-Mail-Benachrichtigung am Rollout-Ende
+
+Wenn im Vault SMTP konfiguriert ist (siehe unten), schickt Cockpit
+nach dem Rollout-Ende (`done` / `failed` / `cancelled`) eine
+Zusammenfassungs-Mail an die konfigurierten Default-Empfänger. Best-
+Effort: Mail-Send-Fehler blockieren den Rollout nie, landen aber im
+Audit-Log als `firmware_rollout_mail_failed`.
+
+Body enthält Rollout-ID, End-Status, Timestamp, Zaehler
+(X OK / Y FAILED / Z SKIPPED von N) und eine Zeile pro Gerät mit
+Endzustand + Summary.
+
+---
+
+## E-Mail-Benachrichtigungen (SMTP)
+
+Pro Vault konfigurierbar unter **Tresor-Einstellungen → E-Mail-
+Benachrichtigungen (SMTP)**. Ganze Sektion optional — solange
+`enabled=false`, spricht Cockpit gar nicht mit smtplib.
+
+### Konfigurierbar
+
+- **SMTP-Host + Port** (Default 587).
+- **TLS-Modus**: `starttls` (Port-587-typisch), `tls` (Port-465-
+  wrapped) oder `none` (nur für Lab-SMTP).
+- **Username / Passwort** — leer erlaubt (keine Auth). Passwort ist
+  Teil des verschlüsselten Vaults; API-Response maskiert es als `***`.
+- **From-Adresse**.
+- **Default-Empfänger** (mehrzeilig, pro Zeile eine Adresse).
+- **Test-Empfänger + Test-Button**: verschickt eine Test-Mail an eine
+  frei wählbare Adresse ohne die Config zu ändern. Funktioniert auch
+  wenn `enabled=false` — Testfall „Config eingegeben, aber vor
+  Aktivieren nochmal prüfen".
+
+### Password-Semantik
+
+- Vault speichert Klartext-Passwort (mit dem Vault-Master-Passwort
+  verschlüsselt).
+- GET liefert `password="***"` wenn ein Wert gespeichert ist.
+- PUT mit `password="***"` behält den gespeicherten Wert
+  (Teil-Update ohne Verlust).
+- PUT mit leerem `password=""` löscht das Passwort explizit.
+
+### Anwendungspfade
+
+- **Heute**: Firmware-Rollout-Ende (siehe oben).
+- **Erweiterbar**: das `notifications/`-Modul ist so gebaut, dass
+  weitere Anlässe (Cert-Ablauf, Config-Drift, Safety-Net-Fire) ohne
+  große Refactorings andocken können.
+
+### API
+
+- `GET /api/vaults/settings/smtp` — Config lesen (Password maskiert).
+- `PUT /api/vaults/settings/smtp` — Config setzen.
+- `POST /api/vaults/settings/smtp/test` mit `{to}` — Test-Mail
+  verschicken. Antwort `{ok, detail}`.
+- `Auto-Submitted: auto-generated`-Header damit MTAs keine Auto-
+  Replies zurückschicken.
+
+### Sicherheitshinweis
+
+Wer das entschlüsselte Vault-Blob im Speicher hat, sieht das SMTP-
+Passwort — vergleichbar mit den OPNsense-API-Secrets. Ein SMTP-
+Compromise ist damit gleich stark wie ein Compromise der Vault-
+Session; separate Enclave-Speicherung (Windows-Credential-Store,
+libsecret) ist bewusst nicht implementiert, weil der Portabilitäts-
+Vorteil des Vault-Files das rechtfertigt.
+
+---
+
+## Interfaces-Tab (Device-Modal)
+
+Live-Liste aller Interfaces einer Box — mehr Detail als das
+`6/8`-Kachel-Widget. Datenquelle:
+`POST /api/interfaces/overview/interfacesInfo` +
+`POST /api/diagnostics/traffic/interface`.
+
+### Angezeigte Spalten
+
+- **Status-Punkt**: grün (Admin-up + Link-up), gelb (Admin-up ohne
+  Link — Kabel raus?), grau (Admin-disabled).
+- **Identifier** (`wan`, `lan`, `opt1`) + OS-Device-Name
+  (`em0`, `vtnet0`).
+- **Description** (aus OPNsense-Interface-Config).
+- **IPv4 + IPv6** mit Subnetzmaske.
+- **Media** (`1000baseTX <full-duplex>`), **MTU**, **MAC-Adresse**.
+- **RX/TX-Traffic** (kumulativ seit Interface-Up): human-readable
+  Bytes (B/KB/MB/GB/TB) + Paketzähler (k/M/G-Notation). Tooltip zeigt
+  Roh-Zahlen für exakten Vergleich.
+
+### Filter
+
+Einfaches Suchfeld über Identifier, Description, OS-Device, IPv4/IPv6
+und MAC. Case-insensitive.
+
+### Reload-Button pro Interface
+
+Triggert `POST /api/interfaces/overview/reloadInterface/{identifier}`
+— Interface-Stack down + up, **kein Config-Change**.
+
+Anwendungsfälle:
+
+- DHCP-Lease-Refresh erzwingen.
+- Link-Detection nach Kabel-Wechsel wieder anwerfen.
+- Router-Advertisement-Flush.
+
+Confirm-Modal warnt vor der 2–5 s Unterbrechung; nach Erfolg wird der
+Tab nach ~3 s neu geladen damit der Link-Status sich stabilisiert.
+Regex-Whitelist auf den Identifier als Path-Injection-Verteidigung.
+
+Alle Reloads landen im Audit-Log (`interface_reload` /
+`interface_reload_failed`).
+
+### Warum kein Enable/Disable?
+
+Die OPNsense-Core-API bietet für normale Interfaces (WAN, LAN, opt*)
+keinen sauberen Endpoint zum Setzen des `enabled`-Flags — der Wert
+lebt nur im `config.xml` und ließe sich nur per Voll-Config-Restore
+ändern (viel zu invasiv für einen Klick). Für VLAN- / LAGG-Interfaces
+gibt es einen `toggleItem`-Endpoint pro Sub-Modul; wird als V3
+nachgezogen sobald konkret benötigt.
+
+Der `Reload`-Button deckt viele der Anwendungsfälle ab, für die man
+sonst Enable/Disable versucht hätte.
+
+---
+
+## Kachel-Widgets: CARP / Interfaces / NTP
+
+Auf jeder Geräte-Kachel im Inventar drei Live-Widgets neben Status-Dot
+und Tags. Batch-Poll alle 60 s über
+`POST /api/inventory/kachel-widgets` — ein einziger Request holt alle
+drei Widgets für alle Devices, damit ein 25-Boxen-Inventar nicht 75
+Einzel-Calls pro Minute abfeuert.
+
+### CARP / HA
+
+Zeigt den CARP-VIP-Zustand einer HA-Box:
+
+- **Master / Backup / Init-Counts** (wieviele VIPs in welchem State).
+- **Maintenance-Mode-Flag** (wenn die Box gerade auf Wartung steht).
+- Farbcode: grün wenn alle VIPs in einem konsistenten State (alle
+  Master oder alle Backup), amber bei Mix, rot bei init-hängenden VIPs.
+
+Datenquelle: `POST /api/diagnostics/interface/get_vip_status`. Nicht-
+HA-Boxen (keine VIPs) zeigen das Widget nicht.
+
+### Interfaces (Kurz-Zusammenfassung)
+
+Zeigt `up-count/admin-enabled-count`, z.B. `6/8`. Farbcode:
+
+- **Grün**: alle admin-enabled Interfaces sind auch link-up.
+- **Amber**: mindestens ein Interface admin-up aber ohne Link.
+- **Rot**: kritischer Zustand (z.B. WAN down).
+
+Klick auf das Widget öffnet den Interfaces-Detail-Tab (s.o.).
+
+### NTP
+
+Zeigt den Sync-Status: `synced` (grün), `unsynced` (amber),
+`unknown` (grau — Endpoint nicht verfügbar auf älteren OPNsense).
+Beste-Effort — NTP-Endpoint variiert zwischen OPNsense-Versionen.
+
+### Persistente Config
+
+Die Widgets sind heute immer an. Wenn du sie global abschalten willst,
+gibt es dafür (bewusst) keinen Toggle — der 60 s-Batch-Call ist
+extrem günstig und die Widgets sind der Haupt-Gewinn der Kachel-
+Ansicht gegenüber der Text-Liste.
 
 ---
 

@@ -3,36 +3,54 @@
 Multi-Site-Management für OPNsense-Firewalls. Zentrale, ferngesteuerte
 Konfiguration mehrerer Standorte über die OPNsense-REST-API:
 
-- **Vier CRUD-Subsysteme** mit voller Edit/Delete-Unterstützung:
+- **Fünf CRUD-Subsysteme** mit voller Edit/Delete-Unterstützung:
   Aliase, statische Routen, Filter-Regeln (Automation-Filter, ab
   OPNsense 23.7 in Core), Unbound DNS Host-Overrides + Domain-Overrides
+  + Query-Forwards (DoT-fähig)
 - **Plan/Apply-Vorschau** vor jedem Rollout, Read-back-Verifikation, parallel
   über N Geräte
 - **Config-Compare-Matrix** zeigt Drift zwischen 2–N Geräten pro Subsystem
+- **Firmware-Rollout** — Single-Device Update/Upgrade oder sequenzielle
+  Sammelaktion über N Boxen, mit optionaler **Zeitplanung** (à la Cisco
+  `reload at`) und **wiederkehrendem Wartungsfenster** für Multi-Day-
+  Iteration (z.B. „22:00–06:00, alles was in einer Nacht nicht fertig
+  wird, läuft am nächsten Fenster-Beginn weiter"). Persistent über
+  Cockpit-Restart
+- **CSV Bulk-Rollout** — dieselbe DNS-Config auf mehrere Gateways
+  gleichzeitig (Host-Overrides + Query-Forwards), Pre-Apply-Backup
+  pro Gateway, Fehler pro Ziel isoliert
 - **Safety-Net via SSH** (On-Device Dead-Man's-Switch) — vor jedem Apply
   läuft auf der OPNsense ein `daemon(8)`-Timer, der bei Cockpit-Lockout
   von selbst zur Pre-Apply-Config zurück + reboot triggert. Test-Funktion
   im Geräte-Modal für gefahrlose Probeläufe
+- **E-Mail-Benachrichtigung** (SMTP, pro Vault) — Rollout-Ende
+  (done / failed / cancelled) landet als Zusammenfassungs-Mail bei den
+  konfigurierten Empfängern. STARTTLS / TLS-wrapped / none, Test-Mail-
+  Button im Vault-Settings
 - **Auto-Backup** vor jedem Apply + Post-Apply-Snapshot als Drift-Baseline,
   Scheduled Backups, Config-Drift-Erkennung
 - **Auto-Retry-Queue** für Mobile-Racks — persistiert über Server-Restart,
   Orphan-Adoption beim nächsten Vault-Unlock
-- **Audit-Log** mit HMAC-Hash-Chain, CSV- + signierter PDF-Export, Filter,
-  Integrity-Check
+- **Audit-Log** mit HMAC-Hash-Chain, CSV- + signierter PDF-Export
+  (`audit-verify-pdf`-CLI zur Signatur-Verifikation), Filter, Integrity-Check
 - **Bulk-Import** von Firewall-Stammdaten, Sicht-Vorlagen für wiederkehrende
   Aktionen
-- **Frontend-Inline-Validierung** beim Tippen (CIDR, Host, Aliase, Ports)
+- **Frontend-Inline-Validierung** beim Tippen (CIDR, Host, FQDN, Aliase, Ports)
 - **Interne CAs unterstützen** — Custom-Root-Zertifikate im Tresor, damit
   OPNsense-Boxen mit interner-CA-Cert mit aktiver TLS-Prüfung verwaltet werden
-- **HTTPS by default** — Cockpit startet immer HTTPS, auch beim ersten
-  Boot. Ohne Konfig wird ein Self-Signed generiert (EC P-256, 397 Tage,
-  Fingerprint im Boot-Log); Custom-Cert (Let's Encrypt/interne CA) im
-  Server-TLS-Modal hochladbar. Auto-Rotation 30 Tage vor Ablauf mit
-  „Server neu starten"-Button im UI
+- **HTTPS by default** — Cockpit startet immer HTTPS auf Port 443, auch
+  beim ersten Boot. Ohne Konfig wird ein Self-Signed generiert
+  (EC P-256, 397 Tage, Fingerprint im Boot-Log); Custom-Cert
+  (Let's Encrypt/interne CA) im Server-TLS-Modal hochladbar. Auto-
+  Rotation 30 Tage vor Ablauf mit „Server neu starten"-Button im UI.
+  HTTP-Modus für Reverse-Proxy-Setups (nginx/Caddy/Traefik),
+  siehe [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md)
 - **TOTP / 2FA** (Multi-User, opt-in) — pro User aktivierbar mit
   Authenticator-App + 8 Backup-Codes; Admin-Recovery-Reset
 - **Wartungsmodus pro Gerät** — geplant offline-Sites vom Polling
   ausschließen, Audit-Log bleibt sauber
+- **Live-Widgets auf jeder Kachel** — CARP/HA-Status, Interface-Up-Count,
+  NTP-Sync auf einen Blick. Batch-Poll alle 60s
 - **Disk-Space-Widget** in der Topbar (Linux-Server) — Warnung bei ≥80 %,
   einmaliger Toast bei ≥92 %
 
@@ -118,23 +136,34 @@ minimalen Rechten.
   OPNsense-Firmware-Version, Cert-Ablauf-Indikator (gelb < 30 Tage,
   rot < 7 Tage), Drift-Indikator, Tags, „Offen"-Indikator für
   unverifizierte Aktionen, Direkt-Link zur OPNsense-Weboberfläche.
+- **Live-Widgets pro Kachel** (Batch-Poll alle 60 s):
+  **CARP/HA** (Master/Backup/Init-Count, Maintenance-Mode),
+  **Interfaces** (`6/8` = 6 up von 8 admin-enabled, Farbcode je nach
+  Verhältnis), **NTP** (Sync-Status). Klick auf ein Widget öffnet den
+  passenden Detail-Tab.
 - **Hover-Quick-Actions** auf der Karte: OPNsense öffnen,
   Updates suchen, Duplizieren.
 
-### Device-Modal (Karten-Klick) — sechs Tabs
+### Device-Modal (Karten-Klick) — sieben Tabs
 - **Info** — Test-Connection, Bearbeiten, Duplizieren, Update-Check,
-  Backup herunterladen
+  Backup herunterladen, Single-Device Firmware-Install
 - **Updates** — installierte/verfügbare OPNsense-Version, „Erneut prüfen"
 - **Backups** — Liste aller lokal gespeicherten Backups
   (Pre-Apply / Post-Apply / Manuell / Scheduled), Download +
   „Backup erzeugen" (server-only)
+- **Interfaces** — Live-Liste aller physischen/virtuellen Interfaces mit
+  Admin-Status, Link-Status, IPv4 + IPv6, MTU, MAC, Media, **RX/TX-
+  Traffic-Counter** (Bytes + Pakete) und **Reload**-Button pro Interface
+  (Interface-Stack-Bounce ohne Config-Change — DHCP-Refresh /
+  Link-Recovery)
 - **Aliase** — Live-Liste mit Filter, Edit/Delete pro Eintrag
 - **Routen** — Live-Liste aller statischen Routen, Edit/Delete pro Eintrag
 - **Regeln** — Live-Liste der Automation-Filter-Regeln (Firewall →
   Automation → Filter), Add/Edit/Delete. Klassische „Firewall → Rules"
   (Legacy-XML-Editor) sind nicht API-zugänglich und werden nicht angezeigt.
 - **DNS** mit drei Sub-Tabs — Live-Listen mit Filter, jeweils
-  Add/Edit/Delete pro Zeile:
+  Add/Edit/Delete pro Zeile plus **CSV-Import/Export** (Single- oder
+  Multi-Gateway-Rollout):
   **Host-Overrides** (single-Record-Mappings),
   **Domain-Overrides** (Zone-Weiterleitung an internen Resolver, z. B.
   Active-Directory-DNS) und
@@ -159,6 +188,18 @@ minimalen Rechten.
 - **Master-→-Targets-Sync** direkt aus der Compare-Matrix für
   **Aliase** und **DNS-Host-Overrides** — ein Klick erzeugt den Plan
   und springt in die Vorschau.
+- **CSV-Multi-Device-Import** für Unbound-DNS (Host-Overrides +
+  Query-Forwards): dieselbe CSV auf N Gateways in einem Rutsch.
+  Ziel-Auswahl mit „alle/keins"-Toggle, Pre-Apply-Backup pro Gateway,
+  Fehler pro Ziel isoliert (ein Gateway-Fehler blockiert die anderen
+  nicht). Pro-Device-Preview mit aufklappbaren Actions.
+- **Firmware-Sammelrollout** — sequenziell über N Boxen mit optionaler
+  **Zeitplanung** (à la Cisco `reload at`, z.B. „Start heute 02:00")
+  und **wiederkehrendem Wartungsfenster** (z.B. „nur zwischen 22:00
+  und 06:00 arbeiten"). Overnight-Fenster werden über Mitternacht
+  korrekt behandelt; bei aktivem Fenster gilt kein 6h-Total-Cap,
+  Multi-Day-Iteration ist explizit unterstützt. Optional E-Mail
+  nach Rollout-Ende (SMTP).
 
 ### Safety-Nets
 - **Auto-Backup vor Apply** + **Post-Apply-Snapshot** als neue
@@ -185,6 +226,12 @@ minimalen Rechten.
   auf der Karte.
 - **Frontend-Inline-Validierung** beim Tippen: CIDR mit Host-Bits-Check,
   IPv4, Host/FQDN, Alias-Name, Gateway-Name, Port (Zahl/Range/Alias).
+- **E-Mail-Benachrichtigungen** (SMTP, pro Vault) — heute für
+  Firmware-Rollout-Ergebnisse, künftig erweiterbar. STARTTLS /
+  TLS-wrapped / none; Test-Button im Vault-Settings.
+- **`audit-verify-pdf`-CLI** — verifiziert die HMAC-Signatur eines
+  bereits generierten PDF-Audit-Reports gegen den aktuellen Chain-
+  State (compliance-relevant bei langfristiger Archivierung).
 
 ## Designprinzipien
 
@@ -319,7 +366,10 @@ src/opn_cockpit/
 
 - [docs/QUICKSTART.md](docs/QUICKSTART.md) — Dev-Walkthrough + erster Apply
 - [docs/FEATURES.md](docs/FEATURES.md) — Feature-Anleitungen pro Subsystem
-  (Aliase, Routen, Filter-Regeln, Unbound-DNS, Safety-Net, Backups, Audit)
+  (Aliase, Routen, Filter-Regeln, Unbound-DNS, Firmware-Rollout,
+  Interfaces, Kachel-Widgets, SMTP, Safety-Net, Backups, Audit)
+- [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md) — Setup hinter
+  nginx / Caddy / Traefik, Let's-Encrypt-Hinweise, SSO/OIDC-Muster
 - [docs/INSTALLATION-WINDOWS.md](docs/INSTALLATION-WINDOWS.md) —
   Windows-Installation (SmartScreen, Updates, Service-Mode)
 - [installer/linux/README.md](installer/linux/README.md) — Linux-Server,

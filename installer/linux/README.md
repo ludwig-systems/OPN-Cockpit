@@ -250,6 +250,8 @@ Scheduled-Retention und alle 24 h kannst du grob mit
   Vault-Operationen.
 - Bind ist `0.0.0.0` — bei produktivem Betrieb hinter Reverse-Proxy
   mit TLS + Client-Cert / mTLS (Standard-nginx- oder Caddy-Setup).
+  Ausführlicher Guide für nginx/Caddy/Traefik + SSO-Muster:
+  [../../docs/REVERSE-PROXY.md](../../docs/REVERSE-PROXY.md).
 - Rate-Limit auf Login + Bootstrap (10 Versuche / 15 min pro IP).
 - Audit-Log ist HMAC-Chain-protected → Tamper-Evidence.
 

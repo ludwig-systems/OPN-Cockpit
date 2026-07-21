@@ -123,14 +123,19 @@ Whitelist-sanitisiert). Spätere Plans starten mit „Aus Vorlage laden".
 
 ## 10. Inventar pro Gerät: Live-Listen + Edit/Delete
 
-Klick auf eine Karte → Device-Modal mit sechs Tabs:
+Klick auf eine Karte → Device-Modal mit sieben Tabs:
 
 - **Info** — Test-Connection, Update-Check, Bearbeiten, Duplizieren,
-  Backup herunterladen
+  Backup herunterladen, Single-Device Firmware-Install
 - **Updates** — installierte/verfügbare OPNsense-Version
 - **Backups** — alle lokal gespeicherten Backups dieses Gerätes
   (Pre-Apply / Post-Apply / Manuell / Scheduled) zum Download,
   plus „Backup erzeugen" (server-only ohne Browser-Download-Dialog)
+- **Interfaces** — Live-Liste aller Interfaces mit Admin-/Link-Status,
+  IPv4 + IPv6, MTU, MAC, Media und **RX/TX-Traffic-Countern**. Pro
+  Interface ein **Reload**-Button (Stack-Bounce ohne Config-Change,
+  z.B. für DHCP-Lease-Refresh). Details:
+  [FEATURES.md → Interfaces-Tab](FEATURES.md#interfaces-tab-device-modal)
 - **Aliase** — Live-Liste mit Filter + Bearbeiten/Löschen pro Eintrag
 - **Routen** — Live-Liste der statischen Routen + Bearbeiten/Löschen
 - **Regeln** — Live-Liste der **Automation-Filter-Regeln** (Firewall →
@@ -138,7 +143,8 @@ Klick auf eine Karte → Device-Modal mit sechs Tabs:
   OPNsense 23.7 in Core integriert (vorher als `os-firewall`-Plugin).
   Klassische „Firewall → Rules" (Legacy-XML) sind nicht API-zugänglich
   und werden nicht angezeigt
-- **DNS** — drei Sub-Tabs mit Add/Edit/Delete pro Zeile:
+- **DNS** — drei Sub-Tabs mit Add/Edit/Delete pro Zeile plus CSV-
+  Import/Export (single- oder multi-Gateway-Rollout):
   **Host-Overrides** (Single-Record-Mappings),
   **Domain-Overrides** (leiten eine Zone an einen internen
   Resolver, z. B. AD-DNS) und
@@ -155,7 +161,63 @@ zwei zu machen:
 - Domain (DNS-Domain-Overrides)
 - Domain + Server + Port (DNS-Abfrage-Weiterleitungen)
 
-## 11. Config-Compare zwischen Geräten
+## 11. Live-Widgets auf den Kacheln
+
+Jede Geräte-Kachel zeigt neben Status-Dot und Tags drei kleine
+Widgets: **CARP/HA-Zustand**, **Interfaces-Up-Count** und
+**NTP-Sync**. Batch-Poll alle 60 s (ein Request holt alle Widgets für
+alle Devices). Klick auf ein Widget öffnet den passenden Detail-Tab.
+
+Details:
+[FEATURES.md → Kachel-Widgets](FEATURES.md#kachel-widgets-carp--interfaces--ntp).
+
+## 12. Firmware-Rollout (Single- oder Sammelaktion)
+
+**Einzelnes Gerät**: Karte → Info-Tab → **„Update installieren"** oder
+**„Major-Upgrade"**. Confirm-Dialog + Progress-Panel; Cockpit pollt
+den Fortschritt und aktualisiert die Kachel wenn fertig.
+
+**Sammelaktion über N Boxen**: Sidebar → **„Firmware-Rollout"**.
+Modal mit Tag-Filter, Mode (`update`/`upgrade`), Fehlerpolitik und
+Ziel-Auswahl. Zusätzliche Optionen:
+
+- **Zeitplanung** — Radio-Button „Geplant zu…" mit `datetime-local`-
+  Feld. Der Rollout wartet im `scheduled`-State bis der Zeitpunkt
+  erreicht ist.
+- **Wartungsfenster** — Checkbox „Nur im Wartungsfenster arbeiten"
+  blendet zwei Zeit-Inputs ein (Default 22:00–06:00). Was in einer
+  Nacht nicht fertig wird, läuft am nächsten Fenster-Beginn weiter.
+  Overnight-Fenster (Start > Ende) werden über Mitternacht korrekt
+  behandelt.
+
+Der Rollout läuft sequenziell, ein persistentes Banner zeigt
+Progress (auch nach Cockpit-Restart). Details:
+[FEATURES.md → Firmware-Sammelaktion](FEATURES.md#sammelaktion-pro-tag-gruppe-iteration-b).
+
+## 13. CSV-Multi-Device-Import für Unbound-DNS
+
+Wenn dieselbe DNS-Config auf mehrere Standorte soll: Device-Modal →
+DNS-Tab → **„CSV Import…"**. Im Modal die Ziel-Gateways per Checkbox
+auswählen (aktuelles Device ist vorbelegt), CSV wählen, Preview
+berechnen und anwenden. Pro Gateway läuft ein eigenes Pre-Apply-
+Backup; Fehler auf einem Gateway blockieren die anderen nicht.
+
+Details:
+[FEATURES.md → Multi-Device-Import](FEATURES.md#multi-device-import-dieselbe-csv-auf-n-gateways).
+
+## 14. E-Mail-Benachrichtigungen bei Rollout-Ende
+
+Tresor-Einstellungen → **„E-Mail-Benachrichtigungen (SMTP)"** —
+SMTP-Host/Port/TLS-Modus/User/Password/Empfänger eintragen,
+Test-Mail-Button verifiziert die Config live. Sobald aktiviert,
+schickt Cockpit nach jedem Firmware-Rollout-Ende (done/failed/
+cancelled) eine Zusammenfassung an die Default-Empfänger.
+
+Password-Handling: `***` beim GET bedeutet „gespeichert"; PUT mit
+`***` behält den Wert, leerer String löscht ihn. Details:
+[FEATURES.md → SMTP](FEATURES.md#e-mail-benachrichtigungen-smtp).
+
+## 15. Config-Compare zwischen Geräten
 
 Mindestens zwei Karten markieren → in der Selektions-Toolbar
 **„Vergleichen"** klicken.
@@ -172,7 +234,7 @@ Bei **Aliase** und **DNS-Hosts** erscheint zusätzlich ein
 (`add_alias` bzw. `add_unbound_host`) vom Master zu allen anderen
 Spalten und springt direkt in die Preview.
 
-## 12. Audit-Log einsehen + exportieren
+## 16. Audit-Log einsehen + exportieren
 
 Topbar-Icon (drei Linien) öffnet das Audit-Modal:
 - Filter nach Event-Kind / Action / Geräte-ID
@@ -182,7 +244,7 @@ Topbar-Icon (drei Linien) öffnet das Audit-Modal:
 - **Als PDF (signiert)** — gefilterte Records als A4-Querformat-Report
   mit HMAC-SHA256-Signatur im Footer + in den PDF-Metadaten
 
-## 13. Interne PKI integrieren (optional)
+## 17. Interne PKI integrieren (optional)
 
 Wer eine interne CA betreibt, hat zwei Hebel im **Tresor-Einstellungen**-Modal:
 
@@ -198,7 +260,7 @@ Schritt-für-Schritt mit step-ca / OpenSSL / AD-CS-Beispielen in
 [FEATURES.md → Interne CAs vertrauen](FEATURES.md#interne-cas-vertrauen)
 und [FEATURES.md → HTTPS für Cockpit selbst](FEATURES.md#https-fuer-cockpit-selbst).
 
-## 14. Safety-Net via SSH (On-Device Dead-Man's-Switch)
+## 18. Safety-Net via SSH (On-Device Dead-Man's-Switch)
 
 Optional pro Gerät: SSH-Zugang mit Private-Key in den Tresor legen
 (Gerät → Bearbeiten → unten „Safety-Net via SSH aktivieren" + Felder
@@ -229,7 +291,7 @@ Im Edit-Dialog gibt es:
 Längere Version inkl. Troubleshooting:
 [FEATURES.md → Safety-Net via SSH](FEATURES.md#safety-net-via-ssh).
 
-## 15. Wartungsmodus für planmäßig offline Geräte
+## 19. Wartungsmodus für planmäßig offline Geräte
 
 Wenn ein Standort längere Zeit aus ist (Hardware-Tausch, Mobile-Rack im
 Transit), Gerät → Bearbeiten → **„Wartungsmodus (Polling
@@ -240,14 +302,14 @@ deaktivieren)"** anhaken. Heartbeat, Scheduled Backups und Drift-Check
 Die Karte zeigt dann einen neutralen Status-Dot + „Wartung"-Badge
 statt rot/grün.
 
-## 16. Mein Konto (Passwort + 2FA)
+## 20. Mein Konto (Passwort + 2FA)
 
 Multi-User-Mode: Topbar → Person-Icon **„Mein Konto"**. Im selben
 Modal: Passwort ändern (oben) und Zwei-Faktor-Authentifizierung
 einrichten/verwalten (unten). TOTP-Details + Backup-Codes-Handhabung
 siehe [FEATURES.md → TOTP](FEATURES.md#zwei-faktor-authentifizierung-totp).
 
-## 17. Disk-Space im Auge behalten (Server)
+## 21. Disk-Space im Auge behalten (Server)
 
 Auf Linux-Servern und Multi-User-Windows-Setups zeigt die Topbar einen
 schmalen **Progress-Bar mit Prozent** für den belegten Speicher auf

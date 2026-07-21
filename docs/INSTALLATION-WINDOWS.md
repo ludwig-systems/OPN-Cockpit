@@ -131,6 +131,47 @@ Restart-Service -Name OPN-Cockpit
 Danach liefert `/api/updates/check` `status: "disabled"` und der Banner
 erscheint nicht mehr.
 
+## Hinter einem Reverse-Proxy betreiben
+
+Für Team-Setups mit Let's-Encrypt-Cert, SSO/OIDC (Authelia, Keycloak)
+oder einheitlichem Ingress kann Cockpit hinter nginx / Caddy / Traefik
+laufen. Umschaltung erfolgt via Env-Variable `OPNCOCKPIT_ALLOW_HTTP=1`
+(bewusster Opt-in gegen Fehlkonfiguration).
+
+Beispiel Multi-User-Server:
+
+```powershell
+& "$env:ProgramFiles\OPN-Cockpit\bundle\nssm.exe" set OPN-Cockpit AppEnvironmentExtra `
+  "OPNCOCKPIT_ALLOW_HTTP=1" "OPNCOCKPIT_HOST=127.0.0.1" "OPNCOCKPIT_PORT=9876"
+Restart-Service -Name OPN-Cockpit
+```
+
+Danach übernimmt der Reverse-Proxy die TLS-Terminierung. Ausführlicher
+Setup-Guide mit Beispiel-Configs für nginx, Caddy und Traefik + SSO-
+Muster: [REVERSE-PROXY.md](REVERSE-PROXY.md).
+
+## Neue Features in v0.11
+
+Das v0.11-Update bringt mehrere Bereiche, die sich in der laufenden
+Installation direkt nutzen lassen (keine Migration nötig):
+
+- **HTTPS by default + Port 443**: Cockpit läuft ab v0.11 immer HTTPS
+  (Self-Signed generiert beim ersten Boot). Update-Banner + Kachel-
+  Widget für Cert-Ablauf erscheinen automatisch.
+- **Firmware-Rollout**: Sidebar → „Firmware-Rollout" — Sammelaktion
+  über N Boxen mit optionaler Zeitplanung und Multi-Day-Wartungs-
+  fenster.
+- **CSV Multi-Device-Import** für Unbound-DNS: DNS-Tab → „CSV Import…"
+  mit Multi-Gateway-Auswahl.
+- **SMTP-Benachrichtigungen**: Tresor-Einstellungen →
+  „E-Mail-Benachrichtigungen (SMTP)" — E-Mail-Report nach Rollout-Ende.
+- **Interfaces-Tab** mit RX/TX-Countern und Reload-Button pro Interface.
+- **Live-Widgets pro Kachel**: CARP/HA, Interfaces, NTP.
+
+Volle Liste + Details:
+[CHANGELOG.md](../CHANGELOG.md) und
+[FEATURES.md](FEATURES.md).
+
 ## Hilfe bei Problemen
 
 - **Server kommt nicht hoch**: `%APPDATA%\OPN-Cockpit\` löschen und
