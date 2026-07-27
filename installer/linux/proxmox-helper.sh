@@ -167,6 +167,18 @@ Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
            /etc/polkit-1/rules.d/50-opn-cockpit.rules
         chmod 644 /etc/polkit-1/rules.d/50-opn-cockpit.rules
     fi
+
+    # /etc/profile.d/opn-cockpit.sh — 'update'-Alias fuer die Shell.
+    # Wird beim naechsten pct enter automatisch geladen. Aeltere Container
+    # bekommen ihn hier nachgerueckt, ohne dass der Nutzer sich darum
+    # kuemmern muss.
+    log "Convenience-Aliase (update / cockpit-update) aktualisieren..."
+    if [[ -f "$INSTALL_DIR/installer/linux/etc-profile-d-opn-cockpit.sh" ]]; then
+        cp "$INSTALL_DIR/installer/linux/etc-profile-d-opn-cockpit.sh" \
+           /etc/profile.d/opn-cockpit.sh
+        chmod 644 /etc/profile.d/opn-cockpit.sh
+    fi
+
     systemctl daemon-reload
 
     log "Service starten (Migrations laufen automatisch)..."
@@ -211,8 +223,13 @@ geoffneten Cockpit-Tab:
 Ohne Hard-Reload siehst du die neuen Features nicht und denkst
 das Update sei nicht durchgekommen.
 
+Naechstes Update: einfach 'update' in dieser Container-Shell
+tippen. Der Alias wurde beim ersten Setup / bei diesem Update
+in /etc/profile.d/opn-cockpit.sh angelegt und wird ab der
+naechsten Shell-Sitzung automatisch geladen.
+
 User-Daten und Login bleiben unveraendert - dein bestehendes
-Admin-Konto funktioniert weiter." 28 78 || true
+Admin-Konto funktioniert weiter." 32 78 || true
 
         log "Update fertig: $CURRENT_TAG ($CURRENT_COMMIT) -> $NEW_TAG ($NEW_COMMIT)"
         echo
@@ -549,6 +566,19 @@ chmod +x /tmp/install.sh
 OPNCOCKPIT_REPO_URL='${REPO_URL}' OPNCOCKPIT_REPO_BRANCH='${REPO_BRANCH}' /tmp/install.sh
 "
 
+# 'update'-Alias fuer die Shell im Container installieren.
+# Datei liegt im geklonten Repo (install.sh hat das schon nach
+# /opt/opn-cockpit gecloned) und wird nach /etc/profile.d/ kopiert.
+# Wird beim naechsten pct enter automatisch geladen.
+pct exec "$CT_ID" -- bash -c "
+set -e
+if [ -f /opt/opn-cockpit/installer/linux/etc-profile-d-opn-cockpit.sh ]; then
+    cp /opt/opn-cockpit/installer/linux/etc-profile-d-opn-cockpit.sh \
+       /etc/profile.d/opn-cockpit.sh
+    chmod 644 /etc/profile.d/opn-cockpit.sh
+fi
+"
+
 # ---------------------------------------------------------------------------
 # Proxmox-Container-Beschreibung (Notes-Feld)
 # ---------------------------------------------------------------------------
@@ -577,7 +607,16 @@ CT_DESCRIPTION=$(cat <<EOF
 
 ### Update / Reinstall
 Im Container einloggen (\`pct enter ${CT_ID}\` vom Proxmox-Host),
-dann das Helper-Skript erneut starten:
+dann:
+
+    update
+
+Der Alias steckt in \`/etc/profile.d/opn-cockpit.sh\` und ruft das
+Helper-Skript vom GitHub-Repo auf. \`cockpit-update\` ist die
+lange Variante mit identischer Wirkung.
+
+Fallback ohne Alias (z.B. in einem Non-Bash-Shell oder wenn
+\`/etc/profile.d\` nicht sourced ist):
 
     bash -c "\$(wget -qLO - ${RAW_HELPER_URL})"
 
@@ -625,9 +664,12 @@ $PW_HINT
 Befehle (auf Proxmox-Host):
   pct enter $CT_ID                               (Shell im Container)
   pct exec $CT_ID -- journalctl -u opn-cockpit -f  (Logs)
-  pct stop $CT_ID                                (Stop)"
+  pct stop $CT_ID                                (Stop)
 
-whiptail --backtitle "$BACKTITLE" --title "Fertig" --msgbox "$SUCCESS" 24 78 || true
+Naechstes Update: 'pct enter $CT_ID' -> 'update' tippen.
+Der Alias ist in /etc/profile.d/opn-cockpit.sh installiert."
+
+whiptail --backtitle "$BACKTITLE" --title "Fertig" --msgbox "$SUCCESS" 26 78 || true
 
 echo
 log "Installation fertig."
@@ -643,4 +685,7 @@ echo
 echo "  Logs:          pct exec $CT_ID -- journalctl -u opn-cockpit -f"
 echo "  Shell:         pct enter $CT_ID"
 echo "  Stop:          pct stop $CT_ID"
+echo
+echo "  Naechstes Update: 'pct enter $CT_ID' -> 'update' tippen."
+echo "  (Alias in /etc/profile.d/opn-cockpit.sh; 'cockpit-update' geht auch.)"
 echo

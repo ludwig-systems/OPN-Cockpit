@@ -4,6 +4,38 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Proxmox-Container: `update`-Alias fuer Updates
+
+Im Proxmox-LXC-Container gibt es jetzt zwei Shell-Aliase, die den
+Update-Modus des Helper-Skripts auf Knopfdruck triggern:
+
+```bash
+pct enter <ct-id>
+update              # oder: cockpit-update
+```
+
+Beide sind identisch — `update` ist kurz und alltagstauglich,
+`cockpit-update` ist die eindeutige Variante fuer den Fall dass
+jemand mal ein anderes Tool namens `update` erwartet.
+
+**Wie installiert:** Ein einzeiliges Profile-Skript unter
+`/etc/profile.d/opn-cockpit.sh` (via `installer/linux/etc-profile-d-
+opn-cockpit.sh` aus dem Repo). Es wird bei jedem interaktiven
+Bash/Zsh-Login automatisch gesourced. Neue Container bekommen es
+im Rahmen des `proxmox-helper.sh`-Setups; bestehende Container
+bekommen es beim naechsten Update-Run nachgerueckt.
+
+**Was der Alias tut:** ruft den vollstaendigen One-Liner auf
+(`bash -c "$(wget -qLO - .../proxmox-helper.sh)"`). Das Helper-
+Skript erkennt automatisch dass es im Container laeuft und geht
+in den Update-Modus.
+
+**Fallback**: der wget-Einzeiler funktioniert weiterhin und ist
+in der README als Alternative dokumentiert — fuer Non-Bash-Shells,
+Skript-Automation, oder alte Container ohne das Profile-Skript.
+`pct exec <ct-id> -- bash -lc update` funktioniert auch vom
+Proxmox-Host aus.
+
 ### Fix: Kachel-Widget "Interfaces up" filtert unassigned Ports raus
 
 Das Kachel-Widget zeigte auf Boxen mit nicht zugewiesenen physischen

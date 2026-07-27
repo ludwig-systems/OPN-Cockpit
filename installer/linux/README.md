@@ -110,6 +110,11 @@ pct exec <ct-id> -- journalctl -u opn-cockpit -f     # Logs
 pct stop <ct-id>                                     # Stop
 ```
 
+**Im Container gibt es die Shell-Aliase `update` und `cockpit-update`**,
+die den Update-Modus des Helper-Skripts auslösen. Der Alias sitzt in
+`/etc/profile.d/opn-cockpit.sh` und wird beim nächsten `pct enter`
+automatisch geladen. Details siehe [Update](#update) weiter unten.
+
 ## Erster Login
 
 Browser auf `https://<host-or-container-ip>` öffnen (Self-Signed-Cert,
@@ -162,12 +167,30 @@ systemctl restart opn-cockpit
 
 ## Update
 
-**Empfohlen — derselbe Link wie bei der Installation, im Container ausgeführt:**
+**Empfohlen — einfach `update` tippen:**
+
+```bash
+# In der Container-Shell (pct enter <ct-id>)
+update
+```
+
+Der Alias `update` (und die längere Variante `cockpit-update`) liegt
+in `/etc/profile.d/opn-cockpit.sh` und wird beim allerersten
+Container-Setup vom Proxmox-Helper mit installiert. Er ruft im
+Hintergrund denselben Helper vom GitHub-Repo auf, den du für die
+Erstinstallation genutzt hast.
+
+**Alternative — der vollständige One-Liner, im Container ausgeführt:**
 
 ```bash
 # In der Container-Shell (pct enter / SSH)
 bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"
 ```
+
+Beides tut exakt dasselbe. `update` ist bequemer für den Alltag,
+der wget-Weg ist der Fallback wenn der Alias nicht geladen ist
+(alte Container ohne das Profile-Skript, Non-Bash-Shell,
+Skript-Automation).
 
 Der Helper erkennt automatisch:
 - **Proxmox-Host** (pveam vorhanden) → TUI-Wizard für neuen Container
@@ -196,11 +219,15 @@ sudo -u opncockpit /opt/opn-cockpit/.venv/bin/pip install --quiet --upgrade -e /
 sudo systemctl start opn-cockpit
 ```
 
-**Vom Proxmox-Host aus** (Einzeiler):
+**Vom Proxmox-Host aus** (Einzeiler, ohne in den Container einzuloggen):
 
 ```bash
 pct exec <ct-id> -- bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"
 ```
+
+Der `update`-Alias ist hier nicht direkt nutzbar (`pct exec` startet
+keine Login-Shell, die `/etc/profile.d/` sourced). Wenn du den Alias
+trotzdem hebeln willst: `pct exec <ct-id> -- bash -lc update`.
 
 ### Was passiert NICHT beim Update
 
