@@ -310,6 +310,14 @@ def fetch_interfaces_status(
         enabled = _as_bool(row.get("enabled", True))
         if not enabled:
             continue
+        # Unassigned Interfaces (physisch da, aber im OPNsense-Menue
+        # "Interfaces: Assignments" nicht zugeordnet) fliegen aus der
+        # Widget-Berechnung raus — sie sind fuer die Health-Anzeige
+        # irrelevant und wuerden sonst "5/7 up" zeigen obwohl die
+        # zugeordneten 5/5 komplett up sind. Im Detail-Tab bleiben
+        # sie sichtbar (fetch_interfaces_detailed filtert nicht).
+        if _is_unassigned_interface(row):
+            continue
         # Prüfen ob die Box das Interface als "up" meldet.
         status_val = str(row.get("status", "")).strip().lower()
         link_val = str(row.get("link", "")).strip().lower()
@@ -516,6 +524,34 @@ def _as_bool(value: Any) -> bool:
         return value != 0
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on", "up"}
+    return False
+
+
+def _is_unassigned_interface(row: dict[str, Any]) -> bool:
+    """Erkennt Interfaces die in OPNsense physisch existieren, aber im
+    Menue "Interfaces: Assignments" nicht zugeordnet sind.
+
+    Heuristik (defensiv gestaffelt, alles was passt ist unassigned):
+
+    1. Explizites ``unassigned=true`` Flag (falls die OPNsense-Version es
+       liefert).
+    2. Leerer ``identifier`` — Assigned-Interfaces bekommen einen
+       User-Facing-Namen wie ``wan``, ``lan``, ``opt1``. Bei Unassigned-
+       Interfaces liefert OPNsense hier meistens leer.
+    3. ``identifier`` == ``device`` (z.B. beide sind ``em2``) — manche
+       Versionen faelschen den Device-Namen als Identifier ein.
+
+    Assigned-Interfaces landen NICHT in einer dieser Kategorien, damit
+    ist der Filter false-positive-frei.
+    """
+    if _as_bool(row.get("unassigned", False)):
+        return True
+    identifier = str(row.get("identifier", "")).strip()
+    if not identifier:
+        return True
+    device = str(row.get("device", "")).strip()
+    if device and identifier.lower() == device.lower():
+        return True
     return False
 
 

@@ -4,6 +4,32 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Fix: Kachel-Widget "Interfaces up" filtert unassigned Ports raus
+
+Das Kachel-Widget zeigte auf Boxen mit nicht zugewiesenen physischen
+Ports (haeufig NIC-Ports die im OPNsense-Menue "Interfaces:
+Assignments" nicht zugeordnet sind) irrefuehrend "5/7 up" — die 2
+Unassigned-Ports meldeten `status=down` und wurden mitgezaehlt.
+
+Ab jetzt filtert das Widget diese Interfaces aus der Berechnung raus.
+Heuristik (defensiv gestaffelt):
+
+1. Explizites ``unassigned=true``-Flag in der OPNsense-Response.
+2. Leerer ``identifier`` (Standardfall — Assigned-Interfaces haben
+   ``wan`` / ``lan`` / ``opt1``).
+3. ``identifier`` == ``device`` (manche OPNsense-Versionen setzen den
+   Device-Namen als Identifier bei Unassigned).
+
+Die Kachel zeigt jetzt "5/5 up" was der User-Erwartung entspricht.
+
+Im **Interfaces-Detail-Tab** bleiben Unassigned-Interfaces sichtbar
+(User will sie ja weiterhin sehen koennen) — der Filter greift nur
+in ``fetch_interfaces_status`` (Widget), nicht in
+``fetch_interfaces_detailed`` (Tab).
+
+4 neue Tests decken alle drei Heuristik-Varianten + die Regressions-
+Sicherung fuer den Detail-Tab ab.
+
 ### Reverse-Proxy-Setup-Guide
 
 Neue Doku [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md) — praktische
