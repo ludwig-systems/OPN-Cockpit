@@ -253,9 +253,13 @@ class AliasAdapter:
         if not isinstance(content_raw, list):
             content_raw = []
         merge_mode_raw = str(raw.get("merge_mode", "create"))
-        merge_mode: MergeMode = (
-            "append" if merge_mode_raw == "append" else "create"
-        )
+        merge_mode: MergeMode
+        if merge_mode_raw == "append":
+            merge_mode = "append"
+        elif merge_mode_raw == "replace":
+            merge_mode = "replace"
+        else:
+            merge_mode = "create"
         return AliasSpec(
             name=str(raw.get("name", "")),
             type=str(raw.get("type", "host")),

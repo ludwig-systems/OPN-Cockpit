@@ -4,6 +4,25 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Fix: Sync-Plan verlor merge_mode="replace" beim Persistieren
+
+Follow-up zum Sync-Bug: der Adapter-Fix (neuer replace-Modus) griff
+korrekt beim Diff, aber beim Apply landete der Plan trotzdem im
+`_create`-Pfad und der User bekam wieder "already exists" — Ursache:
+``AliasAdapter.spec_from_dict`` mappte alles ausser `"append"` still
+auf `"create"`. Der Sync-Endpoint schrieb den Plan zwar mit
+`merge_mode="replace"` in den PlanStore, beim Laden fuer den Apply
+wurde er auf `"create"` runter-normalisiert und der Adapter machte
+`addItem` statt `setItem`.
+
+Fix: ``spec_from_dict`` behandelt `"replace"` jetzt als validen Modus.
+Zusaetzlich fangen wir unbekannte Werte weiterhin ab und fallen auf
+`"create"` zurueck — damit koennen aeltere Cockpit-Versionen einen
+Plan aus einer neueren Instanz lesen ohne zu crashen.
+
+Zwei neue Regressions-Tests: Roundtrip mit `replace` bleibt erhalten,
+unbekannte Zukunfts-Werte fallen defensiv auf `create`.
+
 ### Fix: Sync-Button "Master -> Targets" scheiterte bei existierenden Aliasen
 
 Bug-Report: Ein auf dem Master-SG geaenderter Alias sollte per Sync-Button
@@ -41,9 +60,9 @@ Die Diff-Preview zeigt beim Sync jetzt konkret was passiert:
 Regressions-Sicherung dass replace nicht wie append merged, plus
 die drei Diff-Varianten fuer den neuen Modus.
 
-### Proxmox-Container: `update`-Alias fuer Updates
+### Proxmox-Container: `update`-Wrapper fuer Updates (statt Shell-Alias)
 
-Im Proxmox-LXC-Container gibt es jetzt zwei Shell-Aliase, die den
+Im Proxmox-LXC-Container gibt es jetzt zwei Kommandos, die den
 Update-Modus des Helper-Skripts auf Knopfdruck triggern:
 
 ```bash
@@ -52,26 +71,28 @@ update              # oder: cockpit-update
 ```
 
 Beide sind identisch — `update` ist kurz und alltagstauglich,
-`cockpit-update` ist die eindeutige Variante fuer den Fall dass
-jemand mal ein anderes Tool namens `update` erwartet.
+`cockpit-update` ist die eindeutige Variante.
 
-**Wie installiert:** Ein einzeiliges Profile-Skript unter
-`/etc/profile.d/opn-cockpit.sh` (via `installer/linux/etc-profile-d-
-opn-cockpit.sh` aus dem Repo). Es wird bei jedem interaktiven
-Bash/Zsh-Login automatisch gesourced. Neue Container bekommen es
-im Rahmen des `proxmox-helper.sh`-Setups; bestehende Container
-bekommen es beim naechsten Update-Run nachgerueckt.
+**Wie installiert:** ein echtes Shell-Skript unter
+`/usr/local/bin/cockpit-update` (Symlink `update` zeigt darauf).
+Ruft im Hintergrund den bekannten wget-Einzeiler auf.
 
-**Was der Alias tut:** ruft den vollstaendigen One-Liner auf
-(`bash -c "$(wget -qLO - .../proxmox-helper.sh)"`). Das Helper-
-Skript erkennt automatisch dass es im Container laeuft und geht
-in den Update-Modus.
+**Wichtiger Fix gegenueber der ersten Version dieses Features:**
+frueher wurde ein Shell-Alias in `/etc/profile.d/opn-cockpit.sh`
+angelegt. Das hatte den Nachteil, dass Aliase erst in **neuen**
+Login-Shells sichtbar werden — wer nach dem Update in der
+bestehenden `pct enter`-Shell `update` tippte, sah "command not
+found". Mit dem `/usr/local/bin/`-Wrapper greift der Befehl
+**sofort**, auch in der laufenden Shell und aus
+`pct exec <ct-id> -- update` vom Proxmox-Host.
 
-**Fallback**: der wget-Einzeiler funktioniert weiterhin und ist
-in der README als Alternative dokumentiert — fuer Non-Bash-Shells,
-Skript-Automation, oder alte Container ohne das Profile-Skript.
-`pct exec <ct-id> -- bash -lc update` funktioniert auch vom
-Proxmox-Host aus.
+**Migration bestehender Container:** beim naechsten Update-Run wird
+der Wrapper installiert und die alte Profile-Alias-Datei automatisch
+entfernt. Kein manueller Eingriff noetig.
+
+**Fallback:** der wget-Einzeiler funktioniert weiterhin und ist in
+der README als Alternative dokumentiert — fuer Container die noch
+keinen Wrapper-Update mitgemacht haben.
 
 ### Fix: Kachel-Widget "Interfaces up" filtert unassigned Ports raus
 
