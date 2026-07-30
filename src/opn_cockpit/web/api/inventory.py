@@ -1184,9 +1184,11 @@ def sync_alias_from_master(
        einen Plan mit den Target-Geraeten
     4. Frontend springt direkt in den Plan-View
 
-    Die Sync-Action ist 'add_alias' (= create on target). Wenn das Target
-    den Alias bereits in identischer Form hat, markiert der Planner ihn als
-    SKIP - keine Doppel-Anwendung.
+    Die Sync-Action ist 'sync_alias' im ``replace``-Modus (Upsert): Target
+    ohne Alias → wird angelegt; Target mit identischem Alias → SKIP; Target
+    mit anderem Inhalt → wird auf Master-Zustand gesetzt (setItem). Damit
+    scheitert der Sync nicht mehr wenn Targets den Alias schon (mit altem
+    Inhalt) haben — genau der Fall, den man beim Sync will.
     """
     # Spaete Imports: vermeidet Zirkular-Imports zur plans.py.
     from opn_cockpit.core.objects.aliases import AliasSpec  # noqa: PLC0415
@@ -1238,11 +1240,11 @@ def sync_alias_from_master(
         type=source.type,
         content=tuple(source.content),
         descr=source.description,
-        merge_mode="create",
+        merge_mode="replace",
     )
     plan = _generate_and_save_plan(
         session=session,
-        action="add_alias",
+        action="sync_alias",
         subsystem="firewall_alias",
         spec=spec,
         devices=target_devices,

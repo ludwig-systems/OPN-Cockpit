@@ -4,6 +4,43 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Fix: Sync-Button "Master -> Targets" scheiterte bei existierenden Aliasen
+
+Bug-Report: Ein auf dem Master-SG geaenderter Alias sollte per Sync-Button
+in der Config-Compare-Matrix auf 4 Targets uebertragen werden. Der Apply
+scheiterte an OPNsense mit "An Alias with this name already exists" —
+die Targets hatten den Alias schon (mit altem Inhalt).
+
+**Ursache:** Der Sync-Flow legte den Plan mit ``merge_mode="create"`` an.
+Der Alias-Adapter macht in dem Modus ``addItem`` — was OPNsense mit dem
+Namens-Konflikt ablehnt. Die Diff-Vorschau warnte zwar korrekt
+("Konflikt: v1 unterstuetzt kein In-Place-Update bei 'create' — Apply
+wird hier fehlschlagen"), aber der User will beim Sync natuerlich das
+Ersetzen, nicht ein Neu-Anlegen.
+
+**Fix:** Neuer ``merge_mode="replace"`` (Upsert) im Alias-Adapter.
+Semantik:
+
+- Target hat den Alias nicht → wird angelegt (wie ``create``).
+- Target hat den Alias identisch → **SKIP**, kein API-Call.
+- Target hat den Alias mit anderem Inhalt → wird via
+  ``setItem/{uuid}`` komplett ersetzt (**das** war der Fehler-Fall).
+
+Der Sync-Endpoint ``POST /api/inventory/compare/sync-aliases`` erzeugt
+den Plan jetzt mit ``action="sync_alias"`` und
+``merge_mode="replace"``. Der bestehende ``add_alias``-Pfad
+(Sidebar → "Alias hinzufuegen") bleibt unveraendert bei
+``merge_mode="create"`` — dort ist ein Namens-Konflikt weiterhin ein
+echter Konflikt.
+
+Die Diff-Preview zeigt beim Sync jetzt konkret was passiert:
+"Alias 'name' wird auf Master-Zustand gesetzt: +2 neu (a, b) · -1 weg
+(c)". Kein "Apply wird fehlschlagen"-Warnhinweis mehr.
+
+6 neue Adapter-Tests decken die drei Cases (create/skip/replace),
+Regressions-Sicherung dass replace nicht wie append merged, plus
+die drei Diff-Varianten fuer den neuen Modus.
+
 ### Proxmox-Container: `update`-Alias fuer Updates
 
 Im Proxmox-LXC-Container gibt es jetzt zwei Shell-Aliase, die den

@@ -1,7 +1,7 @@
 """``AliasAdapter`` und ``AliasesController`` für Firewall-Aliasse.
 
 Zweite konkrete Implementation des in :mod:`opn_cockpit.core.objects.base`
-definierten Protokolls. Bietet zwei Modi:
+definierten Protokolls. Bietet drei Modi:
 
 * **create** — neuen Alias anlegen. Wenn ein Alias gleichen Namens schon
   existiert, ist das ein Konflikt (R-PRE-3 zeigt das in der Vorschau,
@@ -9,6 +9,13 @@ definierten Protokolls. Bietet zwei Modi:
 
 * **append** — Inhalt zu einem bestehenden Alias hinzufügen (Merge, R-ACT-2).
   Schlägt fehl, wenn der Alias nicht existiert.
+
+* **replace** — Upsert / Sync-Modus. Existiert der Alias noch nicht, wird
+  er angelegt (wie ``create``). Existiert er mit anderem Inhalt, wird der
+  Inhalt komplett ersetzt (wie ``update``). Genutzt vom Master→Targets-
+  Sync in der Config-Compare-Matrix, damit ein Sync eines geänderten
+  Aliases auf Targets funktioniert, die ihn bereits (mit altem Inhalt)
+  haben. Identischer Inhalt → SKIP (kein API-Call).
 
 API-Konventionen (mit Schritt 0 / API-Spike final zu verifizieren):
 
@@ -59,7 +66,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-MergeMode = Literal["create", "append"]
+MergeMode = Literal["create", "append", "replace"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +81,8 @@ class AliasSpec:
     Wenn ``merge_mode == "append"`` wird der ``content`` zu einem bestehenden
     Alias hinzugefügt (Mengen-Union). Wenn ``merge_mode == "create"`` (Default),
     legt der Adapter einen neuen Alias an und scheitert bei Namenskollision.
+    Wenn ``merge_mode == "replace"`` (Sync/Upsert), wird der Alias angelegt
+    wenn er fehlt oder komplett ersetzt wenn er mit anderem Inhalt existiert.
     """
 
     name: str
@@ -297,7 +306,37 @@ class AliasAdapter:
         validate_alias_type(spec.type)
         if spec.merge_mode == "append":
             return self._append(client, ctx, spec)
+        if spec.merge_mode == "replace":
+            return self._replace(client, ctx, spec)
         return self._create(client, ctx, spec)
+
+    def _replace(
+        self,
+        client: HttpClient,
+        ctx: RequestContext,
+        spec: AliasSpec,
+    ) -> AddOutcome:
+        """Upsert: existiert der Alias, wird sein Inhalt ersetzt (setItem);
+        existiert er nicht, wird er neu angelegt (addItem). Genutzt vom
+        Sync-Flow, wo der Master-Content auf N Targets uebernommen wird
+        und die Targets ihn teilweise schon (mit altem Inhalt) haben.
+        """
+        existing_uuid = self._search_uuid(client, ctx, spec.name)
+        if existing_uuid is None:
+            return self._create(client, ctx, spec)
+        payload = {"alias": self.to_payload(spec)}
+        set_path = ALIAS_SET.format(uuid=existing_uuid)
+        response = client.call(
+            ctx.target, ctx.key, ctx.secret,
+            "POST", set_path,
+            json=payload,
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        _raise_if_not_saved(body, set_path, ctx)
+        return AddOutcome(uuid=existing_uuid, raw_status=response.status_code)
 
     def _create(
         self,
@@ -521,6 +560,32 @@ class AliasAdapter:
         # current existiert
         current_set = set(current.content)
         target_set = set(target_spec.content)
+        if target_spec.merge_mode == "replace":
+            if current_set == target_set:
+                return Diff(
+                    kind=DiffKind.SKIP,
+                    summary=(
+                        f"Alias '{target_spec.name}' bereits identisch — "
+                        "wird übersprungen."
+                    ),
+                )
+            added = sorted(target_set - current_set)
+            removed = sorted(current_set - target_set)
+            parts: list[str] = []
+            if added:
+                parts.append(f"+{len(added)} neu ({', '.join(added[:3])}"
+                             + ("…" if len(added) > 3 else "") + ")")
+            if removed:
+                parts.append(f"-{len(removed)} weg ({', '.join(removed[:3])}"
+                             + ("…" if len(removed) > 3 else "") + ")")
+            change = " · ".join(parts) if parts else "nur Beschreibung/Typ"
+            return Diff(
+                kind=DiffKind.UPDATE,
+                summary=(
+                    f"Alias '{target_spec.name}' wird auf Master-Zustand "
+                    f"gesetzt: {change}"
+                ),
+            )
         if target_spec.merge_mode == "create":
             if current_set == target_set:
                 return Diff(
@@ -535,7 +600,8 @@ class AliasAdapter:
                 summary=(
                     f"Konflikt: Alias '{target_spec.name}' existiert mit anderem "
                     "Inhalt. v1 unterstützt kein In-Place-Update bei 'create' — "
-                    "Apply wird hier fehlschlagen. Nutze append-alias zum Mergen."
+                    "Apply wird hier fehlschlagen. Nutze append-alias oder "
+                    "replace-alias zum Ersetzen."
                 ),
             )
         # append mode + exists
