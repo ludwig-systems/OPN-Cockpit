@@ -110,10 +110,11 @@ pct exec <ct-id> -- journalctl -u opn-cockpit -f     # Logs
 pct stop <ct-id>                                     # Stop
 ```
 
-**Im Container gibt es die Shell-Aliase `update` und `cockpit-update`**,
-die den Update-Modus des Helper-Skripts auslösen. Der Alias sitzt in
-`/etc/profile.d/opn-cockpit.sh` und wird beim nächsten `pct enter`
-automatisch geladen. Details siehe [Update](#update) weiter unten.
+**Im Container gibt es die Kommandos `update` und `cockpit-update`**,
+die den Update-Modus des Helper-Skripts auslösen. Der Wrapper liegt in
+`/usr/local/bin/cockpit-update` (mit Symlink `update`) und ist sofort
+verfügbar — kein Shell-Reload nötig. Details siehe
+[Update](#update) weiter unten.
 
 ## Erster Login
 
@@ -174,11 +175,17 @@ systemctl restart opn-cockpit
 update
 ```
 
-Der Alias `update` (und die längere Variante `cockpit-update`) liegt
-in `/etc/profile.d/opn-cockpit.sh` und wird beim allerersten
-Container-Setup vom Proxmox-Helper mit installiert. Er ruft im
+Der Wrapper `update` (und die längere Variante `cockpit-update`) liegt
+als echtes Skript in `/usr/local/bin/cockpit-update` (Symlink `update`
+zeigt darauf). Er wird beim allerersten Container-Setup vom
+Proxmox-Helper installiert und bei jedem Update aktualisiert. Ruft im
 Hintergrund denselben Helper vom GitHub-Repo auf, den du für die
 Erstinstallation genutzt hast.
+
+Der Wrapper ist **sofort verfügbar** — kein `exit` / erneutes
+`pct enter` nötig, weil er ein echtes Programm in `$PATH` ist, kein
+Shell-Alias. Funktioniert auch aus `pct exec <ct-id> -- update` direkt
+vom Proxmox-Host.
 
 **Alternative — der vollständige One-Liner, im Container ausgeführt:**
 
@@ -188,9 +195,9 @@ bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cock
 ```
 
 Beides tut exakt dasselbe. `update` ist bequemer für den Alltag,
-der wget-Weg ist der Fallback wenn der Alias nicht geladen ist
-(alte Container ohne das Profile-Skript, Non-Bash-Shell,
-Skript-Automation).
+der wget-Weg ist der Fallback für Container die noch kein Update mit
+dem Wrapper mitgemacht haben, oder für Skript-Automation die den
+Repo-URL explizit setzen will.
 
 Der Helper erkennt automatisch:
 - **Proxmox-Host** (pveam vorhanden) → TUI-Wizard für neuen Container
@@ -219,15 +226,18 @@ sudo -u opncockpit /opt/opn-cockpit/.venv/bin/pip install --quiet --upgrade -e /
 sudo systemctl start opn-cockpit
 ```
 
-**Vom Proxmox-Host aus** (Einzeiler, ohne in den Container einzuloggen):
+**Vom Proxmox-Host aus** (ohne in den Container einzuloggen):
+
+```bash
+pct exec <ct-id> -- update
+```
+
+Klappt weil der Wrapper ein echtes Programm in `$PATH` ist. Alternative
+wenn der Container noch keinen Wrapper hat:
 
 ```bash
 pct exec <ct-id> -- bash -c "$(wget -qLO - https://raw.githubusercontent.com/ludwig-systems/opn-cockpit/main/installer/linux/proxmox-helper.sh)"
 ```
-
-Der `update`-Alias ist hier nicht direkt nutzbar (`pct exec` startet
-keine Login-Shell, die `/etc/profile.d/` sourced). Wenn du den Alias
-trotzdem hebeln willst: `pct exec <ct-id> -- bash -lc update`.
 
 ### Was passiert NICHT beim Update
 

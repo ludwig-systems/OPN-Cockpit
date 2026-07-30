@@ -168,15 +168,25 @@ Update jetzt durchfuehren?" 30 78 || err "Abgebrochen."
         chmod 644 /etc/polkit-1/rules.d/50-opn-cockpit.rules
     fi
 
-    # /etc/profile.d/opn-cockpit.sh — 'update'-Alias fuer die Shell.
-    # Wird beim naechsten pct enter automatisch geladen. Aeltere Container
-    # bekommen ihn hier nachgerueckt, ohne dass der Nutzer sich darum
-    # kuemmern muss.
-    log "Convenience-Aliase (update / cockpit-update) aktualisieren..."
-    if [[ -f "$INSTALL_DIR/installer/linux/etc-profile-d-opn-cockpit.sh" ]]; then
-        cp "$INSTALL_DIR/installer/linux/etc-profile-d-opn-cockpit.sh" \
-           /etc/profile.d/opn-cockpit.sh
-        chmod 644 /etc/profile.d/opn-cockpit.sh
+    # /usr/local/bin/cockpit-update + Symlink 'update' — Wrapper-Skript.
+    # Warum ein Skript statt Alias in /etc/profile.d/: Aliase greifen nur
+    # in neuen Login-Shells. Wer nach dem Update in der bestehenden Shell
+    # 'update' tippt, sieht sonst "command not found". Das Wrapper-Skript
+    # unter /usr/local/bin liegt in jedem gaengigen $PATH und ist sofort
+    # verfuegbar, auch aus 'pct exec <ct-id> -- update'.
+    log "Convenience-Wrapper (update / cockpit-update) installieren..."
+    if [[ -f "$INSTALL_DIR/installer/linux/usr-local-bin-cockpit-update.sh" ]]; then
+        cp "$INSTALL_DIR/installer/linux/usr-local-bin-cockpit-update.sh" \
+           /usr/local/bin/cockpit-update
+        chmod 755 /usr/local/bin/cockpit-update
+        # Kurze Form: 'update' als Symlink auf denselben Wrapper.
+        ln -sf cockpit-update /usr/local/bin/update
+    fi
+    # Altes Profile-Alias-Skript aus fruehen v0.11-Snapshots aufraeumen —
+    # das Wrapper-Skript uebernimmt, ein liegen gebliebener Alias waere
+    # redundant (und wuerde bei laufenden Shell-Sessions weiter geladen).
+    if [[ -f /etc/profile.d/opn-cockpit.sh ]]; then
+        rm -f /etc/profile.d/opn-cockpit.sh
     fi
 
     systemctl daemon-reload
@@ -224,12 +234,11 @@ Ohne Hard-Reload siehst du die neuen Features nicht und denkst
 das Update sei nicht durchgekommen.
 
 Naechstes Update: einfach 'update' in dieser Container-Shell
-tippen. Der Alias wurde beim ersten Setup / bei diesem Update
-in /etc/profile.d/opn-cockpit.sh angelegt und wird ab der
-naechsten Shell-Sitzung automatisch geladen.
+tippen. Der Wrapper liegt in /usr/local/bin/cockpit-update und
+ist sofort verfuegbar - kein Shell-Reload noetig.
 
 User-Daten und Login bleiben unveraendert - dein bestehendes
-Admin-Konto funktioniert weiter." 32 78 || true
+Admin-Konto funktioniert weiter." 30 78 || true
 
         log "Update fertig: $CURRENT_TAG ($CURRENT_COMMIT) -> $NEW_TAG ($NEW_COMMIT)"
         echo
@@ -566,16 +575,15 @@ chmod +x /tmp/install.sh
 OPNCOCKPIT_REPO_URL='${REPO_URL}' OPNCOCKPIT_REPO_BRANCH='${REPO_BRANCH}' /tmp/install.sh
 "
 
-# 'update'-Alias fuer die Shell im Container installieren.
-# Datei liegt im geklonten Repo (install.sh hat das schon nach
-# /opt/opn-cockpit gecloned) und wird nach /etc/profile.d/ kopiert.
-# Wird beim naechsten pct enter automatisch geladen.
+# 'update' + 'cockpit-update' Wrapper-Skripte in /usr/local/bin/
+# installieren. Sofort verfuegbar ohne Shell-Reload.
 pct exec "$CT_ID" -- bash -c "
 set -e
-if [ -f /opt/opn-cockpit/installer/linux/etc-profile-d-opn-cockpit.sh ]; then
-    cp /opt/opn-cockpit/installer/linux/etc-profile-d-opn-cockpit.sh \
-       /etc/profile.d/opn-cockpit.sh
-    chmod 644 /etc/profile.d/opn-cockpit.sh
+if [ -f /opt/opn-cockpit/installer/linux/usr-local-bin-cockpit-update.sh ]; then
+    cp /opt/opn-cockpit/installer/linux/usr-local-bin-cockpit-update.sh \
+       /usr/local/bin/cockpit-update
+    chmod 755 /usr/local/bin/cockpit-update
+    ln -sf cockpit-update /usr/local/bin/update
 fi
 "
 
@@ -611,12 +619,13 @@ dann:
 
     update
 
-Der Alias steckt in \`/etc/profile.d/opn-cockpit.sh\` und ruft das
-Helper-Skript vom GitHub-Repo auf. \`cockpit-update\` ist die
-lange Variante mit identischer Wirkung.
+Der Wrapper liegt in \`/usr/local/bin/cockpit-update\` (Symlink
+\`update\` zeigt darauf) und ruft das Helper-Skript vom GitHub-Repo
+auf. \`cockpit-update\` ist die lange Variante mit identischer
+Wirkung. Beide sind sofort verfuegbar - kein Shell-Reload noetig.
 
-Fallback ohne Alias (z.B. in einem Non-Bash-Shell oder wenn
-\`/etc/profile.d\` nicht sourced ist):
+Fallback ohne Wrapper (z.B. bei einem Zwischen-Update das den
+Wrapper noch nicht installiert hat):
 
     bash -c "\$(wget -qLO - ${RAW_HELPER_URL})"
 
@@ -667,7 +676,7 @@ Befehle (auf Proxmox-Host):
   pct stop $CT_ID                                (Stop)
 
 Naechstes Update: 'pct enter $CT_ID' -> 'update' tippen.
-Der Alias ist in /etc/profile.d/opn-cockpit.sh installiert."
+Der Wrapper liegt in /usr/local/bin/cockpit-update."
 
 whiptail --backtitle "$BACKTITLE" --title "Fertig" --msgbox "$SUCCESS" 26 78 || true
 
@@ -687,5 +696,5 @@ echo "  Shell:         pct enter $CT_ID"
 echo "  Stop:          pct stop $CT_ID"
 echo
 echo "  Naechstes Update: 'pct enter $CT_ID' -> 'update' tippen."
-echo "  (Alias in /etc/profile.d/opn-cockpit.sh; 'cockpit-update' geht auch.)"
+echo "  (Wrapper in /usr/local/bin/cockpit-update; 'cockpit-update' geht auch.)"
 echo
