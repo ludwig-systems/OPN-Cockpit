@@ -4,6 +4,25 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Doku: Alias-Sync-Semantik (Upsert / replace) klar benannt
+
+Nach Verifikation des Sync-Fixes im Lab wurden README, FEATURES.md
+und QUICKSTART.md nachgezogen:
+
+- **README**: Multi-Site-Tools-Bullet nennt die Upsert-Semantik
+  explizit (Target ohne Alias → anlegen, mit anderem Inhalt →
+  setItem, identisch → SKIP). Klarstellung, dass es keinen
+  "already exists"-Konflikt mehr wie in einer add-basierten
+  Sync-Semantik gibt.
+- **docs/FEATURES.md**: Der Sync-Absatz in "Config-Compare zwischen
+  Geräten" bekommt eine eigene Semantik-Sektion mit den drei
+  Diff-Fällen, einem konkreten Preview-Beispiel
+  (``+2 neu (a, b) · -1 weg (c)``) und einer Abgrenzung "kein
+  revert-to-master" (Löschen fehlender Master-Einträge geht heute
+  nur über den Unbound-CSV-Reconcile-Weg).
+- **docs/QUICKSTART.md**: Kapitel "Config-Compare" verlinkt auf die
+  FEATURES-Details.
+
 ### Fix: Sync-Plan verlor merge_mode="replace" beim Persistieren
 
 Follow-up zum Sync-Bug: der Adapter-Fix (neuer replace-Modus) griff

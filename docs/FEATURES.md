@@ -612,12 +612,37 @@ flow-string; DNS: server + descr).
 
 **Sync (Aliase + DNS-Host-Overrides):** in Drift-Zeilen erscheint
 **„Sync ←"** — erzeugt einen Plan vom Master zu allen anderen Spalten
-(`add_alias` bzw. `add_unbound_host`), springt direkt in die Preview.
-Vorhandene identische Einträge werden im Plan als SKIP markiert (keine
-Doppelanlage). Für Routen, Rules, DNS-Overrides und Query-Forwards ist
+(`sync_alias` bzw. `add_unbound_host`) und springt direkt in die Preview.
+
+**Alias-Sync-Semantik (Upsert / `merge_mode="replace"`):** pro Target
+wird der Diff gegen den Live-Zustand berechnet:
+
+- Target hat den Alias **nicht** → wird angelegt (`addItem`).
+- Target hat den Alias **identisch** zum Master → **SKIP**, kein
+  API-Call, kein API-Traffic.
+- Target hat den Alias **mit anderem Inhalt** → wird via
+  `setItem/{uuid}` **komplett auf den Master-Zustand gesetzt**. Kein
+  Merge — was der Master hat gilt, alles andere wird ersetzt.
+
+Die Preview zeigt konkret welche Content-Delta anfällt:
+`Alias 'branch_ips' wird auf Master-Zustand gesetzt:
++2 neu (10.0.1.5, 10.0.1.6) · -1 weg (10.0.0.9)`. Bei Aliasen mit
+vielen Einträgen werden nur die ersten drei je Richtung gezeigt,
+Rest als `…`.
+
+**DNS-Host-Sync** nutzt den bestehenden `add_unbound_host`-Pfad —
+identisch = SKIP, sonst Add (Duplikate erlaubt OPNsense hier bewusst).
+
+Für Routen, Rules, DNS-Overrides und Query-Forwards ist
 Master-Sync **bewusst nicht** verfügbar: die zeigen als Compare-Matrix
 zwar Drift, sind aber typisch site-spezifisch (lokale Resolver,
 per-Site-Upstreams) — Add/Edit/Delete bitte pro Gerät im DNS-Tab.
+
+**Warum kein „revert-to-master"?** Der Sync ersetzt in der Master-
+Richtung — er kann keine Einträge auf Targets löschen, die auf dem
+Master fehlen. Wer eine echte Reconcile-Semantik (Löschen inklusive)
+will, nutzt heute den CSV-Multi-Device-Import mit Reconcile-Checkbox
+(nur für Unbound-DNS verfügbar).
 
 **Rules-Quelle:** Cockpit liest Regeln für den Compare aus dem
 **Konfig-XML** (`download_backup`), nicht aus der os-firewall-API.

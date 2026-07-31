@@ -187,7 +187,11 @@ minimalen Rechten.
   Detail-Aufklapp pro Zeile.
 - **Master-→-Targets-Sync** direkt aus der Compare-Matrix für
   **Aliase** und **DNS-Host-Overrides** — ein Klick erzeugt den Plan
-  und springt in die Vorschau.
+  und springt in die Vorschau. Der Alias-Sync ist **Upsert**: fehlt
+  der Alias auf einem Target, wird er angelegt; existiert er mit
+  anderem Inhalt, wird er auf den Master-Zustand gesetzt (`setItem`);
+  ist er identisch, SKIP. Kein „already exists"-Konflikt mehr wie in
+  einer add-basierten Sync-Semantik.
 - **CSV-Multi-Device-Import** für Unbound-DNS (Host-Overrides +
   Query-Forwards): dieselbe CSV auf N Gateways in einem Rutsch.
   Ziel-Auswahl mit „alle/keins"-Toggle, Pre-Apply-Backup pro Gateway,

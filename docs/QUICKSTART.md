@@ -231,8 +231,15 @@ und zeigt den vollen Inhalt pro Gerät.
 
 Bei **Aliase** und **DNS-Hosts** erscheint zusätzlich ein
 **„Sync ←"**-Button in Drift-Zeilen: Klick erzeugt einen Plan
-(`add_alias` bzw. `add_unbound_host`) vom Master zu allen anderen
+(`sync_alias` bzw. `add_unbound_host`) vom Master zu allen anderen
 Spalten und springt direkt in die Preview.
+
+Der Alias-Sync arbeitet im **Upsert-Modus** (`replace`): fehlender
+Alias wird angelegt, existierender mit anderem Inhalt wird
+`setItem`-artig auf den Master-Zustand gesetzt, identischer wird
+übersprungen. Die Preview zeigt Content-Delta pro Target
+(`+2 neu (…) · -1 weg (…)`). Details:
+[FEATURES.md → Config-Compare zwischen Geräten](FEATURES.md#config-compare-zwischen-geraeten).
 
 ## 16. Audit-Log einsehen + exportieren
 
