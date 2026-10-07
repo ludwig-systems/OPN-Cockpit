@@ -8152,6 +8152,8 @@
     $('#totp-disable-block').hidden = true;
     $('#totp-error').hidden = true;
     $('#totp-start-enroll-btn').hidden = true;
+    $('#totp-disable-pw').value = '';
+    $('#totp-disable-code').value = '';
     $('#pwself-modal').hidden = false;
     setTimeout(() => $('#pwself-current').focus(), 0);
     loadTotpStatus().catch(() => {});
@@ -8313,7 +8315,11 @@
         return;
       }
       showToast('2FA deaktiviert.');
-      closeTotpModal();
+      // Modal bleibt offen (TOTP lebt im Mein-Konto-Modal) — Felder leeren
+      // und Status neu laden, damit "2FA einrichten" sofort sichtbar ist.
+      $('#totp-disable-pw').value = '';
+      $('#totp-disable-code').value = '';
+      await loadTotpStatus();
     } catch (err) {
       $('#totp-error').textContent = err.message;
       $('#totp-error').hidden = false;
