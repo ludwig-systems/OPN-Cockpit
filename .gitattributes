@@ -1,0 +1,31 @@
+# Zeilenenden festnageln.
+#
+# Hintergrund: das Repo wurde unter Windows ausgecheckt und der Ordner danach auf
+# den Mac kopiert. Dadurch standen 9 Dateien als "geaendert" im Status, obwohl ihr
+# Inhalt Zeichen fuer Zeichen derselbe war -- nur CRLF statt LF. Das verdeckt echte
+# Aenderungen und macht jeden Diff unlesbar. Ohne diese Datei haengt das Ergebnis
+# davon ab, auf welchem Rechner gerade gearbeitet wird.
+#
+# Regel: im Repo IMMER LF. Im Arbeitsverzeichnis ebenfalls LF -- ausser bei den
+# Formaten, die unter Windows sonst Aerger machen.
+
+* text=auto eol=lf
+
+# Windows-Werkzeuge erwarten CRLF
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.iss text eol=crlf
+
+# Binaerdateien nie anfassen
+*.exe binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.docx binary
+*.xlsx binary
