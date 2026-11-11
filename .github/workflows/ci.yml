@@ -46,9 +46,38 @@ jobs:
       - name: Abhaengigkeiten installieren (gesperrte Versionen)
         run: uv sync --extra dev --frozen
 
+      # tests/ steht in .gitignore ("nicht im public Repo, weil fuer Endnutzer nicht
+      # relevant"). Die 92 Testdateien mit rund 1300 Tests liegen damit NUR auf dem
+      # Arbeitsrechner -- auf GitHub gibt es sie nicht, und kein Lauf kann sie
+      # ausfuehren. Der erste CI-Lauf ist genau daran gescheitert (pytest-Code 5:
+      # nichts eingesammelt).
+      #
+      # Dieser Schritt stellt das fest und schreibt es als Warnung in jeden Lauf.
+      # Gruen heisst hier ausdruecklich NICHT "geprueft", sondern "hier war nichts zu
+      # pruefen" -- deshalb steht es sichtbar in der Zusammenfassung und nicht nur
+      # im Protokoll. Sobald die Entscheidung gefallen ist (Tests veroeffentlichen
+      # oder in ein eigenes privates Repo), faellt dieser Schritt weg.
+      - name: Liegen Tests im Repo?
+        id: pruefung
+        run: |
+          anzahl=$(find tests -name 'test_*.py' 2>/dev/null | wc -l | tr -d ' ')
+          echo "anzahl=$anzahl" >> "$GITHUB_OUTPUT"
+          if [ "$anzahl" = "0" ]; then
+            echo "::warning title=Keine Tests im Repo::tests/ ist in .gitignore. Die rund 1300 Tests liegen nur auf dem Arbeitsrechner und werden hier NICHT ausgefuehrt. Gruen bedeutet hier nicht geprueft."
+            {
+              echo "## ⚠️ Es wurden keine Tests ausgefuehrt"
+              echo ""
+              echo '`tests/` steht in `.gitignore` und ist deshalb nicht im Repo.'
+              echo "Die rund 1300 Tests existieren nur auf dem Arbeitsrechner."
+              echo ""
+              echo "**Gruen heisst hier nicht \`geprueft\`.**"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # `-m "not live"` laesst die Tests gegen eine echte OPNsense aus -- die
       # brauchen das Test-Lab und haben in einem automatischen Lauf nichts zu suchen.
       - name: Pytest
+        if: steps.pruefung.outputs.anzahl != '0'
         run: uv run pytest -q -m "not live"
 
   stil:
