@@ -1,0 +1,80 @@
+name: CI
+
+# Zwei Jobs mit unterschiedlichem Gewicht -- und das ist Absicht.
+#
+# `tests` ist ein hartes Tor: 1300 Tests, die heute gruen sind. Was sie brechen
+# wuerde, kommt nicht nach main.
+#
+# `stil` ist (noch) weich. Lint, Formatierung und Typen melden beim Stand vom
+# 11.11.2026 zusammen rund 250 Befunde -- nicht weil der Code verfallen waere,
+# sondern weil ruff und mypy in `pyproject.toml` ohne Obergrenze stehen
+# (`ruff>=0.5`, `mypy>=1.10`) und seither neue Regeln dazugekommen sind. Allein
+# 41 Befunde sind ueberfluessig gewordene `# noqa`-Kommentare.
+#
+# Ein Tor, das von Tag eins rot ist, wird nach einer Woche ignoriert. Deshalb
+# laeuft `stil` zunaechst sichtbar mit, ohne den Lauf zu faellen. Sobald der
+# Rueckstand abgearbeitet ist: `continue-on-error` entfernen -- an EINER Stelle,
+# und das Tor ist scharf.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests (hartes Tor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: uv einrichten
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Abhaengigkeiten installieren (gesperrte Versionen)
+        run: uv sync --extra dev --frozen
+
+      # `-m "not live"` laesst die Tests gegen eine echte OPNsense aus -- die
+      # brauchen das Test-Lab und haben in einem automatischen Lauf nichts zu suchen.
+      - name: Pytest
+        run: uv run pytest -q -m "not live"
+
+  stil:
+    name: Lint · Format · Typen (noch nicht scharf)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: uv einrichten
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Abhaengigkeiten installieren (gesperrte Versionen)
+        run: uv sync --extra dev --frozen
+
+      - name: Ruff — Lint
+        continue-on-error: true
+        run: uv run ruff check src tests
+
+      - name: Ruff — Formatierung
+        continue-on-error: true
+        run: uv run ruff format --check src tests
+
+      - name: Mypy — Typen (strict)
+        continue-on-error: true
+        run: uv run mypy
