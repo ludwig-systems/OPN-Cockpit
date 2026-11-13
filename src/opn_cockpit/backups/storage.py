@@ -125,17 +125,33 @@ def _write_index(device_dir: Path, records: list[BackupRecord]) -> None:
 
 
 def _sort_records_desc(records: list[BackupRecord]) -> list[BackupRecord]:
-    # Sekundaersort nach urspruenglicher Index-Position: bei gleichem
-    # timestamp_utc gilt "spaeter im Index gespeichert kommt zuerst".
-    # Windows' datetime.now() hat ~15 ms Aufloesung; zwei Appends im gleichen
-    # Tick landen sonst mit identischem timestamp_utc und die Reihenfolge ist
-    # plattform-abhaengig unbestimmt. append_backup haengt neue Records an
-    # das Ende der Index-Liste, daher spiegelt der urspruengliche Position-
-    # Index die Insertion-Reihenfolge und gibt einen deterministischen
-    # "juengster zuerst"-Tiebreaker.
-    indexed = list(enumerate(records))
-    indexed.sort(key=lambda pair: (pair[1].timestamp_utc, pair[0]), reverse=True)
-    return [record for _pos, record in indexed]
+    """Sortiert absteigend: juengstes Backup zuerst.
+
+    Der Sortierschluessel besteht nur aus Werten, die **im Record selbst
+    stehen** und damit das Schreiben und Wiedereinlesen von ``index.json``
+    ueberleben:
+
+    1. ``timestamp_utc`` — die eigentliche Ordnung.
+    2. ``seq`` — Tiebreaker bei gleichem Zeitstempel. Der Zeitstempel hat
+       nur Millisekunden-Aufloesung (auf Windows real ~15 ms), zwei
+       Backups im selben Tick kollidieren also. ``append_backup`` vergibt
+       ``seq`` pro Geraet monoton steigend, hoeher = juenger.
+    3. ``id`` — letzter Halt fuer Altbestand, der noch kein ``seq`` hat
+       und deshalb geschlossen auf ``0`` liegt. Fachlich beliebig, aber
+       deterministisch, und darauf kommt es hier an.
+
+    Frueher war der Tiebreaker die Position in der uebergebenen Liste
+    ("spaeter angehaengt = juenger"). Das gilt nur fuer die Anfuege-
+    Reihenfolge: auf eine bereits absteigend sortierte Datei angewandt
+    drehte die Regel Gleichstaende jedes Mal wieder um. Die Sortierung
+    war damit nicht idempotent, und ``list_backups`` zeigte nach dem
+    Wiedereinlesen das *aeltere* Backup zuerst.
+    """
+    return sorted(
+        records,
+        key=lambda r: (r.timestamp_utc, r.seq, r.id),
+        reverse=True,
+    )
 
 
 def append_backup(
@@ -196,6 +212,12 @@ def append_backup(
         ) from exc
 
     size_compressed = target_file.stat().st_size
+    existing = _read_index(device_dir)
+    # Anlage-Nummer pro Geraet fortschreiben. Sie ist der Tiebreaker der
+    # Sortierung, wenn zwei Backups denselben Millisekunden-Zeitstempel
+    # tragen - siehe _sort_records_desc. Altbestand ohne Feld liegt auf 0,
+    # das erste neue Backup bekommt damit 1.
+    next_seq = max((r.seq for r in existing), default=0) + 1
     record = BackupRecord(
         id=backup_id,
         device_id=device_id,
@@ -206,9 +228,9 @@ def append_backup(
         sha256=sha,
         related_plan_id=related_plan_id,
         device_name_at_creation=device_name_at_creation,
+        seq=next_seq,
     )
 
-    existing = _read_index(device_dir)
     existing.append(record)
     try:
         _write_index(device_dir, existing)

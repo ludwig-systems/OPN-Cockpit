@@ -4,6 +4,31 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Fix: Backup-Liste zeigte bei gleichem Zeitstempel das ältere zuerst
+
+Die Sortierung des Backup-Index war nicht idempotent. `_sort_records_desc`
+löste einen Gleichstand beim `timestamp_utc` über die Position in der
+übergebenen Liste auf ("später angehängt = jünger"). Diese Annahme gilt
+nur für die Anfüge-Reihenfolge; auf eine bereits absteigend sortierte
+Datei angewandt drehte die Regel den Gleichstand jedes Mal wieder um.
+
+Der Zeitstempel hat nur Millisekunden-Auflösung (auf Windows real
+~15 ms), zwei Backups im selben Tick kollidieren also tatsächlich.
+Sichtbare Folge: `list_backups` lieferte dann das **ältere** Backup
+zuerst, und `prune_backups` löschte im Zweifel das jüngere statt des
+ältesten.
+
+Fix: `BackupRecord` bekommt ein Feld `seq` — eine pro Gerät monoton
+steigende Anlage-Nummer, die `append_backup` vergibt. Der Sortier-
+schlüssel ist jetzt `(timestamp_utc, seq, id)` und besteht damit nur aus
+Werten, die im Record selbst stehen und das Schreiben und Wiedereinlesen
+von `index.json` überleben.
+
+Abwärtskompatibel: ein `index.json` ohne `seq` bleibt lesbar, solche
+Records liegen auf `seq=0` und sortieren unter jedem neu angelegten
+Backup (`seq >= 1`) — was der Realität entspricht. Die API-Antwort ist
+unverändert, `seq` ist reine Index-Interna.
+
 ### Doku: Alias-Sync-Semantik (Upsert / replace) klar benannt
 
 Nach Verifikation des Sync-Fixes im Lab wurden README, FEATURES.md
