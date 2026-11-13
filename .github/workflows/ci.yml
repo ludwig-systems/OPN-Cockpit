@@ -91,7 +91,7 @@ jobs:
         run: uv run pytest -q -m "not live"
 
   stil:
-    name: Lint · Format · Typen (noch nicht scharf)
+    name: Lint · Format (hart) · Typen (noch weich)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -107,10 +107,20 @@ jobs:
         run: uv sync --extra dev --frozen
 
       - name: Ruff — Lint
-        run: uv run ruff check src tests
+        # `tests/` steht in .gitignore und ist im CI-Checkout NICHT vorhanden
+        # (siehe Kopf dieser Datei). Lokal wird es mitgeprueft, hier nur wenn da.
+        run: |
+          ZIELE=src
+          if [ -d tests ]; then ZIELE="src tests"; fi
+          uv run ruff check $ZIELE
 
       - name: Ruff — Formatierung
-        run: uv run ruff format --check src tests
+        # `tests/` steht in .gitignore und ist im CI-Checkout NICHT vorhanden
+        # (siehe Kopf dieser Datei). Lokal wird es mitgeprueft, hier nur wenn da.
+        run: |
+          ZIELE=src
+          if [ -d tests ]; then ZIELE="src tests"; fi
+          uv run ruff format --check $ZIELE
 
       - name: Mypy — Typen (strict)
         continue-on-error: true
