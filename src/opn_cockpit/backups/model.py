@@ -37,6 +37,13 @@ class BackupRecord:
       ``trigger="pre-apply"``). Sonst leer.
     * ``device_name_at_creation`` — Geraete-Name zum Zeitpunkt des Backups,
       damit Listen-Anzeige funktioniert auch wenn das Geraet umbenannt wurde.
+    * ``seq`` — pro Geraet monoton steigende Anlage-Nummer, vergeben von
+      ``append_backup``. Einziger Zweck: ein stabiler Tiebreaker fuer die
+      Sortierung, wenn zwei Backups denselben ``timestamp_utc`` tragen —
+      der hat nur Millisekunden-Aufloesung, auf Windows sogar nur ~15 ms.
+      Anders als die Position in der Index-Liste ueberlebt ``seq`` das
+      Schreiben und Wiedereinlesen von ``index.json``, die Sortierung
+      bleibt dadurch idempotent. Altbestand ohne Feld bekommt ``0``.
     """
 
     id: str
@@ -48,6 +55,7 @@ class BackupRecord:
     sha256: str
     related_plan_id: str = ""
     device_name_at_creation: str = ""
+    seq: int = 0
 
     # ----- Serialisierung -----
 
@@ -61,6 +69,12 @@ class BackupRecord:
         Unbekannte Felder werden ignoriert, fehlende defaults. Wenn ein
         ``trigger`` ausserhalb der Whitelist auftaucht (alter Index, neuer
         Trigger), wird er auf ``"manual"`` zurueckgemappt — kein Crash.
+
+        Abwaertskompatibel: ein ``index.json`` aus einer Version vor dem
+        ``seq``-Feld hat das Feld nicht. Solche Records bekommen ``seq=0``
+        und sortieren damit unter jedem spaeter angelegten Backup — was
+        genau der Realitaet entspricht, denn ``append_backup`` vergibt ab
+        jetzt ``seq >= 1``.
         """
         trigger_raw = str(raw.get("trigger", "manual"))
         trigger = trigger_raw if trigger_raw in BACKUP_TRIGGERS else "manual"
@@ -74,6 +88,7 @@ class BackupRecord:
             sha256=str(raw.get("sha256", "")),
             related_plan_id=str(raw.get("related_plan_id", "")),
             device_name_at_creation=str(raw.get("device_name_at_creation", "")),
+            seq=int(raw.get("seq", 0) or 0),
         )
 
 

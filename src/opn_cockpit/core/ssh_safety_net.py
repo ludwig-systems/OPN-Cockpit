@@ -44,12 +44,20 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from opn_cockpit.vault.model import VaultDevice
 
 _log = logging.getLogger(__name__)
+
+# paramiko bringt keine Typ-Stubs mit (kein ``py.typed``), und
+# ``types-paramiko`` ist hier bewusst keine zusaetzliche Dev-Abhaengigkeit.
+# Der SSH-Client ist deshalb untypisiert. Der Alias benennt das an jeder
+# Signatur, statt es hinter einem blanken ``Any`` verschwinden zu lassen -
+# und markiert zugleich die Stelle, an der ein spaeterer Stub-Umstieg
+# greifen muesste.
+SshClient = Any
 
 # Datei-Pfade auf der Box - Konstanten weil "konfigurierbar" hier ein
 # Footgun waere. Wer das ueberschreiben muss, soll den Code anpassen.
@@ -137,7 +145,7 @@ def _connect(
     device: VaultDevice,
     *,
     connect_timeout_s: float,
-):  # type: ignore[no-untyped-def]
+) -> tuple[SshClient | None, str | None]:
     """Baut eine SSH-Verbindung auf. Liefert (client, None) bei Erfolg,
     sonst (None, summary).
 
@@ -201,7 +209,7 @@ def _connect(
     return client, None
 
 
-def _exec(client, command: str, timeout_s: float) -> tuple[int, str, str]:  # type: ignore[no-untyped-def]
+def _exec(client: SshClient, command: str, timeout_s: float) -> tuple[int, str, str]:
     """Fuehrt ``command`` aus und liefert (rc, stdout, stderr) als Text.
 
     Wirft keine Exception bei rc != 0 - der Aufrufer entscheidet was ein

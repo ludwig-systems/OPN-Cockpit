@@ -10,9 +10,11 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
@@ -156,6 +158,17 @@ from opn_cockpit.web.api.schemas import (
 from opn_cockpit.web.auth.dependencies import require_session
 from opn_cockpit.web.server_state import ServerState
 from opn_cockpit.web.vault_writes import persist_session_vault
+
+if TYPE_CHECKING:
+    # Nur fuer Annotationen. Die Laufzeit-Importe dieser Module bleiben in
+    # den jeweiligen Funktionen (gleiches Muster wie im Rest der Datei).
+    from opn_cockpit.core.objects.unbound import (
+        UnboundForwardIdentity,
+        UnboundForwardSpec,
+        UnboundHostIdentity,
+        UnboundHostSpec,
+    )
+    from opn_cockpit.importers.unbound_csv import UnboundSpec
 
 _log = logging.getLogger(__name__)
 
@@ -1954,7 +1967,13 @@ def get_device_unbound_forwards(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_device_or_404(session: Session, device_id: str):
+# Identitaet eines Unbound-Eintrags: Host-Overrides sind ueber
+# (host, domain) eindeutig, Query-Forwards ueber (domain, server, port).
+# Beide Formen tauchen in denselben Dicts auf, deshalb die Union.
+UnboundIdent = tuple[str, str] | tuple[str, str, int]
+
+
+def _resolve_device_or_404(session: Session, device_id: str) -> VaultDevice:
     """Gemeinsamer Lookup + Zugriffs-Check fuer die Unbound-CSV-Endpoints."""
     device = next(
         (d for d in session.opened.data.devices if d.id == device_id),
@@ -1969,7 +1988,12 @@ def _resolve_device_or_404(session: Session, device_id: str):
     return device
 
 
-def _fetch_live_unbound_hosts(client, target, key, secret):
+def _fetch_live_unbound_hosts(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> list[UnboundHostSpec]:
     """Alle Host-Overrides einer Box als UnboundHostSpec-Liste."""
     from opn_cockpit.core.objects._endpoints import (  # noqa: PLC0415
         UNBOUND_HOST_SEARCH,
@@ -1991,7 +2015,7 @@ def _fetch_live_unbound_hosts(client, target, key, secret):
     rows = data.get("rows") if isinstance(data, dict) else None
     if not isinstance(rows, list):
         return []
-    specs = []
+    specs: list[UnboundHostSpec] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -2008,7 +2032,12 @@ def _fetch_live_unbound_hosts(client, target, key, secret):
     return specs
 
 
-def _fetch_live_unbound_forwards(client, target, key, secret):
+def _fetch_live_unbound_forwards(
+    client: HttpClient,
+    target: HttpTarget,
+    key: str,
+    secret: str,
+) -> list[UnboundForwardSpec]:
     """Alle Query-Forwards einer Box als UnboundForwardSpec-Liste."""
     from opn_cockpit.core.objects._endpoints import (  # noqa: PLC0415
         UNBOUND_FORWARD_SEARCH,
@@ -2030,7 +2059,7 @@ def _fetch_live_unbound_forwards(client, target, key, secret):
     rows = data.get("rows") if isinstance(data, dict) else None
     if not isinstance(rows, list):
         return []
-    specs = []
+    specs: list[UnboundForwardSpec] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -2128,12 +2157,65 @@ def export_device_unbound_forwards_csv(
 
 
 # ----- Import (dry-run + apply) -------------------------------------------
+#
+# Host-Overrides und Query-Forwards durchlaufen dieselbe Import-Logik,
+# haben aber keine gemeinsame Basisklasse - es sind zwei verschiedene
+# OPNsense-Modelle. Die drei Helfer unten sind die einzigen Stellen, die
+# den Unterschied kennen; sie grenzen per ``isinstance`` ein, statt die
+# Unterscheidung als Zeichenkette durch den ganzen Ablauf zu reichen.
+
+
+def _unbound_identity(spec: UnboundSpec) -> UnboundIdent:
+    """Fachlicher Schluessel eines Eintrags (Grundlage des CSV-Diffs)."""
+    from opn_cockpit.core.objects.unbound import UnboundHostSpec  # noqa: PLC0415
+
+    if isinstance(spec, UnboundHostSpec):
+        return (spec.host.lower(), spec.domain.lower())
+    return ((spec.domain or "").lower(), spec.server.lower(), int(spec.port))
+
+
+def _unbound_label(spec: UnboundSpec) -> str:
+    """Anzeigename eines Eintrags fuer Preview und Ergebnisliste."""
+    from opn_cockpit.core.objects.unbound import UnboundHostSpec  # noqa: PLC0415
+
+    if isinstance(spec, UnboundHostSpec):
+        return f"{spec.host}.{spec.domain}"
+    dom = spec.domain or "(alle)"
+    return f"{dom} -> {spec.server}:{spec.port} ({spec.type})"
+
+
+def _unbound_is_identical(a: UnboundSpec, b: UnboundSpec) -> bool:
+    """True, wenn sich ausser dem Schluessel nichts unterscheidet.
+
+    Die Schluesselfelder selbst werden nicht verglichen - wer hier
+    landet, hat schon dieselbe Identitaet. Zwei Specs verschiedener Art
+    sind nie identisch.
+    """
+    from opn_cockpit.core.objects.unbound import (  # noqa: PLC0415
+        UnboundForwardSpec,
+        UnboundHostSpec,
+    )
+
+    if isinstance(a, UnboundHostSpec) and isinstance(b, UnboundHostSpec):
+        return (
+            a.server == b.server
+            and (a.description or "") == (b.description or "")
+            and a.enabled == b.enabled
+        )
+    if isinstance(a, UnboundForwardSpec) and isinstance(b, UnboundForwardSpec):
+        return (
+            (a.type or "") == (b.type or "")
+            and (a.verify or "") == (b.verify or "")
+            and (a.description or "") == (b.description or "")
+            and a.enabled == b.enabled
+        )
+    return False
 
 
 def _run_unbound_import(
     *,
     session: Session,
-    device,
+    device: VaultDevice,
     payload: UnboundImportRequest,
     subsystem: str,  # "unbound_hosts" | "unbound_forwards"
 ) -> UnboundImportResponse:
@@ -2158,44 +2240,16 @@ def _run_unbound_import(
     )
     from opn_cockpit.orchestration.registry import get_binding  # noqa: PLC0415
 
+    # Sequence statt list: die beiden Fetch-Funktionen liefern je eine
+    # Liste ihres eigenen Spec-Typs, und nur die kovariante Sequence
+    # nimmt beide als "Folge von UnboundSpec" an.
+    fetch_fn: Callable[[HttpClient, HttpTarget, str, str], Sequence[UnboundSpec]]
     if subsystem == "unbound_hosts":
         parse_fn = parse_unbound_hosts_csv
         fetch_fn = _fetch_live_unbound_hosts
-
-        def _identity(spec):
-            return (spec.host.lower(), spec.domain.lower())
-
-        def _label(spec) -> str:
-            return f"{spec.host}.{spec.domain}"
-
-        def _is_identical(a, b) -> bool:
-            return (
-                a.server == b.server
-                and (a.description or "") == (b.description or "")
-                and a.enabled == b.enabled
-            )
     elif subsystem == "unbound_forwards":
         parse_fn = parse_unbound_forwards_csv
         fetch_fn = _fetch_live_unbound_forwards
-
-        def _identity(spec):
-            return (
-                (spec.domain or "").lower(),
-                spec.server.lower(),
-                int(spec.port),
-            )
-
-        def _label(spec) -> str:
-            dom = spec.domain or "(alle)"
-            return f"{dom} -> {spec.server}:{spec.port} ({spec.type})"
-
-        def _is_identical(a, b) -> bool:
-            return (
-                (a.type or "") == (b.type or "")
-                and (a.verify or "") == (b.verify or "")
-                and (a.description or "") == (b.description or "")
-                and a.enabled == b.enabled
-            )
     else:
         msg = f"Unbekannter subsystem: {subsystem!r}"
         raise ValueError(msg)
@@ -2216,13 +2270,13 @@ def _run_unbound_import(
 
     with HttpClient(targets=[tgt], tuning=tuning) as client:
         live_specs = fetch_fn(client, tgt, device.api_key, device.api_secret)
-        live_by_ident = {_identity(s): s for s in live_specs}
+        live_by_ident = {_unbound_identity(s): s for s in live_specs}
 
         # ------ Preview aufbauen ------
         actions: list[UnboundImportAction] = []
-        csv_idents: set = set()
+        csv_idents: set[UnboundIdent] = set()
         for pos, spec in enumerate(parse_result.specs):
-            ident = _identity(spec)
+            ident = _unbound_identity(spec)
             csv_idents.add(ident)
             row_num = pos + 2  # CSV: Zeile 1 = Header
             current = live_by_ident.get(ident)
@@ -2231,16 +2285,16 @@ def _run_unbound_import(
                     UnboundImportAction(
                         row_num=row_num,
                         action="add",
-                        identity=_label(spec),
-                        summary=f"Neu: {_label(spec)}",
+                        identity=_unbound_label(spec),
+                        summary=f"Neu: {_unbound_label(spec)}",
                     )
                 )
-            elif _is_identical(current, spec):
+            elif _unbound_is_identical(current, spec):
                 actions.append(
                     UnboundImportAction(
                         row_num=row_num,
                         action="skip",
-                        identity=_label(spec),
+                        identity=_unbound_label(spec),
                         summary="Identisch - uebersprungen.",
                     )
                 )
@@ -2249,8 +2303,8 @@ def _run_unbound_import(
                     UnboundImportAction(
                         row_num=row_num,
                         action="update",
-                        identity=_label(spec),
-                        summary=f"Update: {_label(spec)}",
+                        identity=_unbound_label(spec),
+                        summary=f"Update: {_unbound_label(spec)}",
                     )
                 )
 
@@ -2262,8 +2316,8 @@ def _run_unbound_import(
                     UnboundImportAction(
                         row_num=0,
                         action="delete",
-                        identity=_label(current),
-                        summary=f"Loeschen (Live-only): {_label(current)}",
+                        identity=_unbound_label(current),
+                        summary=f"Loeschen (Live-only): {_unbound_label(current)}",
                     )
                 )
 
@@ -2355,7 +2409,7 @@ def _run_unbound_import(
 
         # Actions durchlaufen. Bei Fehler weitermachen, aber Zaehler
         # incrementen — der User sieht am Ende welche Zeilen kaputt waren.
-        parsed_by_ident = {_identity(s): s for s in parse_result.specs}
+        parsed_by_ident = {_unbound_identity(s): s for s in parse_result.specs}
         live_by_ident_current = dict(live_by_ident)
         any_write_success = False
 
@@ -2365,32 +2419,30 @@ def _run_unbound_import(
             try:
                 if action_entry.action in ("add", "update"):
                     # Nach identity_label rueckwaerts das Spec finden.
-                    spec = _find_spec_by_label(
+                    found_spec = _find_spec_by_label(
                         parsed_by_ident,
                         action_entry.identity,
-                        subsystem,
                     )
-                    if spec is None:
+                    if found_spec is None:
                         action_entry.action = "failed"
                         action_entry.summary = "Interner Fehler: Spec verloren."
                         continue
                     if action_entry.action == "add":
-                        adapter.add(client, ctx, spec)
+                        adapter.add(client, ctx, found_spec)
                     else:
-                        adapter.update(client, ctx, spec)
+                        adapter.update(client, ctx, found_spec)
                     action_entry.summary = f"OK: {action_entry.identity}"
                     any_write_success = True
                 elif action_entry.action == "delete":
                     ident_key = _label_to_ident(
                         action_entry.identity,
                         live_by_ident_current,
-                        subsystem,
                     )
                     if ident_key is None:
                         action_entry.action = "failed"
                         action_entry.summary = "Live-Entry nicht mehr gefunden (Race?)."
                         continue
-                    adapter.delete(client, ctx, _build_ident(ident_key, subsystem))
+                    adapter.delete(client, ctx, _build_ident(ident_key))
                     action_entry.summary = f"Geloescht: {action_entry.identity}"
                     any_write_success = True
             except OpnCockpitError as exc:
@@ -2436,46 +2488,44 @@ def _run_unbound_import(
     return response
 
 
-def _find_spec_by_label(parsed_by_ident, label: str, subsystem: str):
+def _find_spec_by_label(
+    parsed_by_ident: dict[UnboundIdent, UnboundSpec],
+    label: str,
+) -> UnboundSpec | None:
     """Sucht das UnboundSpec-Objekt zurueck zum Preview-Label.
 
     Weniger effizient als eine direkte Zuordnung, aber der Preview
     baut nur eine flache Liste — die Rueckzuordnung geht ueber Iteration.
     """
     for spec in parsed_by_ident.values():
-        if subsystem == "unbound_hosts":
-            if f"{spec.host}.{spec.domain}" == label:
-                return spec
-        else:  # unbound_forwards
-            dom = spec.domain or "(alle)"
-            expected = f"{dom} -> {spec.server}:{spec.port} ({spec.type})"
-            if expected == label:
-                return spec
+        if _unbound_label(spec) == label:
+            return spec
     return None
 
 
-def _label_to_ident(label: str, live_by_ident, subsystem: str):
+def _label_to_ident(
+    label: str,
+    live_by_ident: dict[UnboundIdent, UnboundSpec],
+) -> UnboundIdent | None:
     """Findet den Identity-Tupel zurueck zum Label — fuer delete."""
     for ident_key, current in live_by_ident.items():
-        if subsystem == "unbound_hosts":
-            if f"{current.host}.{current.domain}" == label:
-                return ident_key
-        else:
-            dom = current.domain or "(alle)"
-            expected = f"{dom} -> {current.server}:{current.port} ({current.type})"
-            if expected == label:
-                return ident_key
+        if _unbound_label(current) == label:
+            return ident_key
     return None
 
 
-def _build_ident(ident_tuple, subsystem: str):
-    """Baut ein Identity-Objekt aus dem tuple-Key."""
+def _build_ident(ident_tuple: UnboundIdent) -> UnboundHostIdentity | UnboundForwardIdentity:
+    """Baut ein Identity-Objekt aus dem tuple-Key.
+
+    Die Laenge des Tupels unterscheidet die beiden Faelle: Host-Overrides
+    sind (host, domain), Query-Forwards (domain, server, port).
+    """
     from opn_cockpit.core.objects.unbound import (  # noqa: PLC0415
         UnboundForwardIdentity,
         UnboundHostIdentity,
     )
 
-    if subsystem == "unbound_hosts":
+    if len(ident_tuple) == 2:
         host, domain = ident_tuple
         return UnboundHostIdentity(host=host, domain=domain)
     domain, server, port = ident_tuple

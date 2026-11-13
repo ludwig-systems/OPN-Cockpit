@@ -4,6 +4,69 @@ Alle nennenswerten Änderungen pro Release.
 
 ## v0.11.0 — in Arbeit — Unbound CRUD + Port 443 + Firmware + CSV + Kachel-Widgets + Interfaces-Tab + Rollout-Scheduling + Security-Audit-Refresh
 
+### Fix: Watcher fanden nie eine Session (Safety-Net und Firmware-Rollout)
+
+Beim Abarbeiten des mypy-Rückstands (siehe unten) kamen drei echte
+Fehler ans Licht, die der Typcheck seit jeher gemeldet hatte:
+
+- **Session-Adoption war wirkungslos.** `safety_net_watcher` und
+  `firmware_rollout_watcher` riefen `SessionManager.sessions()` auf —
+  eine Methode, die es nicht gibt. Der `AttributeError` lief jedes Mal
+  in ein `except Exception` und wurde still verschluckt. Folge: Der
+  Safety-Net-Watcher fand nie das Gerät für den SSH-Rückweg, der
+  Rollout-Watcher nie eine Session zum Adoptieren nach Neustart.
+  Zweite Schicht desselben Problems: das danach gelesene
+  `opened.vault_path` gibt es an `OpenedVault` ebenfalls nicht. Beide
+  nutzen jetzt `snapshot_active()`, das `(token, session, vault_path)`
+  liefert. Der Catch bleibt — die Watcher laufen im Hintergrund-Thread
+  und dürfen an einem Lookup nicht sterben —, protokolliert den Fehler
+  jetzt aber, statt ihn zu schlucken.
+- **`FirmwareTriggerRequest()` ohne Body.** Das Feld `mode` trug seinen
+  Default positional (`Field("update", ...)`). Jetzt `default="update"`.
+- **Rollout-Initiator `None`.** `POST /api/firmware/rollout` reichte
+  `audit_actor(session)` durch, das im Single-User-Modus `None` liefert.
+  In den Rollout-Meldungen stand dann „None“ im Klartext; jetzt greift
+  derselbe Fallback `cockpit` wie an den Plan-Endpunkten.
+
+### Qualität: mypy im Strict-Modus fehlerfrei, CI-Tor vollständig scharf
+
+Die verbliebenen 65 mypy-Fehler sind abgearbeitet — ohne eine einzige
+`# type: ignore`-Unterdrückung; die drei vorhandenen wurden sogar
+entfernt und durch echte Signaturen ersetzt. Damit fällt in
+`.github/workflows/ci.yml` das letzte `continue-on-error`: Lint,
+Formatierung und Typen fallen jetzt alle drei den Lauf.
+
+paramiko bringt keine Typ-Stubs mit; statt `types-paramiko` als neue
+Abhängigkeit aufzunehmen, steht das Paket in derselben
+mypy-Override-Liste wie argon2 und qrcode, und der SSH-Client trägt in
+`core/ssh_safety_net.py` den benannten Alias `SshClient`, damit die
+Lücke an jeder Signatur sichtbar bleibt.
+
+### Fix: Backup-Liste zeigte bei gleichem Zeitstempel das ältere zuerst
+
+Die Sortierung des Backup-Index war nicht idempotent. `_sort_records_desc`
+löste einen Gleichstand beim `timestamp_utc` über die Position in der
+übergebenen Liste auf ("später angehängt = jünger"). Diese Annahme gilt
+nur für die Anfüge-Reihenfolge; auf eine bereits absteigend sortierte
+Datei angewandt drehte die Regel den Gleichstand jedes Mal wieder um.
+
+Der Zeitstempel hat nur Millisekunden-Auflösung (auf Windows real
+~15 ms), zwei Backups im selben Tick kollidieren also tatsächlich.
+Sichtbare Folge: `list_backups` lieferte dann das **ältere** Backup
+zuerst, und `prune_backups` löschte im Zweifel das jüngere statt des
+ältesten.
+
+Fix: `BackupRecord` bekommt ein Feld `seq` — eine pro Gerät monoton
+steigende Anlage-Nummer, die `append_backup` vergibt. Der Sortier-
+schlüssel ist jetzt `(timestamp_utc, seq, id)` und besteht damit nur aus
+Werten, die im Record selbst stehen und das Schreiben und Wiedereinlesen
+von `index.json` überleben.
+
+Abwärtskompatibel: ein `index.json` ohne `seq` bleibt lesbar, solche
+Records liegen auf `seq=0` und sortieren unter jedem neu angelegten
+Backup (`seq >= 1`) — was der Realität entspricht. Die API-Antwort ist
+unverändert, `seq` ist reine Index-Interna.
+
 ### Doku: Alias-Sync-Semantik (Upsert / replace) klar benannt
 
 Nach Verifikation des Sync-Fixes im Lab wurden README, FEATURES.md

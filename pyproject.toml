@@ -95,7 +95,12 @@ mypy_path = "src"
 packages = ["opn_cockpit"]
 
 [[tool.mypy.overrides]]
-module = ["argon2.*", "qrcode.*"]
+# Diese drei Pakete liefern keine Typ-Stubs mit (kein py.typed). Die
+# jeweiligen `types-*`-Stub-Pakete waeren zusaetzliche Dev-Abhaengigkeiten
+# nur fuer den Typcheck - dafuer ist der Nutzen zu klein. Die betroffenen
+# Aufrufe sind in wenigen Modulen gekapselt und dort als untypisiert
+# gekennzeichnet (siehe z. B. `SshClient` in core/ssh_safety_net.py).
+module = ["argon2.*", "qrcode.*", "paramiko.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -250,7 +250,12 @@ def _collect_san(hostname: str) -> list[x509.GeneralName]:
     except (socket.gaierror, OSError, UnicodeError):
         infos = []
     for _fam, _typ, _proto, _canon, sock_addr in infos:
-        raw_addr = sock_addr[0]
+        # getaddrinfo liefert je nach Adressfamilie unterschiedlich
+        # geformte sockaddr-Tupel; nur bei AF_INET/AF_INET6 ist das erste
+        # Element die Adresse als String. str() haelt exotische Familien
+        # raus, ohne hier eine Fallunterscheidung aufzumachen - was nicht
+        # parst, faellt unten durch den ValueError-Zweig.
+        raw_addr = str(sock_addr[0])
         # IPv6 Scoped-Suffix strippen ("fe80::1%eth0")
         raw_addr = raw_addr.split("%", 1)[0]
         try:

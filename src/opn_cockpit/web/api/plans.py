@@ -244,9 +244,10 @@ def plan_route_delete(
 # ---------------------------------------------------------------------------
 
 
-def _rule_spec_from_request(payload: object) -> RuleSpec:
-    # Duck-typed - akzeptiert sowohl RulePlanRequest (ohne uuid) als auch
-    # RuleUpdatePlanRequest (mit uuid).
+def _rule_spec_from_request(payload: RulePlanRequest | RuleUpdatePlanRequest) -> RuleSpec:
+    # Beide Payloads erben von derselben Basis und teilen das Feldset; nur
+    # RuleUpdatePlanRequest traegt zusaetzlich eine uuid, deshalb dort
+    # getattr mit Default statt direktem Zugriff.
     return RuleSpec(
         uuid=getattr(payload, "uuid", "") or "",
         enabled=payload.enabled,
