@@ -60,7 +60,6 @@ settings.local.json
 Anforderungen
 Feature-Requests
 mockups/
-tests/
 start.bat
 start.ps1
 scripts/demo_setup.py
