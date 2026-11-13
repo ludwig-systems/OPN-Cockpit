@@ -703,7 +703,10 @@ class FirmwareTriggerRequest(BaseModel):
     Default ist ``update`` - der User muss upgrade explizit anfordern.
     """
 
-    mode: str = Field("update", pattern="^(update|upgrade)$")
+    # `default=` ausgeschrieben statt positional: nur so erkennt der
+    # Typchecker den Default und laesst `FirmwareTriggerRequest()` ohne
+    # Argumente zu - genau das tut der Endpoint, wenn kein Body kommt.
+    mode: str = Field(default="update", pattern="^(update|upgrade)$")
 
 
 class FirmwareTriggerResponse(BaseModel):

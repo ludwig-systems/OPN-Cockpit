@@ -36,6 +36,10 @@ from opn_cockpit.web.firmware_rollout_watcher import (
 
 router = APIRouter(prefix="/api/firmware", tags=["firmware"])
 
+# Fallback-Name fuer den Rollout-Initiator, wenn die Session keinen User
+# traegt (Single-User-Mode). Gleicher Wert wie in plans.audit_actor_for_session.
+DEFAULT_INITIATOR = "cockpit"
+
 
 def _get_watcher(request: Request) -> FirmwareRolloutWatcher:
     watcher = getattr(request.app.state, "firmware_rollout_watcher", None)
@@ -145,7 +149,11 @@ def start_rollout(
     watcher = _get_watcher(request)
     try:
         watcher.submit(
-            initiator=audit_actor(session),
+            # audit_actor liefert im Single-User-Mode None (dann greift im
+            # Audit-Backend der Default-Actor). Der Rollout schreibt den
+            # Initiator aber in seine eigenen Meldungen - dort ist ein
+            # sprechender Fallback besser als ein "None" im Klartext.
+            initiator=audit_actor(session) or DEFAULT_INITIATOR,
             vault_path=vault_path,
             devices=ordered,
             mode=payload.mode,
@@ -209,7 +217,7 @@ def cancel_rollout(
     """
     require_write_role(session)
     watcher = _get_watcher(request)
-    initiator = audit_actor(session)
+    initiator = audit_actor(session) or DEFAULT_INITIATOR
     if not watcher.cancel(initiator=initiator):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

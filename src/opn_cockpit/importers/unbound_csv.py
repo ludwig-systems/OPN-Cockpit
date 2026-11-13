@@ -53,6 +53,12 @@ from opn_cockpit.core.objects.unbound import UnboundForwardSpec, UnboundHostSpec
 # Konstanten
 # ---------------------------------------------------------------------------
 
+# Die beiden Spec-Typen haben bewusst keine gemeinsame Basisklasse - sie
+# beschreiben zwei verschiedene OPNsense-Modelle. Fuer alles, was beide
+# Faelle gemeinsam durchlaeuft (Import-Ergebnis, Diff-Helfer), reicht die
+# Union; wer auf Felder zugreift, grenzt per ``isinstance`` ein.
+UnboundSpec = UnboundHostSpec | UnboundForwardSpec
+
 HOST_REQUIRED = ("host", "domain", "server")
 FORWARD_REQUIRED = ("server",)
 
@@ -74,10 +80,11 @@ class UnboundCsvImportResult:
 
     Analog zu :class:`csv_routes.CsvImportResult`, aber Typ-parametrisch
     genutzt (via ``specs``-Liste — Elemente sind entweder alle
-    ``UnboundHostSpec`` oder alle ``UnboundForwardSpec``).
+    ``UnboundHostSpec`` oder alle ``UnboundForwardSpec``, je nachdem
+    welche ``parse_*``-Funktion das Ergebnis gefuellt hat).
     """
 
-    specs: list = field(default_factory=list)
+    specs: list[UnboundSpec] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -298,6 +305,7 @@ def write_unbound_forwards_csv(specs: Iterable[UnboundForwardSpec]) -> str:
 
 __all__ = [
     "UnboundCsvImportResult",
+    "UnboundSpec",
     "parse_unbound_forwards_csv",
     "parse_unbound_hosts_csv",
     "write_unbound_forwards_csv",

@@ -233,11 +233,13 @@ def export_audit_pdf(
     filter_summary = ", ".join(filter_bits) if filter_bits else "ohne Filter"
 
     secret = load_or_generate_secret()
+    # Im Single-User-Mode gibt es keinen User-Eintrag an der Session.
+    user = session.user
     pdf_bytes = render_pdf(
         records,
         secret=secret,
         filter_summary=filter_summary,
-        issued_by=session.user.username if getattr(session, "user", None) else "",
+        issued_by=user.username if user is not None else "",
     )
     return StreamingResponse(
         iter([pdf_bytes]),

@@ -42,11 +42,17 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import RLock, Thread
+from typing import TYPE_CHECKING
 
 from opn_cockpit.audit.backend import AuditBackend
 from opn_cockpit.audit.log import AuditEventKind
 from opn_cockpit.core import ssh_safety_net
+from opn_cockpit.vault.errors import SessionLockedError
 from opn_cockpit.web.auth.manager import SessionManager
+
+if TYPE_CHECKING:
+    from opn_cockpit.security.session import Session
+    from opn_cockpit.vault.model import VaultDevice
 
 _log = logging.getLogger(__name__)
 
@@ -350,23 +356,38 @@ class SafetyNetWatcher:
 
     # ----- Session / Device-Lookup -----
 
-    def _lookup_vault_device(self, entry: SafetyNetEntry):  # type: ignore[no-untyped-def]
+    def _active_sessions(self) -> list[tuple[str, Session, Path]]:
+        """Aktive Sessions als ``(token, session, vault_path)``.
+
+        Der SessionManager kennt keine Methode ``sessions()`` - der
+        Einstiegspunkt heisst ``snapshot_active`` und liefert den
+        Vault-Pfad gleich mit. Fruehere Versionen riefen hier
+        ``sessions()`` auf; der AttributeError lief jedes Mal in das
+        ``except`` unten, die Session-Adoption war damit still
+        wirkungslos.
+
+        Der Catch bleibt trotzdem: der Watcher laeuft im Hintergrund-
+        Thread und darf an einem Lookup nicht sterben.
+        """
+        try:
+            return list(self._manager.snapshot_active())
+        except Exception:
+            _log.exception("Safety-Net-Watcher: Session-Liste nicht lesbar")
+            return []
+
+    def _lookup_vault_device(self, entry: SafetyNetEntry) -> VaultDevice | None:
         """Sucht eine aktive Session zum Vault-Path und liefert das
         VaultDevice (mit SSH-Credentials).
         """
         if not entry.vault_path:
             return None
         target = Path(entry.vault_path)
-        try:
-            sessions = list(self._manager.sessions())
-        except Exception:
-            return None
-        for session in sessions:
-            opened = getattr(session, "opened", None)
-            if opened is None:
+        for _token, session, vault_path in self._active_sessions():
+            if not _same_path(vault_path, target):
                 continue
-            vp = getattr(opened, "vault_path", None)
-            if vp is None or not _same_path(vp, target):
+            try:
+                opened = session.opened
+            except SessionLockedError:
                 continue
             for d in opened.data.devices:
                 if d.id == entry.device_id:
@@ -380,17 +401,8 @@ class SafetyNetWatcher:
         leeren String. Dann hat der Entry keine Adoption-Quelle nach
         Restart.
         """
-        try:
-            sessions = list(self._manager.sessions())
-        except Exception:
-            return ""
-        for session in sessions:
-            opened = getattr(session, "opened", None)
-            if opened is None:
-                continue
-            vp = getattr(opened, "vault_path", None)
-            if vp is not None:
-                return str(vp)
+        for _token, _session, vault_path in self._active_sessions():
+            return str(vault_path)
         return ""
 
     # ----- Persistenz -----

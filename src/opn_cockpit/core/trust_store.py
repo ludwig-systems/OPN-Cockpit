@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
-from cryptography.x509.oid import ExtensionOID, NameOID
+from cryptography.x509.oid import NameOID
 
 _PEM_BLOCK_RE = re.compile(
     r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
@@ -144,8 +144,20 @@ def _common_name(name: x509.Name) -> str:
     return ""
 
 
+def _attr_value_text(value: str | bytes) -> str:
+    """Attribut-Wert als Text.
+
+    Die meisten Name-Attribute sind Strings, einzelne (z. B.
+    ``X500UniqueIdentifier``) liefern Bytes. Ohne explizites Dekodieren
+    stuende in der Ausgabe ``b'...'`` statt des Inhalts.
+    """
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def _stringify_name(name: x509.Name) -> str:
-    return ", ".join(f"{a.oid._name}={a.value}" for a in name)
+    return ", ".join(f"{a.oid._name}={_attr_value_text(a.value)}" for a in name)
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -155,10 +167,11 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def _is_ca_certificate(cert: x509.Certificate) -> bool:
+    # get_extension_for_class statt ..._for_oid: liefert die Extension mit
+    # konkretem Typ, damit ``.value.ca`` ueberhaupt bekannt ist. Ueber die
+    # OID kommt nur die Basisklasse zurueck, die das Feld nicht kennt.
     try:
-        bc = cert.extensions.get_extension_for_oid(
-            ExtensionOID.BASIC_CONSTRAINTS,
-        )
+        bc = cert.extensions.get_extension_for_class(x509.BasicConstraints)
     except x509.ExtensionNotFound:
         return False
     return bool(bc.value.ca)

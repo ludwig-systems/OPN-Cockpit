@@ -41,6 +41,7 @@ from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 from pathlib import Path
 from threading import RLock, Thread
+from typing import TYPE_CHECKING
 
 from opn_cockpit.audit.backend import AuditBackend
 from opn_cockpit.audit.log import AuditEventKind
@@ -60,6 +61,10 @@ from opn_cockpit.core.http_client import (
     tuning_from_settings,
 )
 from opn_cockpit.web.auth.manager import SessionManager
+
+if TYPE_CHECKING:
+    from opn_cockpit.security.session import Session
+    from opn_cockpit.vault.model import VaultDevice
 
 _log = logging.getLogger(__name__)
 
@@ -982,31 +987,39 @@ class FirmwareRolloutWatcher:
 
     # ----- Session-Adoption + HTTP-Client -----
 
-    def _find_session_for_rollout(self, rollout: FirmwareRollout):
+    def _find_session_for_rollout(self, rollout: FirmwareRollout) -> Session | None:
         """Sucht eine aktive Session zum Vault-Pfad des Rollouts.
 
         Bei Server-Restart oder Session-Lock sind keine Sessions offen -
         dann kommt None zurueck und der Watcher wartet den naechsten
         Tick ab (User oeffnet Tresor, dann adoptieren wir).
+
+        Der SessionManager kennt keine Methode ``sessions()``; der
+        Einstiegspunkt heisst ``snapshot_active`` und liefert den
+        Vault-Pfad gleich mit. Fruehere Versionen riefen ``sessions()``
+        auf, der AttributeError lief jedes Mal in das ``except`` - die
+        Session-Adoption war damit still wirkungslos. Der Catch bleibt
+        trotzdem: der Watcher laeuft im Hintergrund-Thread und darf an
+        einem Lookup nicht sterben.
         """
         if not rollout.vault_path:
             return None
         target = Path(rollout.vault_path)
         try:
-            sessions = list(self._manager.sessions())
+            active = list(self._manager.snapshot_active())
         except Exception:
+            _log.exception("Rollout-Watcher: Session-Liste nicht lesbar")
             return None
-        for session in sessions:
-            opened = getattr(session, "opened", None)
-            if opened is None:
-                continue
-            vp = getattr(opened, "vault_path", None)
-            if vp is None or not _same_path(vp, target):
-                continue
-            return session
+        for _token, session, vault_path in active:
+            if _same_path(vault_path, target):
+                return session
         return None
 
-    def _lookup_vault_device(self, rollout: FirmwareRollout, device_id: str):
+    def _lookup_vault_device(
+        self,
+        rollout: FirmwareRollout,
+        device_id: str,
+    ) -> VaultDevice | None:
         session = self._find_session_for_rollout(rollout)
         if session is None:
             return None
@@ -1015,7 +1028,11 @@ class FirmwareRolloutWatcher:
                 return d
         return None
 
-    def _build_client(self, rollout: FirmwareRollout, vault_device):
+    def _build_client(
+        self,
+        rollout: FirmwareRollout,
+        vault_device: VaultDevice,
+    ) -> HttpClient:
         """Baut einen HttpClient mit denselben Trust-CAs wie der User-Vault."""
         session = self._find_session_for_rollout(rollout)
         settings = session.opened.data.settings if session else None

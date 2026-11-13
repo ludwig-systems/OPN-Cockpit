@@ -35,13 +35,22 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock, Thread
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from opn_cockpit.audit.backend import AuditBackend
 from opn_cockpit.audit.log import AuditEventKind
+
+if TYPE_CHECKING:
+    # Nur fuer Annotationen. Zur Laufzeit werden cryptography und das
+    # Auto-Cert-Modul weiterhin erst in der jeweiligen Funktion importiert
+    # (Startzeit, und der Watcher laeuft auch ohne sie bis zum ersten Tick).
+    from cryptography import x509
+
+    from opn_cockpit.security.self_signed import AutoCertPaths, GeneratedCert
 
 _log = logging.getLogger(__name__)
 
@@ -71,7 +80,7 @@ class TlsWatcher:
         audit_backend: AuditBackend,
         *,
         tick_interval_s: int = DEFAULT_TICK_S,
-        restart_callback=None,  # type: ignore[no-untyped-def]
+        restart_callback: Callable[[], None] | None = None,
     ) -> None:
         self._audit = audit_backend
         self._tick_interval_s = tick_interval_s
@@ -252,10 +261,10 @@ class TlsWatcher:
 
     def _regenerate_auto(
         self,
-        paths,  # type: ignore[no-untyped-def]
+        paths: AutoCertPaths,
         *,
         subject_cn_before: str,
-    ):  # type: ignore[no-untyped-def]
+    ) -> GeneratedCert | None:
         from opn_cockpit.security.self_signed import generate_self_signed  # noqa: PLC0415
 
         try:
@@ -346,14 +355,17 @@ def _classify(days_left: int) -> str:
     return STATUS_OK
 
 
-def _get_not_after(cert) -> datetime:  # type: ignore[no-untyped-def]
-    raw = getattr(cert, "not_valid_after_utc", None) or cert.not_valid_after
+def _get_not_after(cert: x509.Certificate) -> datetime:
+    # ``not_valid_after_utc`` gibt es erst ab cryptography 42; auf aelteren
+    # Versionen faellt der Zugriff auf das deprecated ``not_valid_after``
+    # zurueck, das naive Zeiten liefert.
+    raw: datetime = getattr(cert, "not_valid_after_utc", None) or cert.not_valid_after
     if raw.tzinfo is None:
         return raw.replace(tzinfo=UTC)
     return raw.astimezone(UTC)
 
 
-def _common_name(name) -> str:  # type: ignore[no-untyped-def]
+def _common_name(name: x509.Name) -> str:
     from cryptography.x509.oid import NameOID  # noqa: PLC0415
 
     attrs = name.get_attributes_for_oid(NameOID.COMMON_NAME)
