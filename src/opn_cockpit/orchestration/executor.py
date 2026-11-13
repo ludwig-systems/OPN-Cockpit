@@ -164,11 +164,7 @@ class Executor:
             target_count=len(pipelines),
             summary=(
                 f"Plan {plan.plan_id} wird auf {len(pipelines)} Gerät(e) ausgerollt"
-                + (
-                    f" (Safety-Net armed, Window={sn.window_s}s)."
-                    if sn.active
-                    else "."
-                )
+                + (f" (Safety-Net armed, Window={sn.window_s}s)." if sn.active else ".")
             ),
         )
 
@@ -331,8 +327,7 @@ class Executor:
                         phase=Phase.WRITE,
                         error_kind="backup_blocked",
                         summary=(
-                            "Pre-Apply-Backup fehlgeschlagen, Apply blockiert: "
-                            + backup_failure
+                            "Pre-Apply-Backup fehlgeschlagen, Apply blockiert: " + backup_failure
                         ),
                         start=start,
                     )
@@ -527,7 +522,9 @@ class Executor:
             for action in to_write:
                 if action_kind is ActionKind.DELETE:
                     add_outcome = adapter.delete(
-                        client, ctx, adapter.identity(action.target_spec),
+                        client,
+                        ctx,
+                        adapter.identity(action.target_spec),
                     )
                 elif action_kind is ActionKind.UPDATE:
                     add_outcome = adapter.update(client, ctx, action.target_spec)
@@ -576,9 +573,7 @@ class Executor:
         last_verify: VerifyOutcome | None = None
         for action in to_write:
             try:
-                verify_outcome = adapter.verify(
-                    client, ctx, adapter.identity(action.target_spec)
-                )
+                verify_outcome = adapter.verify(client, ctx, adapter.identity(action.target_spec))
             except OpnCockpitError as exc:
                 return Result(
                     device_id=device.id,
@@ -592,9 +587,7 @@ class Executor:
                 )
             if verify_outcome.found is not expected_found:
                 if expected_found:
-                    err_msg = (
-                        f"Read-back leer für {adapter.identity(action.target_spec)}."
-                    )
+                    err_msg = f"Read-back leer für {adapter.identity(action.target_spec)}."
                 else:
                     err_msg = (
                         f"Eintrag '{adapter.identity(action.target_spec)}' "
@@ -733,7 +726,7 @@ class Executor:
             for d in self.session.opened.data.devices:
                 if d.id == device_id:
                     return d
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
         return None
 
@@ -745,9 +738,7 @@ class Executor:
             return False
         if not vault_device.ssh_private_key_pem.strip():
             return False
-        if not vault_device.ssh_user.strip():
-            return False
-        return True
+        return bool(vault_device.ssh_user.strip())
 
     def _arm_safety_net(
         self,
@@ -770,7 +761,7 @@ class Executor:
                 pre_apply_record.id,
                 storage_root=self.backup_storage_root,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return f"Pre-Apply-XML nicht lesbar: {exc}"
 
         jobid = ssh_safety_net.make_jobid(plan_id, device.id)
@@ -855,7 +846,7 @@ class Executor:
                     pre_apply_backup_id=pre_apply_record.id,
                     window_s=window_s,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.exception(
                     "SafetyNetWatcher konnte pending-disarm fuer device_id=%s nicht annehmen.",
                     device.id,
@@ -885,7 +876,7 @@ class Executor:
         """Einmaliger Disarm-Versuch waehrend Exception-Cleanup."""
         try:
             disarm_res = ssh_safety_net.disarm(vault_device, jobid=jobid)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception(
                 "Best-Effort-Disarm crashed fuer device_id=%s",
                 device.id,
@@ -920,13 +911,13 @@ class Executor:
             error_kind=result.error_kind,
             failed_phase=str(result.failed_phase) if result.failed_phase else None,
             duration_ms=result.duration_ms,
-            parameters=mask_dict({
-                "device_host": device.host,
-                "tls_verify": device.tls_verify,
-            }),
-            summary=(
-                f"{device.name}{tls_marker}: {result.status} — {result.short_message}"
+            parameters=mask_dict(
+                {
+                    "device_host": device.host,
+                    "tls_verify": device.tls_verify,
+                }
             ),
+            summary=(f"{device.name}{tls_marker}: {result.status} — {result.short_message}"),
         )
 
 

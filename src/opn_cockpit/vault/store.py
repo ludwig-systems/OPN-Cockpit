@@ -102,9 +102,7 @@ def open_vault_bytes(raw: bytes, password: str) -> OpenedVault:
     aus dem Multi-User-Server-Mode, bei dem der Server keine User-Pfade
     sehen darf (LocalService-Account)."""
     if len(raw) < HEADER_SIZE:
-        raise CorruptVaultError(
-            f"Tresor-Datei zu kurz ({len(raw)} < {HEADER_SIZE} Bytes)."
-        )
+        raise CorruptVaultError(f"Tresor-Datei zu kurz ({len(raw)} < {HEADER_SIZE} Bytes).")
     header_bytes = raw[:HEADER_SIZE]
     header = VaultHeader.unpack(header_bytes)
     ciphertext = raw[HEADER_SIZE:]

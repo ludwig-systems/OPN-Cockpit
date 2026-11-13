@@ -172,27 +172,39 @@ def fetch_firmware_status(
         response = client.call(target, key, secret, "GET", FIRMWARE_STATUS_ENDPOINT)
     except AuthError as exc:
         return FirmwareStatus(
-            reachable=True, authenticated=False,
-            version="unknown", status="unknown", update_available=False,
+            reachable=True,
+            authenticated=False,
+            version="unknown",
+            status="unknown",
+            update_available=False,
             summary=f"Auth abgelehnt: {exc.context.summary or 'Schluessel/Secret falsch'}",
         )
     except UnreachableError as exc:
         if exc.context.error_kind == "tls":
             tls_reason = exc.context.summary or "Cert ungueltig"
             return FirmwareStatus(
-                reachable=True, authenticated=False,
-                version="unknown", status="unknown", update_available=False,
+                reachable=True,
+                authenticated=False,
+                version="unknown",
+                status="unknown",
+                update_available=False,
                 summary=f"TLS-Verifikation fehlgeschlagen: {tls_reason}",
             )
         return FirmwareStatus(
-            reachable=False, authenticated=False,
-            version="unknown", status="unknown", update_available=False,
+            reachable=False,
+            authenticated=False,
+            version="unknown",
+            status="unknown",
+            update_available=False,
             summary=f"nicht erreichbar: {exc.context.summary or exc.context.error_kind}",
         )
     except OpnCockpitError as exc:
         return FirmwareStatus(
-            reachable=True, authenticated=False,
-            version="unknown", status="unknown", update_available=False,
+            reachable=True,
+            authenticated=False,
+            version="unknown",
+            status="unknown",
+            update_available=False,
             summary=f"Antwort ungewoehnlich: {exc.context.error_kind}",
         )
     try:
@@ -205,15 +217,14 @@ def fetch_firmware_status(
     status_msg = _extract_status_msg(body)
     # Summary kompakt mit Zielversion wenn bekannt, sonst Generik.
     if update_available:
-        suffix = (
-            f" — Update v{new_version} verfuegbar" if new_version
-            else " — Update verfuegbar"
-        )
+        suffix = f" — Update v{new_version} verfuegbar" if new_version else " — Update verfuegbar"
     else:
         suffix = ""
     return FirmwareStatus(
-        reachable=True, authenticated=True,
-        version=version, status=status_word,
+        reachable=True,
+        authenticated=True,
+        version=version,
+        status=status_word,
         update_available=update_available,
         summary=f"v{version}{suffix}",
         new_version=new_version,
@@ -350,7 +361,10 @@ def trigger_firmware_update(
     :func:`fetch_upgrade_status` pollen bis ``status == "done"``.
     """
     return _trigger_firmware_action(
-        client, target, key, secret,
+        client,
+        target,
+        key,
+        secret,
         endpoint=FIRMWARE_UPDATE_ENDPOINT,
         action_name="Update",
     )
@@ -369,7 +383,10 @@ def trigger_firmware_upgrade(
     sein (Health-Check-Loop mit Retry-Toleranz).
     """
     return _trigger_firmware_action(
-        client, target, key, secret,
+        client,
+        target,
+        key,
+        secret,
         endpoint=FIRMWARE_UPGRADE_ENDPOINT,
         action_name="Upgrade",
     )
@@ -403,31 +420,43 @@ def fetch_upgrade_status(
     """
     try:
         response = client.call(
-            target, key, secret, "GET", FIRMWARE_UPGRADE_STATUS_ENDPOINT,
+            target,
+            key,
+            secret,
+            "GET",
+            FIRMWARE_UPGRADE_STATUS_ENDPOINT,
         )
     except AuthError as exc:
         return UpgradeStatus(
-            reachable=True, authenticated=False,
-            status=UPGRADE_STATUS_UNKNOWN, log="",
+            reachable=True,
+            authenticated=False,
+            status=UPGRADE_STATUS_UNKNOWN,
+            log="",
             summary=f"Auth abgelehnt: {exc.context.summary or 'Schluessel/Secret falsch'}",
         )
     except UnreachableError as exc:
         if exc.context.error_kind == "tls":
             reason = exc.context.summary or "Cert ungueltig"
             return UpgradeStatus(
-                reachable=True, authenticated=False,
-                status=UPGRADE_STATUS_UNKNOWN, log="",
+                reachable=True,
+                authenticated=False,
+                status=UPGRADE_STATUS_UNKNOWN,
+                log="",
                 summary=f"TLS-Verifikation fehlgeschlagen: {reason}",
             )
         return UpgradeStatus(
-            reachable=False, authenticated=False,
-            status=UPGRADE_STATUS_UNKNOWN, log="",
+            reachable=False,
+            authenticated=False,
+            status=UPGRADE_STATUS_UNKNOWN,
+            log="",
             summary=f"nicht erreichbar: {exc.context.summary or exc.context.error_kind}",
         )
     except OpnCockpitError as exc:
         return UpgradeStatus(
-            reachable=True, authenticated=False,
-            status=UPGRADE_STATUS_UNKNOWN, log="",
+            reachable=True,
+            authenticated=False,
+            status=UPGRADE_STATUS_UNKNOWN,
+            log="",
             summary=f"Antwort ungewoehnlich: {exc.context.error_kind}",
         )
 
@@ -438,8 +467,10 @@ def fetch_upgrade_status(
 
     if not isinstance(body, dict):
         return UpgradeStatus(
-            reachable=True, authenticated=True,
-            status=UPGRADE_STATUS_UNKNOWN, log="",
+            reachable=True,
+            authenticated=True,
+            status=UPGRADE_STATUS_UNKNOWN,
+            log="",
             summary="Antwort unlesbar (kein JSON-Dict)",
         )
 
@@ -454,8 +485,10 @@ def fetch_upgrade_status(
         UPGRADE_STATUS_UNKNOWN: f"Unbekannter Status: {raw_status or '(leer)'}",
     }
     return UpgradeStatus(
-        reachable=True, authenticated=True,
-        status=normalized, log=log_text,
+        reachable=True,
+        authenticated=True,
+        status=normalized,
+        log=log_text,
         summary=summary_map[normalized],
     )
 
@@ -596,9 +629,7 @@ def _parse_cert_blob(pem_or_der: bytes) -> tuple[datetime | None, str, str]:
         return None, "", ""
     # cryptography>=42 hat not_valid_after_utc; aeltere Versionen nur das naive not_valid_after.
     not_after = (
-        cert.not_valid_after_utc
-        if hasattr(cert, "not_valid_after_utc")
-        else cert.not_valid_after
+        cert.not_valid_after_utc if hasattr(cert, "not_valid_after_utc") else cert.not_valid_after
     )
     if not_after.tzinfo is None:
         not_after = not_after.replace(tzinfo=UTC)
@@ -633,28 +664,40 @@ def fetch_certificates(
         # erstelltes Cert auf einer Seite weiter hinten landen und der
         # Kachel-Badge nichts anzeigen.
         response = client.call(
-            target, key, secret, "POST", CERT_SEARCH_ENDPOINT,
+            target,
+            key,
+            secret,
+            "POST",
+            CERT_SEARCH_ENDPOINT,
             json={"current": 1, "rowCount": 1000, "searchPhrase": ""},
         )
     except AuthError as exc:
         return CertificateStatus(
-            reachable=True, authenticated=False, certs=(),
+            reachable=True,
+            authenticated=False,
+            certs=(),
             summary=f"Auth abgelehnt: {exc.context.summary or 'Schluessel/Secret falsch'}",
         )
     except UnreachableError as exc:
         if exc.context.error_kind == "tls":
             reason = exc.context.summary or "Cert ungueltig"
             return CertificateStatus(
-                reachable=True, authenticated=False, certs=(),
+                reachable=True,
+                authenticated=False,
+                certs=(),
                 summary=f"TLS-Verifikation fehlgeschlagen: {reason}",
             )
         return CertificateStatus(
-            reachable=False, authenticated=False, certs=(),
+            reachable=False,
+            authenticated=False,
+            certs=(),
             summary=f"nicht erreichbar: {exc.context.summary or exc.context.error_kind}",
         )
     except OpnCockpitError as exc:
         return CertificateStatus(
-            reachable=True, authenticated=False, certs=(),
+            reachable=True,
+            authenticated=False,
+            certs=(),
             summary=f"Antwort ungewoehnlich: {exc.context.error_kind}",
         )
     try:
@@ -680,7 +723,9 @@ def fetch_certificates(
         if isinstance(row, dict)
     ]
     return CertificateStatus(
-        reachable=True, authenticated=True, certs=tuple(entries),
+        reachable=True,
+        authenticated=True,
+        certs=tuple(entries),
         summary=f"{len(entries)} Zertifikat(e) gefunden.",
     )
 
@@ -703,7 +748,10 @@ def _fetch_cert_detail(
     if uuid:
         try:
             detail_resp = client.call(
-                target, key, secret, "GET",
+                target,
+                key,
+                secret,
+                "GET",
                 CERT_GET_ENDPOINT_FMT.format(uuid=uuid),
             )
             detail_body = detail_resp.json()

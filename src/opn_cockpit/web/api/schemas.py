@@ -30,6 +30,7 @@ def _strip_required(value: str) -> str:
     rejected ihn dann ueber min_length=1)."""
     return value.strip()
 
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
@@ -403,7 +404,7 @@ class ServerTlsStatusResponse(BaseModel):
     requires_restart: bool = False
     warnings: list[str] = Field(default_factory=list)
     # v0.10 HTTPS-by-default
-    cert_type: str = "none"          # "custom" | "auto" | "none"
+    cert_type: str = "none"  # "custom" | "auto" | "none"
     fingerprint_sha256: str = ""
     auto_cert_available: bool = False
     auto_cert_fingerprint: str = ""
@@ -764,14 +765,16 @@ class FirmwareRolloutRequest(BaseModel):
     continue_on_error: bool = False
     scheduled_start_at_ms: int | None = Field(None, ge=0)
     window_start_hhmm: str = Field(
-        "", max_length=5,
+        "",
+        max_length=5,
         description=(
             "Wartungsfenster-Start (HH:MM, Server-lokale Zeit). Leer = kein Fenster. "
             "Zusammen mit window_end_hhmm."
         ),
     )
     window_end_hhmm: str = Field(
-        "", max_length=5,
+        "",
+        max_length=5,
         description="Wartungsfenster-Ende (HH:MM). Leer = kein Fenster.",
     )
 
@@ -1332,11 +1335,11 @@ class _UnboundForwardPayloadBase(BaseModel):
     """Gemeinsame Felder eines Query-Forward-Add/Update-Plans."""
 
     enabled: bool = True
-    domain: str = Field("", max_length=180)          # leer = "alle Queries"
+    domain: str = Field("", max_length=180)  # leer = "alle Queries"
     server: str = Field(..., min_length=1, max_length=80)
     port: int = Field(53, ge=1, le=65535)
     type: str = Field("forward", min_length=1, max_length=16)
-    verify: str = Field("", max_length=180)          # DoT: Server-Name-Verify
+    verify: str = Field("", max_length=180)  # DoT: Server-Name-Verify
     description: str = Field("", max_length=200)
 
 

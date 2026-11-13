@@ -122,15 +122,18 @@ def create_new_vault(
         create_vault(path, payload.password)
     except WeakPasswordError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         ) from exc
     except VaultIOError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         ) from exc
     except VaultError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         ) from exc
 
     # Sofort entsperren — der User hat das Passwort gerade getippt.
@@ -224,10 +227,7 @@ def export_template(
     session.touch()
     opened = session.opened
     # Geraete-Liste mit leeren Secrets bauen
-    blanked = [
-        replace(d, api_key="", api_secret="")
-        for d in opened.data.devices
-    ]
+    blanked = [replace(d, api_key="", api_secret="") for d in opened.data.devices]
     template_data = VaultData(
         schema_version=opened.data.schema_version,
         devices=blanked,
@@ -237,7 +237,9 @@ def export_template(
     # In Temp-Datei schreiben, dann als Download liefern.
     src_name = session.vault_path.stem
     with tempfile.NamedTemporaryFile(
-        suffix=".opnvault", prefix=f"{src_name}-template-", delete=False,
+        suffix=".opnvault",
+        prefix=f"{src_name}-template-",
+        delete=False,
     ) as tmp_fh:
         tmp_path = Path(tmp_fh.name)
     try:
@@ -261,10 +263,7 @@ def export_template(
         AuditEventKind.TEMPLATE_EXPORTED,
         actor=audit_actor(session),
         vault_path=str(session.vault_path),
-        summary=(
-            f"Template-Export erstellt ({len(blanked)} Geraete, "
-            "Credentials geleert)."
-        ),
+        summary=(f"Template-Export erstellt ({len(blanked)} Geraete, Credentials geleert)."),
     )
 
     download_name = f"{src_name}-template.opnvault"
@@ -340,7 +339,8 @@ def switch_vault(
         )
     try:
         created = server.switch_vault(
-            new_path, payload.password,
+            new_path,
+            payload.password,
             create_if_missing=payload.create_if_missing,
         )
     except InvalidPasswordError as exc:
@@ -564,7 +564,8 @@ def _smtp_to_response(s: SmtpSettings) -> SmtpSettingsResponse:
 
 
 def _merge_smtp_password(
-    old: SmtpSettings, incoming: str,
+    old: SmtpSettings,
+    incoming: str,
 ) -> str:
     """Behandelt die Masking-Semantik: incoming ``***`` = alten Wert
     beibehalten; leerer String = Passwort explizit loeschen; sonst
@@ -663,6 +664,7 @@ def test_smtp_settings(
     # Fuer den Test aktivieren wir SMTP temporaer im lokalen Copy —
     # die Vault-Persistenz bleibt unberuehrt.
     from dataclasses import replace  # noqa: PLC0415
+
     smtp_effective = replace(smtp, enabled=True)
 
     if not smtp_effective.host:
@@ -680,9 +682,14 @@ def test_smtp_settings(
         f"From:    {smtp_effective.from_addr or '(leer)'}\n"
     )
     try:
-        send_mail(smtp_effective, MailMessage(
-            to=(payload.to,), subject=subject, body_text=body,
-        ))
+        send_mail(
+            smtp_effective,
+            MailMessage(
+                to=(payload.to,),
+                subject=subject,
+                body_text=body,
+            ),
+        )
     except MailError as exc:
         return SmtpTestResponse(ok=False, detail=str(exc))
     return SmtpTestResponse(ok=True, detail=f"Test-Mail an {payload.to} verschickt.")
@@ -780,16 +787,18 @@ def list_trusted_cas(
             # dem User trotzdem nicht, kaputte PEMs loszuwerden - dafuer
             # gibt es den /sync-Endpoint unten.
             continue
-        entries.append(TrustedCaEntry(
-            fingerprint_sha256=meta.fingerprint_sha256,
-            subject_cn=meta.subject_cn,
-            issuer_cn=meta.issuer_cn,
-            not_before_iso=meta.not_before_iso,
-            not_after_iso=meta.not_after_iso,
-            days_until_expiry=meta.days_until_expiry,
-            is_ca=meta.is_ca,
-            self_signed=meta.self_signed,
-        ))
+        entries.append(
+            TrustedCaEntry(
+                fingerprint_sha256=meta.fingerprint_sha256,
+                subject_cn=meta.subject_cn,
+                issuer_cn=meta.issuer_cn,
+                not_before_iso=meta.not_before_iso,
+                not_after_iso=meta.not_after_iso,
+                days_until_expiry=meta.days_until_expiry,
+                is_ca=meta.is_ca,
+                self_signed=meta.self_signed,
+            )
+        )
     session.touch()
     return TrustedCaListResponse(entries=entries)
 
@@ -858,10 +867,7 @@ def add_trusted_ca(
     if not parsed:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Kein gueltiges Zertifikat im Eingabewert. "
-                + (errors[0] if errors else "")
-            ),
+            detail=("Kein gueltiges Zertifikat im Eingabewert. " + (errors[0] if errors else "")),
         )
 
     old_settings = session.opened.data.settings
@@ -902,7 +908,10 @@ def add_trusted_ca(
         session.opened.data.settings = old_settings
 
     persist_session_vault(
-        request, session, session.vault_path, rollback=_rollback,
+        request,
+        session,
+        session.vault_path,
+        rollback=_rollback,
     )
     # Audit-Finding F5: Fingerprint(s) im Summary mit ausgeben - sonst
     # ist eine spaetere Forensik nicht eindeutig (zwei CAs koennen
@@ -976,7 +985,10 @@ def delete_trusted_ca(
         session.opened.data.settings = old_settings
 
     persist_session_vault(
-        request, session, session.vault_path, rollback=_rollback,
+        request,
+        session,
+        session.vault_path,
+        rollback=_rollback,
     )
     # Audit-Finding F5: Subject CN UND Fingerprint im Summary,
     # damit Forensik eindeutig zuordnen kann.

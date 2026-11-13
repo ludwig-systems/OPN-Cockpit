@@ -44,9 +44,12 @@ _dialog_lock = threading.Lock()
 # anders als X-Forwarded-For. Bei ``starlette.testclient.TestClient`` ist
 # der Wert konventionell ``"testclient"``; wir lassen das durch, damit
 # Tests laufen.
-_LOOPBACK_LITERAL_HOSTS: frozenset[str] = frozenset({
-    "localhost", "testclient",
-})
+_LOOPBACK_LITERAL_HOSTS: frozenset[str] = frozenset(
+    {
+        "localhost",
+        "testclient",
+    }
+)
 
 
 def _is_loopback_origin(host: str) -> bool:
@@ -87,8 +90,8 @@ class BrowseEntry(BaseModel):
 
 
 class BrowseResponse(BaseModel):
-    current: str           # absoluter Pfad des angezeigten Containers ("" wenn Drive-Liste)
-    parent: str | None     # Eltern-Pfad, ``None`` bei Drive-Liste / Filesystem-Wurzel
+    current: str  # absoluter Pfad des angezeigten Containers ("" wenn Drive-Liste)
+    parent: str | None  # Eltern-Pfad, ``None`` bei Drive-Liste / Filesystem-Wurzel
     entries: list[BrowseEntry]
     error: str | None = None
 
@@ -122,13 +125,21 @@ def _list_dir(target: Path) -> list[BrowseEntry]:
         except OSError:
             continue
         if is_dir:
-            entries.append(BrowseEntry(
-                name=child.name, path=str(child), kind="dir",
-            ))
+            entries.append(
+                BrowseEntry(
+                    name=child.name,
+                    path=str(child),
+                    kind="dir",
+                )
+            )
         elif child.suffix.lower() == VAULT_EXTENSION:
-            entries.append(BrowseEntry(
-                name=child.name, path=str(child), kind="vault",
-            ))
+            entries.append(
+                BrowseEntry(
+                    name=child.name,
+                    path=str(child),
+                    kind="vault",
+                )
+            )
     return entries
 
 
@@ -137,10 +148,7 @@ def browse(
     request: Request,
     path: str = Query(
         "",
-        description=(
-            "Absoluter Pfad. Leer = Home-Verzeichnis (Unix) bzw. Drive-Liste "
-            "(Windows)."
-        ),
+        description=("Absoluter Pfad. Leer = Home-Verzeichnis (Unix) bzw. Drive-Liste (Windows)."),
     ),
 ) -> BrowseResponse:
     """Listet Inhalt eines Verzeichnisses (nur Unterordner + .opnvault-Dateien)."""
@@ -196,9 +204,7 @@ def browse(
     # An der Filesystem-Wurzel (Drive-Root oder /): Windows -> Drive-Liste ("");
     # Unix -> kein hoeher (None).
     at_root = parent == resolved
-    parent_str: str | None = (
-        ("" if os.name == "nt" else None) if at_root else str(parent)
-    )
+    parent_str: str | None = ("" if os.name == "nt" else None) if at_root else str(parent)
 
     return BrowseResponse(
         current=str(resolved),
@@ -402,8 +408,7 @@ def _pick_file_native_windows(
     ofn.nMaxFile = len(path_buf)
     ofn.lpstrTitle = title
     ofn.Flags = (
-        ofn_explorer | ofn_filemustexist | ofn_pathmustexist
-        | ofn_hidereadonly | ofn_nochangedir
+        ofn_explorer | ofn_filemustexist | ofn_pathmustexist | ofn_hidereadonly | ofn_nochangedir
     )
     ofn.lpstrDefExt = "opnvault"
 

@@ -30,7 +30,7 @@ class AliasItem:
 
     name: str
     type: str
-    content: tuple[str, ...]   # sortierte Liste, damit Reihenfolge irrelevant
+    content: tuple[str, ...]  # sortierte Liste, damit Reihenfolge irrelevant
     description: str
 
     @property
@@ -87,12 +87,14 @@ def extract_aliases(xml_bytes: bytes) -> list[AliasItem]:
         name = (node.findtext("name") or "").strip()
         if not name:
             continue
-        items.append(AliasItem(
-            name=name,
-            type=(node.findtext("type") or "").strip(),
-            content=_normalize_alias_content(node.findtext("content")),
-            description=(node.findtext("description") or node.findtext("descr") or "").strip(),
-        ))
+        items.append(
+            AliasItem(
+                name=name,
+                type=(node.findtext("type") or "").strip(),
+                content=_normalize_alias_content(node.findtext("content")),
+                description=(node.findtext("description") or node.findtext("descr") or "").strip(),
+            )
+        )
     return items
 
 
@@ -131,9 +133,9 @@ class AliasRow:
 class AliasComparison:
     """Vollstaendige Matrix fuer eine Geraeteauswahl."""
 
-    columns: tuple[str, ...]                   # device_ids in stabiler Reihenfolge
-    rows: tuple[AliasRow, ...]                 # nach Name alphabetisch sortiert
-    summary: str                               # Kurz-Zusammenfassung fuer UI
+    columns: tuple[str, ...]  # device_ids in stabiler Reihenfolge
+    rows: tuple[AliasRow, ...]  # nach Name alphabetisch sortiert
+    summary: str  # Kurz-Zusammenfassung fuer UI
 
 
 def compare_aliases(
@@ -263,12 +265,14 @@ def extract_routes(xml_bytes: bytes) -> list[RouteItem]:
         if not network or not gateway:
             continue
         disabled_raw = (node.findtext("disabled") or "").strip()
-        items.append(RouteItem(
-            network=network,
-            gateway=gateway,
-            descr=(node.findtext("descr") or node.findtext("description") or "").strip(),
-            disabled=disabled_raw in ("1", "true", "yes"),
-        ))
+        items.append(
+            RouteItem(
+                network=network,
+                gateway=gateway,
+                descr=(node.findtext("descr") or node.findtext("description") or "").strip(),
+                disabled=disabled_raw in ("1", "true", "yes"),
+            )
+        )
     return items
 
 
@@ -300,7 +304,7 @@ def compare_routes(
     rows: list[AliasRow] = []
     drift_count = 0
     for key in sorted(all_keys, key=str.lower):
-        network, gateway = key.split("|", 1)
+        network, _gateway = key.split("|", 1)
         cells: list[tuple[str, AliasCell]] = []
         fingerprints_seen: set[str] = set()
         any_absent = False
@@ -319,14 +323,19 @@ def compare_routes(
             ]
             if entry.descr:
                 detail.append(f"descr: {entry.descr}")
-            cells.append((device_id, AliasCell(
-                status="present",
-                type=entry.gateway,
-                content_fingerprint=entry.content_fingerprint,
-                content_count=0,
-                description=entry.descr,
-                content=tuple(detail),
-            )))
+            cells.append(
+                (
+                    device_id,
+                    AliasCell(
+                        status="present",
+                        type=entry.gateway,
+                        content_fingerprint=entry.content_fingerprint,
+                        content_count=0,
+                        description=entry.descr,
+                        content=tuple(detail),
+                    ),
+                )
+            )
             fingerprints_seen.add(entry.content_fingerprint)
         uniform = not any_absent and len(fingerprints_seen) == 1
         if not uniform:
@@ -382,14 +391,21 @@ class RuleItem:
 
     @property
     def content_fingerprint(self) -> str:
-        raw = "\0".join([
-            self.action, self.interface, self.direction, self.protocol,
-            self.source_net, self.source_port,
-            self.destination_net, self.destination_port,
-            self.gateway,
-            "1" if self.enabled else "0",
-            "1" if self.log else "0",
-        ])
+        raw = "\0".join(
+            [
+                self.action,
+                self.interface,
+                self.direction,
+                self.protocol,
+                self.source_net,
+                self.source_port,
+                self.destination_net,
+                self.destination_port,
+                self.gateway,
+                "1" if self.enabled else "0",
+                "1" if self.log else "0",
+            ]
+        )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
     @property
@@ -436,33 +452,37 @@ def extract_rules(xml_bytes: bytes) -> list[RuleItem]:
         src_net = ""
         src_port = ""
         if source is not None:
-            src_net = (source.findtext("network")
-                       or source.findtext("address")
-                       or ("any" if source.find("any") is not None else ""))
+            src_net = (
+                source.findtext("network")
+                or source.findtext("address")
+                or ("any" if source.find("any") is not None else "")
+            )
             src_port = (source.findtext("port") or "").strip()
         dst_net = ""
         dst_port = ""
         if destination is not None:
-            dst_net = (destination.findtext("network")
-                       or destination.findtext("address")
-                       or ("any" if destination.find("any") is not None else ""))
+            dst_net = (
+                destination.findtext("network")
+                or destination.findtext("address")
+                or ("any" if destination.find("any") is not None else "")
+            )
             dst_port = (destination.findtext("port") or "").strip()
-        items.append(RuleItem(
-            description=(node.findtext("descr")
-                         or node.findtext("description")
-                         or "").strip(),
-            enabled=node.findtext("disabled") in (None, "", "0"),
-            action=(node.findtext("type") or "pass").strip(),
-            interface=(node.findtext("interface") or "").strip(),
-            direction=(node.findtext("direction") or "in").strip(),
-            protocol=(node.findtext("protocol") or "any").strip(),
-            source_net=(src_net or "").strip(),
-            source_port=src_port,
-            destination_net=(dst_net or "").strip(),
-            destination_port=dst_port,
-            gateway=(node.findtext("gateway") or "").strip(),
-            log=node.findtext("log") in ("1", "true", "yes"),
-        ))
+        items.append(
+            RuleItem(
+                description=(node.findtext("descr") or node.findtext("description") or "").strip(),
+                enabled=node.findtext("disabled") in (None, "", "0"),
+                action=(node.findtext("type") or "pass").strip(),
+                interface=(node.findtext("interface") or "").strip(),
+                direction=(node.findtext("direction") or "in").strip(),
+                protocol=(node.findtext("protocol") or "any").strip(),
+                source_net=(src_net or "").strip(),
+                source_port=src_port,
+                destination_net=(dst_net or "").strip(),
+                destination_port=dst_port,
+                gateway=(node.findtext("gateway") or "").strip(),
+                log=node.findtext("log") in ("1", "true", "yes"),
+            )
+        )
     return items
 
 
@@ -526,14 +546,19 @@ def compare_rules(
                 detail.append("log: an")
             if not entry.enabled:
                 detail.append("DEAKTIVIERT")
-            cells.append((device_id, AliasCell(
-                status="present",
-                type=entry.action,
-                content_fingerprint=entry.content_fingerprint,
-                content_count=0,
-                description=entry.description,
-                content=tuple(detail),
-            )))
+            cells.append(
+                (
+                    device_id,
+                    AliasCell(
+                        status="present",
+                        type=entry.action,
+                        content_fingerprint=entry.content_fingerprint,
+                        content_count=0,
+                        description=entry.description,
+                        content=tuple(detail),
+                    ),
+                )
+            )
             fingerprints_seen.add(entry.content_fingerprint)
         uniform = not any_absent and len(fingerprints_seen) == 1
         if not uniform:
@@ -613,16 +638,17 @@ def extract_unbound_hosts(xml_bytes: bytes) -> list[UnboundHostItem]:
         if not host and not domain:
             continue
         server = (node.findtext("ip") or node.findtext("server") or "").strip()
-        descr = (node.findtext("descr")
-                 or node.findtext("description") or "").strip()
+        descr = (node.findtext("descr") or node.findtext("description") or "").strip()
         enabled_raw = (node.findtext("enabled") or "1").strip()
-        items.append(UnboundHostItem(
-            host=host,
-            domain=domain,
-            server=server,
-            description=descr,
-            enabled=enabled_raw not in ("0", "false", "no"),
-        ))
+        items.append(
+            UnboundHostItem(
+                host=host,
+                domain=domain,
+                server=server,
+                description=descr,
+                enabled=enabled_raw not in ("0", "false", "no"),
+            )
+        )
     return items
 
 
@@ -669,14 +695,19 @@ def compare_unbound_hosts(
                 detail.append("deaktiviert")
             if entry.description:
                 detail.append(f"descr: {entry.description}")
-            cells.append((device_id, AliasCell(
-                status="present",
-                type=entry.server,
-                content_fingerprint=entry.content_fingerprint,
-                content_count=0,
-                description=entry.description,
-                content=tuple(detail),
-            )))
+            cells.append(
+                (
+                    device_id,
+                    AliasCell(
+                        status="present",
+                        type=entry.server,
+                        content_fingerprint=entry.content_fingerprint,
+                        content_count=0,
+                        description=entry.description,
+                        content=tuple(detail),
+                    ),
+                )
+            )
             fingerprints_seen.add(entry.content_fingerprint)
         uniform = not any_absent and len(fingerprints_seen) == 1
         if not uniform:
@@ -752,15 +783,16 @@ def extract_unbound_domains(xml_bytes: bytes) -> list[UnboundDomainItem]:
         if not domain:
             continue
         server = (node.findtext("ip") or node.findtext("server") or "").strip()
-        descr = (node.findtext("descr")
-                 or node.findtext("description") or "").strip()
+        descr = (node.findtext("descr") or node.findtext("description") or "").strip()
         enabled_raw = (node.findtext("enabled") or "1").strip()
-        items.append(UnboundDomainItem(
-            domain=domain,
-            server=server,
-            description=descr,
-            enabled=enabled_raw not in ("0", "false", "no"),
-        ))
+        items.append(
+            UnboundDomainItem(
+                domain=domain,
+                server=server,
+                description=descr,
+                enabled=enabled_raw not in ("0", "false", "no"),
+            )
+        )
     return items
 
 
@@ -805,14 +837,19 @@ def compare_unbound_domains(
                 detail.append("deaktiviert")
             if entry.description:
                 detail.append(f"descr: {entry.description}")
-            cells.append((device_id, AliasCell(
-                status="present",
-                type=entry.server,
-                content_fingerprint=entry.content_fingerprint,
-                content_count=0,
-                description=entry.description,
-                content=tuple(detail),
-            )))
+            cells.append(
+                (
+                    device_id,
+                    AliasCell(
+                        status="present",
+                        type=entry.server,
+                        content_fingerprint=entry.content_fingerprint,
+                        content_count=0,
+                        description=entry.description,
+                        content=tuple(detail),
+                    ),
+                )
+            )
             fingerprints_seen.add(entry.content_fingerprint)
         uniform = not any_absent and len(fingerprints_seen) == 1
         if not uniform:
@@ -870,10 +907,7 @@ class UnboundForwardItem:
 
     @property
     def content_fingerprint(self) -> str:
-        raw = (
-            f"{self.type}\0{self.verify}\0{self.description}\0"
-            f"{'1' if self.enabled else '0'}"
-        )
+        raw = f"{self.type}\0{self.verify}\0{self.description}\0{'1' if self.enabled else '0'}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
 
@@ -910,18 +944,19 @@ def extract_unbound_forwards(xml_bytes: bytes) -> list[UnboundForwardItem]:
             port = 53
         type_ = (node.findtext("type") or "forward").strip()
         verify = (node.findtext("verify") or "").strip()
-        descr = (node.findtext("descr")
-                 or node.findtext("description") or "").strip()
+        descr = (node.findtext("descr") or node.findtext("description") or "").strip()
         enabled_raw = (node.findtext("enabled") or "1").strip()
-        items.append(UnboundForwardItem(
-            domain=domain,
-            server=server,
-            port=port,
-            type=type_,
-            verify=verify,
-            description=descr,
-            enabled=enabled_raw not in ("0", "false", "no"),
-        ))
+        items.append(
+            UnboundForwardItem(
+                domain=domain,
+                server=server,
+                port=port,
+                type=type_,
+                verify=verify,
+                description=descr,
+                enabled=enabled_raw not in ("0", "false", "no"),
+            )
+        )
     return items
 
 
@@ -969,14 +1004,19 @@ def compare_unbound_forwards(
                 detail.append("deaktiviert")
             if entry.description:
                 detail.append(f"descr: {entry.description}")
-            cells.append((device_id, AliasCell(
-                status="present",
-                type=entry.type,
-                content_fingerprint=entry.content_fingerprint,
-                content_count=0,
-                description=entry.description,
-                content=tuple(detail),
-            )))
+            cells.append(
+                (
+                    device_id,
+                    AliasCell(
+                        status="present",
+                        type=entry.type,
+                        content_fingerprint=entry.content_fingerprint,
+                        content_count=0,
+                        description=entry.description,
+                        content=tuple(detail),
+                    ),
+                )
+            )
             fingerprints_seen.add(entry.content_fingerprint)
         uniform = not any_absent and len(fingerprints_seen) == 1
         if not uniform:

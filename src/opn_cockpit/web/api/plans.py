@@ -105,7 +105,9 @@ def plan_route(
     """Erzeugt einen Plan fuer eine neue statische Route auf den gewaehlten Geraeten."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     # Plausibilitaetspruefung vorab — User soll Fehler im Modal sehen,
     # nicht erst beim Apply gegen die OPNsense.
@@ -156,7 +158,9 @@ def plan_route_update(
     """
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     try:
         parse_cidr(payload.network)
@@ -205,7 +209,9 @@ def plan_route_delete(
     """
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     try:
         parse_cidr(payload.network)
@@ -279,7 +285,9 @@ def plan_rule(
     """
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     spec = _rule_spec_from_request(payload)
@@ -306,7 +314,9 @@ def plan_rule_update(
     """Erzeugt einen Plan fuer einen Filter-Regel-Edit. UUID ist Pflicht."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     spec = _rule_spec_from_request(payload)
@@ -333,7 +343,9 @@ def plan_rule_delete(
     """Erzeugt einen Plan fuer Filter-Regel-Delete. UUID ist Pflicht."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     # Minimal-Spec - der Executor ruft adapter.delete(ident) und ignoriert
@@ -358,8 +370,8 @@ def plan_rule_delete(
 
 def _unbound_spec(payload: object) -> UnboundHostSpec:
     return UnboundHostSpec(
-        host=payload.host,            # type: ignore[attr-defined]
-        domain=payload.domain,        # type: ignore[attr-defined]
+        host=payload.host,  # type: ignore[attr-defined]
+        domain=payload.domain,  # type: ignore[attr-defined]
         server=getattr(payload, "server", ""),
         description=getattr(payload, "description", ""),
         enabled=getattr(payload, "enabled", True),
@@ -378,7 +390,9 @@ def plan_unbound_host(
     """Plan: neuer Unbound-Host-Override auf den gewaehlten Geraeten."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     plan = _generate_and_save_plan(
@@ -404,7 +418,9 @@ def plan_unbound_host_update(
     """Plan: Unbound-Host-Override-Edit. Identitaet = (host, domain)."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     plan = _generate_and_save_plan(
@@ -430,11 +446,15 @@ def plan_unbound_host_delete(
     """Plan: Unbound-Host-Override-Delete. Identitaet = (host, domain)."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     spec = UnboundHostSpec(
-        host=payload.host, domain=payload.domain, server="placeholder",
+        host=payload.host,
+        domain=payload.domain,
+        server="placeholder",
     )
     plan = _generate_and_save_plan(
         session=session,
@@ -454,7 +474,7 @@ def plan_unbound_host_delete(
 
 def _unbound_domain_spec(payload: object) -> UnboundDomainSpec:
     return UnboundDomainSpec(
-        domain=payload.domain,        # type: ignore[attr-defined]
+        domain=payload.domain,  # type: ignore[attr-defined]
         server=getattr(payload, "server", ""),
         description=getattr(payload, "description", ""),
         enabled=getattr(payload, "enabled", True),
@@ -473,7 +493,9 @@ def plan_unbound_domain(
     """Plan: neuer Unbound-Domain-Override auf den gewaehlten Geraeten."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     plan = _generate_and_save_plan(
@@ -499,7 +521,9 @@ def plan_unbound_domain_update(
     """Plan: Unbound-Domain-Override-Edit. Identitaet = domain."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     plan = _generate_and_save_plan(
@@ -525,7 +549,9 @@ def plan_unbound_domain_delete(
     """Plan: Unbound-Domain-Override-Delete. Identitaet = domain."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     spec = UnboundDomainSpec(domain=payload.domain, server="placeholder")
@@ -569,7 +595,9 @@ def plan_unbound_forward(
     """Plan: neuer Unbound-Query-Forward auf den gewaehlten Geraeten."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     plan = _generate_and_save_plan(
@@ -595,7 +623,9 @@ def plan_unbound_forward_update(
     """Plan: Query-Forward-Edit. Identitaet = (domain, server, port)."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     plan = _generate_and_save_plan(
@@ -621,7 +651,9 @@ def plan_unbound_forward_delete(
     """Plan: Query-Forward-Delete. Identitaet = (domain, server, port)."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     devices = _devices_or_404(session, payload.target_device_ids)
     spec = UnboundForwardSpec(
@@ -657,7 +689,9 @@ def plan_alias(
     """Erzeugt einen Plan fuer einen Alias (create oder append)."""
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     # Plausibilitaetspruefung: Name + Typ + typabhaengige Content-Validierung.
     try:
@@ -711,7 +745,9 @@ def plan_alias_update(
     """
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     try:
         validate_alias_name(payload.name)
@@ -762,7 +798,9 @@ def plan_alias_delete(
     """
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.target_device_ids, session.opened.data.devices, session,
+        payload.target_device_ids,
+        session.opened.data.devices,
+        session,
     )
     try:
         validate_alias_name(payload.name)
@@ -804,9 +842,7 @@ def list_plans(session: Session = Depends(require_session)) -> PlanListResponse:
     session.touch()
     store = _plan_store()
     summaries: list[PlanSummary] = []
-    visible_ids = {
-        d.id for d in session.opened.data.devices if device_visible_to(d, session)
-    }
+    visible_ids = {d.id for d in session.opened.data.devices if device_visible_to(d, session)}
     for plan_id in store.list_ids():
         try:
             plan = store.load(plan_id)
@@ -842,9 +878,7 @@ def outstanding(session: Session = Depends(require_session)) -> OutstandingRespo
     counts: dict[str, int] = {}
     plan_lists: dict[str, list[str]] = {}
     name_lookup = {d.id: d.name for d in session.opened.data.devices}
-    visible_ids = {
-        d.id for d in session.opened.data.devices if device_visible_to(d, session)
-    }
+    visible_ids = {d.id for d in session.opened.data.devices if device_visible_to(d, session)}
 
     for plan_id in store.list_ids():
         try:
@@ -862,8 +896,7 @@ def outstanding(session: Session = Depends(require_session)) -> OutstandingRespo
             success_ids: set[str] = set()
         else:
             success_ids = {
-                r.device_id for r in report.results
-                if r.status in {Status.VERIFIED, Status.SKIPPED}
+                r.device_id for r in report.results if r.status in {Status.VERIFIED, Status.SKIPPED}
             }
         for did in plan_devices:
             if did in success_ids:
@@ -901,9 +934,7 @@ def get_plan(
     plan = _load_plan_or_404(plan_id)
     # Plan-Devices muessen alle im User-Scope liegen, sonst 404 (Existenz nicht
     # verraten).
-    visible_ids = {
-        d.id for d in session.opened.data.devices if device_visible_to(d, session)
-    }
+    visible_ids = {d.id for d in session.opened.data.devices if device_visible_to(d, session)}
     plan_device_ids = {a.device.id for a in plan.actions}
     if plan_device_ids and not plan_device_ids.issubset(visible_ids):
         raise HTTPException(
@@ -975,23 +1006,25 @@ def apply_plan(
     require_plan_role(session)
     body_device_ids = payload.device_ids if payload is not None else None
     safety_net_active = bool(payload.safety_net) if payload is not None else False
-    safety_net_window_override = (
-        payload.safety_net_window_s if payload is not None else None
-    )
+    safety_net_window_override = payload.safety_net_window_s if payload is not None else None
     plan = _load_plan_or_404(plan_id)
     target_ids = body_device_ids if body_device_ids else [a.device.id for a in plan.actions]
     require_device_ids_accessible(
-        target_ids, session.opened.data.devices, session,
+        target_ids,
+        session.opened.data.devices,
+        session,
     )
 
     from opn_cockpit.web.safety_net_watcher import SafetyNetWatcher  # noqa: PLC0415
+
     watcher = getattr(request.app.state, "safety_net_watcher", None)
     if not isinstance(watcher, SafetyNetWatcher):
         watcher = None
 
     try:
         plan, full_report = run_apply(
-            session, plan_id,
+            session,
+            plan_id,
             device_ids=body_device_ids,
             safety_net_active=safety_net_active,
             safety_net_window_s=safety_net_window_override,
@@ -1010,8 +1043,11 @@ def apply_plan(
 
     # Auto-Retry-Queue fuer Failed-Devices (v0.7 Mobile-Rack-Feature).
     _auto_arm_retry_for_failures(
-        request=request, session=session, token=token,
-        plan_id=plan_id, report=full_report,
+        request=request,
+        session=session,
+        token=token,
+        plan_id=plan_id,
+        report=full_report,
     )
 
     return _report_to_response(plan, full_report)
@@ -1047,6 +1083,7 @@ def safety_net_status(
     """
     session.touch()
     from opn_cockpit.web.safety_net_watcher import SafetyNetWatcher  # noqa: PLC0415
+
     watcher = getattr(request.app.state, "safety_net_watcher", None)
     if not isinstance(watcher, SafetyNetWatcher):
         return SafetyNetStatusResponse(entries=[])
@@ -1086,6 +1123,7 @@ def safety_net_acknowledge(
     session.touch()
     require_plan_role(session)
     from opn_cockpit.web.safety_net_watcher import SafetyNetWatcher  # noqa: PLC0415
+
     watcher = getattr(request.app.state, "safety_net_watcher", None)
     if not isinstance(watcher, SafetyNetWatcher):
         return
@@ -1114,10 +1152,7 @@ def _auto_arm_retry_for_failures(
     watcher = getattr(request.app.state, "retry_watcher", None)
     if not isinstance(watcher, RetryWatcher):
         return
-    failed_ids = [
-        r.device_id for r in report.results
-        if r.status == Status.FAILED
-    ]
+    failed_ids = [r.device_id for r in report.results if r.status == Status.FAILED]
     if not failed_ids:
         return
     interval_s = max(60, settings.auto_retry_interval_minutes * 60)
@@ -1176,10 +1211,7 @@ def run_apply(
             )
     binding = get_binding(plan.subsystem)
     devices_in_plan = [a.device for a in plan.actions]
-    targets = [
-        HttpTarget(host=d.host, port=d.port, verify=d.tls_verify)
-        for d in devices_in_plan
-    ]
+    targets = [HttpTarget(host=d.host, port=d.port, verify=d.tls_verify) for d in devices_in_plan]
     tuning = _tuning(session)
     audit = get_audit_backend()
     executor = Executor(
@@ -1284,9 +1316,7 @@ def _generate_and_save_plan(
 ) -> Plan:
     binding = get_binding(subsystem)
     tuning = _tuning(session)
-    targets = [
-        HttpTarget(host=d.host, port=d.port, verify=d.tls_verify) for d in devices
-    ]
+    targets = [HttpTarget(host=d.host, port=d.port, verify=d.tls_verify) for d in devices]
     audit = get_audit_backend()
     planner = Planner(
         audit=audit,
@@ -1319,9 +1349,7 @@ def _load_plan_or_404(plan_id: str) -> Plan:
 def _filter_plan_by_devices(plan: Plan, device_ids: list[str]) -> Plan:
     """Liefert einen Plan, der nur Aktionen fuer die genannten Geraete enthaelt."""
     wanted = set(device_ids)
-    filtered: list[PlannedDeviceAction] = [
-        a for a in plan.actions if a.device.id in wanted
-    ]
+    filtered: list[PlannedDeviceAction] = [a for a in plan.actions if a.device.id in wanted]
     return Plan(
         plan_id=plan.plan_id,
         action=plan.action,

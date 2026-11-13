@@ -69,6 +69,4 @@ def _select_one(devices: list[Device], selector: str) -> list[Device]:
     if kind == "name":
         needle = value.lower()
         return [d for d in devices if needle in d.name.lower()]
-    raise SelectorError(
-        f"Unbekannter Selektor-Typ '{kind}'. Erlaubt: {', '.join(KNOWN_KINDS)}."
-    )
+    raise SelectorError(f"Unbekannter Selektor-Typ '{kind}'. Erlaubt: {', '.join(KNOWN_KINDS)}.")

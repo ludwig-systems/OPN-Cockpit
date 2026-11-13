@@ -154,8 +154,7 @@ def append_backup(
     """
     if trigger not in BACKUP_TRIGGERS:
         raise BackupStoreError(
-            f"Unbekannter Backup-Trigger '{trigger}'. Erlaubt: "
-            f"{sorted(BACKUP_TRIGGERS)}",
+            f"Unbekannter Backup-Trigger '{trigger}'. Erlaubt: {sorted(BACKUP_TRIGGERS)}",
         )
     if not content:
         raise BackupStoreError("Leerer Backup-Inhalt verweigert.")
@@ -291,9 +290,7 @@ def prune_backups(
     if not device_dir.exists():
         return []
     records = _read_index(device_dir)
-    pre_apply_pool = [
-        r for r in records if r.trigger in ("manual", "pre-apply", "post-apply")
-    ]
+    pre_apply_pool = [r for r in records if r.trigger in ("manual", "pre-apply", "post-apply")]
     scheduled_pool = [r for r in records if r.trigger == "scheduled"]
 
     keep_pre = _keep_newest(pre_apply_pool, retention_pre_apply)

@@ -38,7 +38,8 @@ class MailMessage:
 
 
 def _build_message(
-    smtp: SmtpSettings, msg: MailMessage,
+    smtp: SmtpSettings,
+    msg: MailMessage,
 ) -> EmailMessage:
     email = EmailMessage()
     email["From"] = smtp.from_addr or (smtp.username or "opn-cockpit@localhost")
@@ -76,7 +77,10 @@ def send_mail(smtp: SmtpSettings, msg: MailMessage) -> None:
         if tls_mode == "tls":
             context = ssl.create_default_context()
             with smtplib.SMTP_SSL(
-                smtp.host, smtp.port, timeout=timeout, context=context,
+                smtp.host,
+                smtp.port,
+                timeout=timeout,
+                context=context,
             ) as client:
                 if smtp.username:
                     client.login(smtp.username, smtp.password)
@@ -105,9 +109,14 @@ def send_mail(smtp: SmtpSettings, msg: MailMessage) -> None:
 
 
 def build_rollout_completion_body(
-    *, rollout_id: str, status: str,
+    *,
+    rollout_id: str,
+    status: str,
     finished_at_iso: str,
-    total: int, ok: int, failed: int, skipped: int,
+    total: int,
+    ok: int,
+    failed: int,
+    skipped: int,
     device_lines: list[str],
     initiator: str = "",
 ) -> str:
@@ -131,11 +140,13 @@ def build_rollout_completion_body(
         lines.extend(device_lines)
     else:
         lines.append("  (keine Geraete-Details verfuegbar)")
-    lines.extend([
-        "",
-        "-- ",
-        "Automatisch generiert von OPN-Cockpit.",
-    ])
+    lines.extend(
+        [
+            "",
+            "-- ",
+            "Automatisch generiert von OPN-Cockpit.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -145,7 +156,10 @@ def send_rollout_completion_mail(
     rollout_id: str,
     status: str,
     finished_at_iso: str,
-    total: int, ok: int, failed: int, skipped: int,
+    total: int,
+    ok: int,
+    failed: int,
+    skipped: int,
     device_lines: list[str],
     recipients: list[str] | None = None,
     initiator: str = "",
@@ -166,9 +180,13 @@ def send_rollout_completion_mail(
         return
     subject = f"[Cockpit] Firmware-Rollout {rollout_id}: {status.upper()}"
     body = build_rollout_completion_body(
-        rollout_id=rollout_id, status=status,
+        rollout_id=rollout_id,
+        status=status,
         finished_at_iso=finished_at_iso,
-        total=total, ok=ok, failed=failed, skipped=skipped,
+        total=total,
+        ok=ok,
+        failed=failed,
+        skipped=skipped,
         device_lines=device_lines,
         initiator=initiator,
     )

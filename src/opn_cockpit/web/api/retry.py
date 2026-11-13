@@ -39,18 +39,21 @@ def retry_status(
     """
     _session, token = pair
     watcher = _watcher(request)
-    return RetryStatusResponse(jobs=[
-        RetryJobResponse(
-            plan_id=s.plan_id,
-            device_ids=s.device_ids,
-            attempts=s.attempts,
-            last_failure_count=s.last_failure_count,
-            started_at_ms=s.started_at_ms,
-            next_attempt_at_ms=s.next_attempt_at_ms,
-            paused=s.paused,
-        )
-        for s in watcher.stats() if s.session_token == token
-    ])
+    return RetryStatusResponse(
+        jobs=[
+            RetryJobResponse(
+                plan_id=s.plan_id,
+                device_ids=s.device_ids,
+                attempts=s.attempts,
+                last_failure_count=s.last_failure_count,
+                started_at_ms=s.started_at_ms,
+                next_attempt_at_ms=s.next_attempt_at_ms,
+                paused=s.paused,
+            )
+            for s in watcher.stats()
+            if s.session_token == token
+        ]
+    )
 
 
 @router.post("/schedule", response_model=RetryJobResponse, status_code=status.HTTP_201_CREATED)
@@ -63,7 +66,9 @@ def schedule_retry(
     session, token = pair
     require_plan_role(session)
     require_device_ids_accessible(
-        payload.device_ids, session.opened.data.devices, session,
+        payload.device_ids,
+        session.opened.data.devices,
+        session,
     )
     watcher = _watcher(request)
     vault_path = session.vault_path

@@ -144,8 +144,12 @@ class Planner:
         Convenience-Wrapper um :meth:`create_bulk_plan` mit ``specs=[spec]``.
         """
         return self.create_bulk_plan(
-            action=action, specs=[spec], devices=devices,
-            adapter=adapter, client=client, action_kind=action_kind,
+            action=action,
+            specs=[spec],
+            devices=devices,
+            adapter=adapter,
+            client=client,
+            action_kind=action_kind,
         )
 
     def create_bulk_plan(
@@ -173,7 +177,11 @@ class Planner:
         for spec in specs:
             all_planned.extend(
                 self._plan_per_device(
-                    devices_list, spec, adapter, client, action_kind,
+                    devices_list,
+                    spec,
+                    adapter,
+                    client,
+                    action_kind,
                 ),
             )
 
@@ -216,7 +224,12 @@ class Planner:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
                 pool.submit(
-                    self._plan_one, device, spec, adapter, client, action_kind,
+                    self._plan_one,
+                    device,
+                    spec,
+                    adapter,
+                    client,
+                    action_kind,
                 )
                 for device in devices
             ]
@@ -242,7 +255,9 @@ class Planner:
             # als NEW mit Hinweis durchreichen; Executor wird das sauber
             # auflösen oder als Fehler melden.
             return _failed_plan_action(
-                device, spec, adapter,
+                device,
+                spec,
+                adapter,
                 summary=f"Pre-Check übersprungen: {exc.context.summary or exc.context.error_kind}",
             )
         ctx = RequestContext(target=target, key=key, secret=secret)
@@ -252,7 +267,9 @@ class Planner:
         except OpnCockpitError as exc:
             reason = exc.context.summary or exc.context.error_kind
             return _failed_plan_action(
-                device, spec, adapter,
+                device,
+                spec,
+                adapter,
                 summary=f"Pre-Check fehlgeschlagen: {reason}",
             )
         if action_kind is ActionKind.UPDATE:

@@ -127,7 +127,8 @@ def verify_code(secret: str, code: str) -> bool:
     if not cleaned.isdigit() or len(cleaned) != TOTP_DIGITS:
         return False
     return pyotp.TOTP(secret, digits=TOTP_DIGITS, interval=TOTP_INTERVAL_S).verify(
-        cleaned, valid_window=TOTP_VALID_WINDOW,
+        cleaned,
+        valid_window=TOTP_VALID_WINDOW,
     )
 
 

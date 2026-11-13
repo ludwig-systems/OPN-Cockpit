@@ -114,8 +114,7 @@ def validate_alias_type(type_value: str) -> str:
     lowered = type_value.strip().lower()
     if lowered not in ALLOWED_ALIAS_TYPES:
         raise ValidationError(
-            f"Unbekannter Alias-Typ '{type_value}'. Erlaubt: "
-            f"{sorted(ALLOWED_ALIAS_TYPES)}",
+            f"Unbekannter Alias-Typ '{type_value}'. Erlaubt: {sorted(ALLOWED_ALIAS_TYPES)}",
             context=make_context(error_kind="alias_type_unknown"),
         )
     return lowered

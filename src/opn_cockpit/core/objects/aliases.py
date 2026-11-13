@@ -122,9 +122,7 @@ def _raise_if_not_saved(body: Any, path: str, ctx: RequestContext) -> None:
         validations = body.get("validations")
         detail = ""
         if isinstance(validations, dict) and validations:
-            detail = "; ".join(
-                f"{k}: {v}" for k, v in validations.items() if v
-            )
+            detail = "; ".join(f"{k}: {v}" for k, v in validations.items() if v)
         msg = (
             f"OPNsense lehnte den Schreibvorgang ab "
             f"(result='{result}'{(': ' + detail) if detail else ''})."
@@ -193,9 +191,7 @@ def _content_from_api(value: Any) -> tuple[str, ...]:
         # Wenn mindestens ein Eintrag selected-Markierung traegt, nur die
         # selected uebernehmen — sonst (z. B. flache Liste ohne selected)
         # alle Keys nehmen.
-        has_selected_flag = any(
-            isinstance(v, dict) and "selected" in v for v in value.values()
-        )
+        has_selected_flag = any(isinstance(v, dict) and "selected" in v for v in value.values())
         if has_selected_flag:
             return tuple(str(k) for k, v in value.items() if _is_selected(v))
         return tuple(str(k) for k in value)
@@ -331,8 +327,11 @@ class AliasAdapter:
         payload = {"alias": self.to_payload(spec)}
         set_path = ALIAS_SET.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", set_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            set_path,
             json=payload,
         )
         try:
@@ -350,8 +349,11 @@ class AliasAdapter:
     ) -> AddOutcome:
         payload = {"alias": self.to_payload(spec)}
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", ALIAS_ADD,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            ALIAS_ADD,
             json=payload,
         )
         try:
@@ -397,8 +399,11 @@ class AliasAdapter:
         payload = {"alias": self.to_payload(spec)}
         set_path = ALIAS_SET.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", set_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            set_path,
             json=payload,
         )
         try:
@@ -423,8 +428,11 @@ class AliasAdapter:
             return AddOutcome(uuid=None, raw_status=0)
         del_path = ALIAS_DEL.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", del_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            del_path,
             json={},
         )
         try:
@@ -446,8 +454,7 @@ class AliasAdapter:
             return Diff(
                 kind=DiffKind.NEW,
                 summary=(
-                    f"Alias '{target.name}' existiert nicht - Update wird "
-                    "beim Apply fehlschlagen."
+                    f"Alias '{target.name}' existiert nicht - Update wird beim Apply fehlschlagen."
                 ),
             )
         same_content = set(current.content) == set(target.content)
@@ -456,9 +463,7 @@ class AliasAdapter:
         if same_content and same_descr and same_type:
             return Diff(
                 kind=DiffKind.SKIP,
-                summary=(
-                    f"Alias '{target.name}' bereits identisch - uebersprungen."
-                ),
+                summary=(f"Alias '{target.name}' bereits identisch - uebersprungen."),
             )
         changes = []
         if not same_type:
@@ -488,9 +493,7 @@ class AliasAdapter:
         if current is None:
             return Diff(
                 kind=DiffKind.SKIP,
-                summary=(
-                    f"Alias '{ident.name}' existiert nicht - bereits weg."
-                ),
+                summary=(f"Alias '{ident.name}' existiert nicht - bereits weg."),
             )
         return Diff(
             kind=DiffKind.DELETE,
@@ -530,8 +533,11 @@ class AliasAdapter:
         payload = {"alias": self.to_payload(merged_spec)}
         set_path = ALIAS_SET.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", set_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            set_path,
             json=payload,
         )
         try:
@@ -568,36 +574,33 @@ class AliasAdapter:
             if current_set == target_set:
                 return Diff(
                     kind=DiffKind.SKIP,
-                    summary=(
-                        f"Alias '{target_spec.name}' bereits identisch — "
-                        "wird übersprungen."
-                    ),
+                    summary=(f"Alias '{target_spec.name}' bereits identisch — wird übersprungen."),
                 )
             added = sorted(target_set - current_set)
             removed = sorted(current_set - target_set)
             parts: list[str] = []
             if added:
-                parts.append(f"+{len(added)} neu ({', '.join(added[:3])}"
-                             + ("…" if len(added) > 3 else "") + ")")
+                parts.append(
+                    f"+{len(added)} neu ({', '.join(added[:3])}"
+                    + ("…" if len(added) > 3 else "")
+                    + ")"
+                )
             if removed:
-                parts.append(f"-{len(removed)} weg ({', '.join(removed[:3])}"
-                             + ("…" if len(removed) > 3 else "") + ")")
+                parts.append(
+                    f"-{len(removed)} weg ({', '.join(removed[:3])}"
+                    + ("…" if len(removed) > 3 else "")
+                    + ")"
+                )
             change = " · ".join(parts) if parts else "nur Beschreibung/Typ"
             return Diff(
                 kind=DiffKind.UPDATE,
-                summary=(
-                    f"Alias '{target_spec.name}' wird auf Master-Zustand "
-                    f"gesetzt: {change}"
-                ),
+                summary=(f"Alias '{target_spec.name}' wird auf Master-Zustand gesetzt: {change}"),
             )
         if target_spec.merge_mode == "create":
             if current_set == target_set:
                 return Diff(
                     kind=DiffKind.SKIP,
-                    summary=(
-                        f"Alias '{target_spec.name}' bereits identisch — "
-                        "wird übersprungen."
-                    ),
+                    summary=(f"Alias '{target_spec.name}' bereits identisch — wird übersprungen."),
                 )
             return Diff(
                 kind=DiffKind.UPDATE,
@@ -614,8 +617,7 @@ class AliasAdapter:
             return Diff(
                 kind=DiffKind.SKIP,
                 summary=(
-                    f"Alle Einträge bereits in '{target_spec.name}' "
-                    "vorhanden — übersprungen."
+                    f"Alle Einträge bereits in '{target_spec.name}' vorhanden — übersprungen."
                 ),
             )
         preview_n = 3
@@ -638,8 +640,11 @@ class AliasAdapter:
         name: str,
     ) -> str | None:
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", ALIAS_SEARCH,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            ALIAS_SEARCH,
             json={"current": 1, "rowCount": -1, "searchPhrase": name},
         )
         try:
@@ -667,8 +672,11 @@ class AliasAdapter:
         uuid: str,
     ) -> AliasSpec:
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "GET", ALIAS_GET.format(uuid=uuid),
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "GET",
+            ALIAS_GET.format(uuid=uuid),
         )
         try:
             data: Any = response.json()
@@ -722,8 +730,11 @@ class AliasesController:
     def reconfigure(self, client: HttpClient, ctx: RequestContext) -> None:
         try:
             client.call(
-                ctx.target, ctx.key, ctx.secret,
-                "POST", ALIAS_RECONFIGURE,
+                ctx.target,
+                ctx.key,
+                ctx.secret,
+                "POST",
+                ALIAS_RECONFIGURE,
                 json={},
                 timeout_override_s=client.tuning.reconfigure_timeout_s,
             )

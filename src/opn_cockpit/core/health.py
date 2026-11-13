@@ -26,12 +26,14 @@ DEFAULT_ICMP_PROBE_TIMEOUT_S = 2.0
 
 # Klassen von Connection-Fehlern, bei denen ein zusaetzlicher ICMP-Probe
 # diagnostisch hilft: Host ist evtl. erreichbar, nur der TCP-Port nicht.
-_PROBE_WORTHY_ERROR_KINDS = frozenset({
-    "connect_timeout",
-    "connect_refused",
-    "connection_error",
-    "network",
-})
+_PROBE_WORTHY_ERROR_KINDS = frozenset(
+    {
+        "connect_timeout",
+        "connect_refused",
+        "connection_error",
+        "network",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)

@@ -40,10 +40,10 @@ DEFAULT_PORT = 443
 
 # TLS-Source-Marker fuers Boot-Log (nicht endpoint-relevant, aber
 # hilfreich in stderr).
-TLS_SOURCE_ENV = "env"                 # Env-Override
-TLS_SOURCE_CUSTOM = "custom"           # settings.json (User-Upload)
-TLS_SOURCE_AUTO = "auto"               # Self-Signed vom Cockpit
-TLS_SOURCE_NONE = "none"               # HTTP-Fallback aktiv
+TLS_SOURCE_ENV = "env"  # Env-Override
+TLS_SOURCE_CUSTOM = "custom"  # settings.json (User-Upload)
+TLS_SOURCE_AUTO = "auto"  # Self-Signed vom Cockpit
+TLS_SOURCE_NONE = "none"  # HTTP-Fallback aktiv
 
 # Restart-Modes (siehe :func:`detect_service_mode`).
 RESTART_MODE_DEV = "dev"
@@ -101,8 +101,9 @@ class WebSettings:
             # AppSettings-Fallback fuer Custom-Cert.
             try:
                 from opn_cockpit.config import AppSettings  # noqa: PLC0415
+
                 app_settings = AppSettings.load()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 app_settings = None
             if app_settings is not None:
                 resolved = app_settings.resolved_tls_paths()

@@ -28,7 +28,6 @@ from fpdf.enums import XPos, YPos
 
 from opn_cockpit.audit.log import AuditRecord
 
-
 REPORT_TITLE = "OPN-Cockpit Audit-Report"
 REPORT_VERSION = 1
 SIG_PREFIX = "OPN-COCKPIT-AUDIT-SIG-v1:"
@@ -63,20 +62,24 @@ def _payload_for_signature(records: list[AuditRecord]) -> bytes:
         f"records={len(records)}",
     ]
     for r in records:
-        parts.append("\x1e".join([
-            r.timestamp_utc or "",
-            r.actor or "",
-            str(r.event) if r.event else "",
-            r.summary or "",
-            r.action or "",
-            r.target_device_id or "",
-            r.target_device_name or "",
-            str(r.target_count) if r.target_count is not None else "",
-            r.status or "",
-            r.error_kind or "",
-            r.failed_phase or "",
-            str(r.duration_ms) if r.duration_ms is not None else "",
-        ]))
+        parts.append(
+            "\x1e".join(
+                [
+                    r.timestamp_utc or "",
+                    r.actor or "",
+                    str(r.event) if r.event else "",
+                    r.summary or "",
+                    r.action or "",
+                    r.target_device_id or "",
+                    r.target_device_name or "",
+                    str(r.target_count) if r.target_count is not None else "",
+                    r.status or "",
+                    r.error_kind or "",
+                    r.failed_phase or "",
+                    str(r.duration_ms) if r.duration_ms is not None else "",
+                ]
+            )
+        )
     return "\x1f".join(parts).encode("utf-8")
 
 
@@ -151,11 +154,11 @@ def render_pdf(
         # rutscht get_y entsprechend - wir setzen y auf das groessere
         # der beiden Werte, damit nichts ueberschrieben wird.
         max_y = pdf.get_y()
-        for _, width, attr in _COLUMNS:
+        for _column in _COLUMNS:
             # No-op-Schleife nur damit max_y konsistent berechnet bleibt;
             # fpdf2 trackt das bereits intern - wir lassen es hier explizit
             # damit die Logik fuer den Reviewer lesbar ist.
-            pass  # noqa: PLW0107
+            pass
         pdf.set_y(max_y)
 
     pdf.ln(4)
@@ -163,8 +166,7 @@ def render_pdf(
 
     # Signatur-Footer
     pdf.set_font("Helvetica", style="B", size=9)
-    pdf.cell(0, 5, "Integritaets-Signatur (zur Verifikation)",
-             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, "Integritaets-Signatur (zur Verifikation)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Courier", size=8)
     pdf.set_x(pdf.l_margin)
     pdf.multi_cell(0, 4, f"SHA256 (Inhalt):  {sha256}", new_x=XPos.LMARGIN)
@@ -173,7 +175,8 @@ def render_pdf(
     pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", style="I", size=7.5)
     pdf.multi_cell(
-        0, 4,
+        0,
+        4,
         "HMAC wird mit dem Cockpit-eigenen Audit-Secret berechnet; ein "
         "Verifizierer mit Zugriff auf das Secret kann den Report "
         "reproduzieren (siehe verify_pdf_signature in pdf_report.py).",
@@ -188,8 +191,9 @@ def render_pdf(
     return bytes(output)
 
 
-def verify_pdf_signature(records: list[AuditRecord], expected_signature: str,
-                         secret: bytes) -> bool:
+def verify_pdf_signature(
+    records: list[AuditRecord], expected_signature: str, secret: bytes
+) -> bool:
     """Pruefen ob die Records zu der erwarteten Signatur passen.
 
     Konstantzeit-Vergleich. Aufrufer extrahiert ``expected_signature`` aus

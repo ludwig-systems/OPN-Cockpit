@@ -81,11 +81,7 @@ def _to_response(user: User) -> UserResponse:
 
 
 def _count_active_admins(store: UserStore) -> int:
-    return sum(
-        1
-        for u in store.list_users()
-        if u.role == "admin" and not u.disabled
-    )
+    return sum(1 for u in store.list_users() if u.role == "admin" and not u.disabled)
 
 
 def _audit(event: AuditEventKind, actor: str, summary: str) -> None:
@@ -174,9 +170,8 @@ def update_user(
     # Last-Admin-Schutz: nicht den letzten aktiven Admin entfernen.
     if target.role == "admin" and not target.disabled:
         admin_change = (
-            (payload.role is not None and payload.role != "admin")
-            or payload.disabled is True
-        )
+            payload.role is not None and payload.role != "admin"
+        ) or payload.disabled is True
         if admin_change and _count_active_admins(store) <= 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -258,10 +253,7 @@ def change_own_password(
     if session.user is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Self-Service-Passwortwechsel ist nur im Multi-User-Mode "
-                "verfuegbar."
-            ),
+            detail=("Self-Service-Passwortwechsel ist nur im Multi-User-Mode verfuegbar."),
         )
     store = _user_store(server)
     # Aktuelles Passwort verifizieren — sonst koennte ein gestohlenes Token
@@ -354,9 +346,7 @@ def _require_multi_user_self(session: Session, store: UserStore) -> User:
     if session.user is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "TOTP-Self-Service ist nur im Multi-User-Mode verfuegbar."
-            ),
+            detail=("TOTP-Self-Service ist nur im Multi-User-Mode verfuegbar."),
         )
     fresh = store.get_user(session.user.id)
     if fresh is None:
@@ -402,10 +392,7 @@ def totp_enroll(
     if user.totp_enabled:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "TOTP ist bereits aktiv. Erst deaktivieren, dann neu "
-                "einrichten."
-            ),
+            detail=("TOTP ist bereits aktiv. Erst deaktivieren, dann neu einrichten."),
         )
     new_secret = totp_mod.generate_secret()
     store.set_totp_secret(user.id, new_secret)
@@ -449,8 +436,7 @@ def totp_confirm(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=(
-                "Code passt nicht. Pruefe Uhrzeit auf dem Authenticator-"
-                "Geraet (+-30s toleriert)."
+                "Code passt nicht. Pruefe Uhrzeit auf dem Authenticator-Geraet (+-30s toleriert)."
             ),
         )
     plaintext_codes = totp_mod.generate_backup_codes()
@@ -535,7 +521,6 @@ def admin_totp_disable(
         AuditEventKind.USER_UPDATED,
         actor=admin.user.username,
         summary=(
-            f"TOTP fuer '{target.username}' durch Admin "
-            f"'{admin.user.username}' zurueckgesetzt."
+            f"TOTP fuer '{target.username}' durch Admin '{admin.user.username}' zurueckgesetzt."
         ),
     )

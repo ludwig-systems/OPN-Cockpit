@@ -60,7 +60,8 @@ def device_visible_to(device: VaultDevice, session: Session) -> bool:
 
 
 def filter_devices_for(
-    devices: Iterable[VaultDevice], session: Session,
+    devices: Iterable[VaultDevice],
+    session: Session,
 ) -> list[VaultDevice]:
     """Filtert eine Geraete-Liste gemaess allowed_tags des Users."""
     return [d for d in devices if device_visible_to(d, session)]
@@ -161,19 +162,16 @@ def require_admin_role(session: Session) -> None:
     if user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"Rolle '{user.role}' darf Trust-Anker nicht aendern — "
-                "admin erforderlich."
-            ),
+            detail=(f"Rolle '{user.role}' darf Trust-Anker nicht aendern — admin erforderlich."),
         )
 
 
 __all__ = [
     "PLAN_ROLES",
     "WRITE_ROLES",
-    "require_admin_role",
     "device_visible_to",
     "filter_devices_for",
+    "require_admin_role",
     "require_device_access",
     "require_device_ids_accessible",
     "require_plan_role",

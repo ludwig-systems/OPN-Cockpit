@@ -68,7 +68,10 @@ def _trust_forwarded_for() -> bool:
     ``false`` haerten wir gegen genau diesen Fall.
     """
     return os.environ.get(_TRUST_FORWARDED_FOR_ENV, "").strip().lower() in {
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     }
 
 
@@ -97,9 +100,7 @@ def _check_rate_limit(request: Request, limiter: RateLimiter) -> None:
     if remaining is not None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"Zu viele Versuche — bitte {int(remaining) + 1} s warten."
-            ),
+            detail=(f"Zu viele Versuche — bitte {int(remaining) + 1} s warten."),
             headers={"Retry-After": str(int(remaining) + 1)},
         )
 
@@ -212,10 +213,7 @@ def login(
     if server.bootstrap_status != "ready":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Server noch nicht ready — Bootstrap-Status: "
-                f"{server.bootstrap_status}."
-            ),
+            detail=(f"Server noch nicht ready — Bootstrap-Status: {server.bootstrap_status}."),
         )
     limiter = _login_limiter(request)
     _check_rate_limit(request, limiter)
@@ -227,10 +225,12 @@ def login(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
-    result = backend.authenticate({
-        "username": payload.username,
-        "password": payload.password,
-    })
+    result = backend.authenticate(
+        {
+            "username": payload.username,
+            "password": payload.password,
+        }
+    )
     if result is None:
         _audit_login_failed_user(payload.username)
         limiter.register_failure(client_key)
@@ -243,7 +243,8 @@ def login(
         # Schritt 1 erfolgreich, aber wir bauen noch keine Session - der
         # User muss Schritt 2 (TOTP-Code) bestehen.
         challenge = totp_mod.issue_challenge(
-            user.id, _challenge_secret(request),
+            user.id,
+            _challenge_secret(request),
         )
         # Login-Versuch zaehlt noch nicht als Erfolg, aber zaehlen wir
         # auch nicht als Fehler — sonst koennte ein Angreifer den
@@ -354,6 +355,7 @@ def login_totp(
         AuthResult,
         UserDbAuthBackend,
     )
+
     if not isinstance(backend, UserDbAuthBackend):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

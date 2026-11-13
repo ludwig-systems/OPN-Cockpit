@@ -181,7 +181,9 @@ class ObjectAdapter(Protocol[TSpec, TIdent]):
         """
 
     def diff_for_update(
-        self, current: TSpec | None, target_spec: TSpec,
+        self,
+        current: TSpec | None,
+        target_spec: TSpec,
     ) -> Diff:
         """Diff fuer UPDATE-Plaene. Adapter ohne Update-Support werfen
         ``NotImplementedError``.
@@ -193,7 +195,9 @@ class ObjectAdapter(Protocol[TSpec, TIdent]):
         """
 
     def diff_for_delete(
-        self, current: TSpec | None, ident: TIdent,
+        self,
+        current: TSpec | None,
+        ident: TIdent,
     ) -> Diff:
         """Diff fuer DELETE-Plaene. Adapter ohne Delete-Support werfen
         ``NotImplementedError``.

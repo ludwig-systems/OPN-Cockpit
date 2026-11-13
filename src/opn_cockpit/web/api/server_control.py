@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -94,16 +94,12 @@ def restart_server(
         AuditEventKind.SERVER_RESTARTED,
         actor=actor,
         action="server_restart_requested",
-        summary=(
-            f"Server-Restart ausgeloest ({mode}). Prozess kommt in ~5 s wieder hoch."
-        ),
+        summary=(f"Server-Restart ausgeloest ({mode}). Prozess kommt in ~5 s wieder hoch."),
     )
     return {
         "status": "scheduled",
         "mode": mode,
-        "message": (
-            "Server-Restart eingeleitet. Bitte in ~5 Sekunden neu laden."
-        ),
+        "message": ("Server-Restart eingeleitet. Bitte in ~5 Sekunden neu laden."),
     }
 
 
@@ -146,7 +142,7 @@ def _spawn_restart(mode: str) -> None:
             # Kein direkter Import von subprocess.DETACHED_PROCESS damit
             # der Modul-Import auf Linux nicht crashed.
             creationflags = 0x00000008 | 0x00000200  # DETACHED | NEW_GROUP
-        subprocess.Popen(  # noqa: S603
+        subprocess.Popen(
             [
                 "cmd",
                 "/c",
@@ -162,7 +158,7 @@ def _spawn_restart(mode: str) -> None:
         # sh -c "sleep 2 && systemctl restart <name>"
         # start_new_session damit der Prozess unabhaengig vom uvicorn
         # weiterlaeuft, auch wenn der uvicorn im Zuge des Restarts stirbt.
-        subprocess.Popen(  # noqa: S603
+        subprocess.Popen(
             ["sh", "-c", f"sleep 2 && systemctl restart {name}"],
             start_new_session=True,
             close_fds=True,

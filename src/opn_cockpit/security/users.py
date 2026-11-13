@@ -110,8 +110,7 @@ class UserStore:
             cols = {row[1] for row in self._conn.execute("PRAGMA table_info(users)")}
             if "must_change_password" not in cols:
                 self._conn.execute(
-                    "ALTER TABLE users ADD COLUMN must_change_password "
-                    "INTEGER NOT NULL DEFAULT 0"
+                    "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
                 )
             # TOTP-Felder (v0.8). totp_secret bleibt leer bis Enrollment.
             # totp_backup_codes_json haelt eine JSON-Liste von SHA-256-
@@ -216,14 +215,16 @@ class UserStore:
     def get_user(self, user_id: int) -> User | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM users WHERE id = ?", (user_id,),
+                "SELECT * FROM users WHERE id = ?",
+                (user_id,),
             ).fetchone()
         return _row_to_user(row) if row else None
 
     def get_user_by_name(self, username: str) -> User | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM users WHERE username = ?", (username.strip(),),
+                "SELECT * FROM users WHERE username = ?",
+                (username.strip(),),
             ).fetchone()
         return _row_to_user(row) if row else None
 
@@ -284,8 +285,7 @@ class UserStore:
         password_hash = self._hasher.hash(new_password)
         with self._lock, self._conn:
             cursor = self._conn.execute(
-                "UPDATE users SET password_hash = ?, must_change_password = 0 "
-                "WHERE id = ?",
+                "UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?",
                 (password_hash, user_id),
             )
         if cursor.rowcount == 0:
@@ -294,7 +294,8 @@ class UserStore:
     def delete_user(self, user_id: int) -> bool:
         with self._lock, self._conn:
             cursor = self._conn.execute(
-                "DELETE FROM users WHERE id = ?", (user_id,),
+                "DELETE FROM users WHERE id = ?",
+                (user_id,),
             )
         return cursor.rowcount > 0
 
@@ -304,7 +305,8 @@ class UserStore:
         """Liefert das aktuelle TOTP-Secret (leer wenn nicht gesetzt)."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT totp_secret FROM users WHERE id = ?", (user_id,),
+                "SELECT totp_secret FROM users WHERE id = ?",
+                (user_id,),
             ).fetchone()
         if row is None:
             return ""
@@ -335,8 +337,7 @@ class UserStore:
         payload = json.dumps(backup_code_hashes)
         with self._lock, self._conn:
             cursor = self._conn.execute(
-                "UPDATE users SET totp_enabled = 1, totp_backup_codes_json = ? "
-                "WHERE id = ?",
+                "UPDATE users SET totp_enabled = 1, totp_backup_codes_json = ? WHERE id = ?",
                 (payload, user_id),
             )
         if cursor.rowcount == 0:

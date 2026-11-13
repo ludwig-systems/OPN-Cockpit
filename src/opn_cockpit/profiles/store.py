@@ -150,9 +150,7 @@ class ProfileStore:
 # ---------------------------------------------------------------------------
 
 
-_FORBIDDEN_SPEC_KEYS = frozenset(
-    {"api_key", "api_secret", "password", "token", "authorization"}
-)
+_FORBIDDEN_SPEC_KEYS = frozenset({"api_key", "api_secret", "password", "token", "authorization"})
 
 
 def _sanitize_spec(spec: dict[str, Any]) -> dict[str, Any]:

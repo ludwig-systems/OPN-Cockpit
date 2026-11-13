@@ -62,10 +62,24 @@ select = [
     "PL",            # pylint subset
     "RUF",           # ruff-specific
 ]
-ignore = ["PLR0913"]  # many arguments often legit for adapter signatures
+ignore = [
+    "PLR0913",  # many arguments often legit for adapter signatures
+    # Die folgenden Regeln sind mit neueren ruff-Versionen dazugekommen. Sie
+    # verlangen allesamt einen echten Umbau des Codes, nicht eine Stil-
+    # korrektur — deshalb werden sie hier bewusst nicht erzwungen, statt sie
+    # an ueber 50 Einzelstellen per `# noqa` zu uebergehen. Ein Umbau der
+    # betroffenen Funktionen ist eine eigene Aufgabe.
+    "PLR0911",  # zu viele return-Statements
+    "PLR0912",  # zu viele Verzweigungen
+    "PLR0915",  # zu viele Statements
+    "PLR0917",  # zu viele positionsbezogene Argumente
+    "PLR2004",  # "magische" Werte im Vergleich (HTTP-Codes, Ports, Fristen)
+]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["PLR2004", "S101"]
+# Tests importieren bewusst erst im Testfall (Monkeypatch-Reihenfolge,
+# absichtlich fehlschlagende Importe) — PLC0415 ist dort kein Befund.
+"tests/**" = ["S101", "PLC0415"]
 # build_parser ist intentional eine lange Aufzählung von Sub-Commands.
 "src/opn_cockpit/cli/main.py" = ["PLR0915"]
 # FastAPI nutzt `Depends(...)` als Default-Argument — Standard-Pattern.

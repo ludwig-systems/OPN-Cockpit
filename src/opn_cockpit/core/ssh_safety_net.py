@@ -38,6 +38,7 @@ Sicherheits-Annahmen:
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import re
@@ -83,8 +84,8 @@ class DisarmResult:
 class MarkerResult:
     """Resultat eines Marker-Checks."""
 
-    success: bool          # SSH war erreichbar; das sagt nichts ueber den Marker
-    fired: bool            # True = Marker gefunden = Daemon hat ausgeloest
+    success: bool  # SSH war erreichbar; das sagt nichts ueber den Marker
+    fired: bool  # True = Marker gefunden = Daemon hat ausgeloest
     summary: str
 
 
@@ -174,8 +175,7 @@ def _connect(
             continue
     if private_key is None:
         return None, (
-            "SSH-Private-Key nicht lesbar - akzeptierte Formate: "
-            "Ed25519, ECDSA, RSA, DSA (PEM)."
+            "SSH-Private-Key nicht lesbar - akzeptierte Formate: Ed25519, ECDSA, RSA, DSA (PEM)."
         )
 
     client = paramiko.SSHClient()
@@ -207,7 +207,7 @@ def _exec(client, command: str, timeout_s: float) -> tuple[int, str, str]:  # ty
     Wirft keine Exception bei rc != 0 - der Aufrufer entscheidet was ein
     Fehler ist.
     """
-    stdin, stdout, stderr = client.exec_command(command, timeout=timeout_s)
+    _stdin, stdout, stderr = client.exec_command(command, timeout=timeout_s)
     out = stdout.read().decode("utf-8", errors="replace")
     err = stderr.read().decode("utf-8", errors="replace")
     rc = stdout.channel.recv_exit_status()
@@ -318,7 +318,7 @@ def arm(
     except ValueError as exc:
         return ArmResult(success=False, summary=str(exc))
 
-    safety_xml_path, pid_file_path, _ = _paths(jobid)
+    safety_xml_path, _pid_file_path, _ = _paths(jobid)
 
     client, err = _connect(device, connect_timeout_s=connect_timeout_s)
     if client is None:
@@ -332,7 +332,7 @@ def arm(
         # 1) SFTP push der Pre-Apply-XML
         try:
             sftp = client.open_sftp()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return ArmResult(
                 success=False,
                 summary=f"SFTP-Channel nicht oeffenbar: {exc}",
@@ -342,20 +342,20 @@ def arm(
                 with sftp.file(safety_xml_path, "wb") as f:
                     f.write(pre_apply_xml)
                 sftp.chmod(safety_xml_path, 0o600)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 return ArmResult(
                     success=False,
                     summary=f"Safety-XML schreiben fehlgeschlagen: {exc}",
                 )
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 sftp.close()
-            except Exception:  # noqa: BLE001, S110
-                pass
 
         # 2) Daemon starten
         daemon_cmd = _build_daemon_cmd(
-            jobid=jobid, window_s=window_s, dry_marker_only=dry_marker_only,
+            jobid=jobid,
+            window_s=window_s,
+            dry_marker_only=dry_marker_only,
         )
         rc, out, daemon_err = _exec(client, daemon_cmd, command_timeout_s)
         if rc != 0:
@@ -372,7 +372,9 @@ def arm(
 
         # 3) PID verifizieren
         rc_v, verify_out, verify_err = _exec(
-            client, _build_verify_cmd(jobid), command_timeout_s,
+            client,
+            _build_verify_cmd(jobid),
+            command_timeout_s,
         )
         verify_out = verify_out.strip()
         if rc_v != 0 or not verify_out.startswith("pid="):
@@ -409,10 +411,8 @@ def arm(
             pid=pid,
         )
     finally:
-        try:
+        with contextlib.suppress(Exception):
             client.close()
-        except Exception:  # noqa: BLE001, S110
-            pass
 
 
 def disarm(
@@ -436,20 +436,15 @@ def disarm(
         if rc != 0:
             return DisarmResult(
                 success=False,
-                summary=(
-                    f"Disarm-Kommando rc={rc}: "
-                    f"{(err_out or out).strip()[:160]}"
-                ),
+                summary=(f"Disarm-Kommando rc={rc}: {(err_out or out).strip()[:160]}"),
             )
         return DisarmResult(
             success=True,
             summary=f"Safety-Net disarmed (jobid={jobid}).",
         )
     finally:
-        try:
+        with contextlib.suppress(Exception):
             client.close()
-        except Exception:  # noqa: BLE001, S110
-            pass
 
 
 def check_marker(
@@ -478,16 +473,21 @@ def check_marker(
     client, err = _connect(device, connect_timeout_s=connect_timeout_s)
     if client is None:
         return MarkerResult(
-            success=False, fired=False, summary=err or "SSH-Connect fehlgeschlagen.",
+            success=False,
+            fired=False,
+            summary=err or "SSH-Connect fehlgeschlagen.",
         )
     try:
         rc, out, err_out = _exec(
-            client, _build_marker_check_cmd(jobid), command_timeout_s,
+            client,
+            _build_marker_check_cmd(jobid),
+            command_timeout_s,
         )
         out_clean = out.strip()
         if rc != 0:
             return MarkerResult(
-                success=False, fired=False,
+                success=False,
+                fired=False,
                 summary=f"Marker-Check rc={rc}: {(err_out or out).strip()[:160]}",
             )
         fired = out_clean == "fired"
@@ -499,10 +499,8 @@ def check_marker(
             summary="Marker gefunden." if fired else "Kein Marker - alles sauber.",
         )
     finally:
-        try:
+        with contextlib.suppress(Exception):
             client.close()
-        except Exception:  # noqa: BLE001, S110
-            pass
 
 
 def run_test_loop(
@@ -524,7 +522,7 @@ def run_test_loop(
     Test pro Geraet, dafuer sehr klar in /var/log auffindbar.
     """
     jobid = "cockpit-test"
-    dummy_xml = b"<?xml version=\"1.0\"?>\n<opncockpit_safety_net_test/>\n"
+    dummy_xml = b'<?xml version="1.0"?>\n<opncockpit_safety_net_test/>\n'
 
     # ARM
     arm_res = arm(

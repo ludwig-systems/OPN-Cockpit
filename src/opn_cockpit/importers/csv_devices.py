@@ -51,8 +51,7 @@ def parse_devices_csv(path: Path | str) -> DeviceCsvImportResult:
 
     result = DeviceCsvImportResult()
     reader = csv.DictReader(
-        line for line in text.splitlines()
-        if line.strip() and not line.strip().startswith("#")
+        line for line in text.splitlines() if line.strip() and not line.strip().startswith("#")
     )
     if reader.fieldnames is None:
         result.errors.append("CSV ist leer oder enthaelt keinen Header.")
@@ -60,19 +59,13 @@ def parse_devices_csv(path: Path | str) -> DeviceCsvImportResult:
     headers = [h.strip().lower() for h in reader.fieldnames]
     missing = [col for col in REQUIRED_COLUMNS if col not in headers]
     if missing:
-        result.errors.append(
-            f"Fehlende Pflicht-Spalten: {', '.join(missing)}"
-        )
+        result.errors.append(f"Fehlende Pflicht-Spalten: {', '.join(missing)}")
         return result
 
     norm_keys = {orig: orig.strip().lower() for orig in reader.fieldnames}
 
     for row_num, row in enumerate(reader, start=2):
-        normalized = {
-            norm_keys[k]: (v or "").strip()
-            for k, v in row.items()
-            if k
-        }
+        normalized = {norm_keys[k]: (v or "").strip() for k, v in row.items() if k}
         try:
             device = _row_to_device(normalized)
         except ValueError as exc:

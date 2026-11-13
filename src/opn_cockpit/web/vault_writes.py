@@ -67,7 +67,9 @@ def persist_session_vault(
         if is_multi_user:
             assert isinstance(server_state, ServerState)
             new_opened = server_state.save_vault_central(
-                session.opened, vault_path, password,
+                session.opened,
+                vault_path,
+                password,
             )
         else:
             new_opened = save_vault(vault_path, session.opened, password)

@@ -14,7 +14,7 @@ from __future__ import annotations
 import contextlib
 import tempfile
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import (
     APIRouter,
@@ -52,6 +52,11 @@ from opn_cockpit.web.server_state import ServerState
 from opn_cockpit.web.vault_path import VaultPathError, resolve_safe_vault_path
 from opn_cockpit.web.vault_writes import persist_session_vault
 
+if TYPE_CHECKING:
+    # Nur fuer die Rueckgabe-Annotation. Zur Laufzeit wird Response bewusst
+    # erst in der Funktion importiert — das Verhalten bleibt damit unveraendert.
+    from fastapi.responses import Response
+
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MiB
@@ -74,7 +79,8 @@ _EXAMPLE_CSV = (
 
 _EXAMPLE_JSON = (
     "{\n"
-    '  "_comment": "OPN-Cockpit Geraete-Import — JSON-Vorlage. Pflichtfelder: name, host, api_key, api_secret.",\n'
+    '  "_comment": "OPN-Cockpit Geraete-Import — JSON-Vorlage. '
+    'Pflichtfelder: name, host, api_key, api_secret.",\n'
     '  "devices": [\n'
     "    {\n"
     '      "name": "HQ Berlin",\n'
@@ -102,10 +108,11 @@ _EXAMPLE_JSON = (
 
 
 @router.get("/examples/devices.csv", include_in_schema=False)
-def example_devices_csv() -> "Response":
+def example_devices_csv() -> Response:
     """Liefert die CSV-Vorlage zum Download. Anonyme Endpoint, weil kein
     Tresor-Zugriff noetig."""
-    from fastapi.responses import Response
+    from fastapi.responses import Response  # noqa: PLC0415
+
     return Response(
         content=_EXAMPLE_CSV,
         media_type="text/csv; charset=utf-8",
@@ -116,9 +123,10 @@ def example_devices_csv() -> "Response":
 
 
 @router.get("/examples/devices.json", include_in_schema=False)
-def example_devices_json() -> "Response":
+def example_devices_json() -> Response:
     """Liefert die JSON-Vorlage zum Download."""
-    from fastapi.responses import Response
+    from fastapi.responses import Response  # noqa: PLC0415
+
     return Response(
         content=_EXAMPLE_JSON,
         media_type="application/json; charset=utf-8",
@@ -211,7 +219,8 @@ async def _parse_upload_or_400(file: UploadFile, fmt: str) -> list[VaultDevice]:
 
 
 def _filter_new(
-    session: Session, parsed: list[VaultDevice],
+    session: Session,
+    parsed: list[VaultDevice],
 ) -> tuple[list[VaultDevice], list[str]]:
     existing = {d.name.strip().lower() for d in session.opened.data.devices}
     to_add: list[VaultDevice] = []
@@ -249,7 +258,9 @@ async def _stage_upload(file: UploadFile, *, suffix: str) -> Path:
             detail=f"Datei zu gross (>{MAX_UPLOAD_BYTES // 1024} KiB).",
         )
     with tempfile.NamedTemporaryFile(
-        mode="wb", suffix=suffix, delete=False,
+        mode="wb",
+        suffix=suffix,
+        delete=False,
     ) as tmp:
         tmp.write(raw)
         tmp_name = tmp.name

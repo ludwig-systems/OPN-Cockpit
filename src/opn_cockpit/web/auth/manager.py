@@ -71,7 +71,8 @@ class SessionManager:
             token = secrets.token_urlsafe(TOKEN_BYTES)
             session = make_session(result)
             self._sessions[token] = _SessionEntry(
-                session=session, vault_path=result.vault_path,
+                session=session,
+                vault_path=result.vault_path,
             )
             return token, session
 
@@ -152,9 +153,7 @@ class SessionManager:
         """
         n = 0
         with self._lock:
-            tokens_to_remove = [
-                t for t in self._sessions if t != keep_token
-            ]
+            tokens_to_remove = [t for t in self._sessions if t != keep_token]
             for t in tokens_to_remove:
                 entry = self._sessions.pop(t)
                 entry.session.lock()

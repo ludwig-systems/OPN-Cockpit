@@ -87,7 +87,7 @@ class UnboundHostSpec:
 
     host: str
     domain: str
-    server: str = ""        # Ziel-IP (IPv4 oder IPv6)
+    server: str = ""  # Ziel-IP (IPv4 oder IPv6)
     description: str = ""
     enabled: bool = True
 
@@ -230,8 +230,11 @@ class UnboundHostAdapter:
     ) -> AddOutcome:
         payload = {"host": self.to_payload(spec)}
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", UNBOUND_HOST_ADD,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            UNBOUND_HOST_ADD,
             json=payload,
         )
         _raise_if_saved_failed(response, UNBOUND_HOST_ADD, ctx)
@@ -255,8 +258,7 @@ class UnboundHostAdapter:
         existing_uuid = self._search_uuid(client, ctx, spec.to_identity())
         if existing_uuid is None:
             raise ValidationError(
-                f"Host-Override {spec.host}.{spec.domain} existiert nicht - "
-                "Update nicht moeglich.",
+                f"Host-Override {spec.host}.{spec.domain} existiert nicht - Update nicht moeglich.",
                 context=make_context(
                     host=ctx.target.host,
                     port=ctx.target.port,
@@ -268,8 +270,11 @@ class UnboundHostAdapter:
         payload = {"host": self.to_payload(spec)}
         set_path = UNBOUND_HOST_SET.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", set_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            set_path,
             json=payload,
         )
         _raise_if_saved_failed(response, set_path, ctx)
@@ -286,8 +291,11 @@ class UnboundHostAdapter:
             return AddOutcome(uuid=None, raw_status=0)
         del_path = UNBOUND_HOST_DEL.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", del_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            del_path,
             json={},
         )
         _raise_if_saved_failed(response, del_path, ctx)
@@ -296,7 +304,9 @@ class UnboundHostAdapter:
     # ----- diff -----
 
     def diff(
-        self, current: UnboundHostSpec | None, target_spec: UnboundHostSpec,
+        self,
+        current: UnboundHostSpec | None,
+        target_spec: UnboundHostSpec,
     ) -> Diff:
         if current is None:
             return Diff(
@@ -327,7 +337,9 @@ class UnboundHostAdapter:
         )
 
     def diff_for_update(
-        self, current: UnboundHostSpec | None, target_spec: UnboundHostSpec,
+        self,
+        current: UnboundHostSpec | None,
+        target_spec: UnboundHostSpec,
     ) -> Diff:
         if current is None:
             return Diff(
@@ -364,14 +376,15 @@ class UnboundHostAdapter:
         )
 
     def diff_for_delete(
-        self, current: UnboundHostSpec | None, ident: UnboundHostIdentity,
+        self,
+        current: UnboundHostSpec | None,
+        ident: UnboundHostIdentity,
     ) -> Diff:
         if current is None:
             return Diff(
                 kind=DiffKind.SKIP,
                 summary=(
-                    f"Host-Override {ident.host}.{ident.domain} existiert "
-                    "nicht - bereits weg."
+                    f"Host-Override {ident.host}.{ident.domain} existiert nicht - bereits weg."
                 ),
             )
         return Diff(
@@ -388,8 +401,11 @@ class UnboundHostAdapter:
         ident: UnboundHostIdentity,
     ) -> str | None:
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", UNBOUND_HOST_SEARCH,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            UNBOUND_HOST_SEARCH,
             json={"current": 1, "rowCount": -1},
         )
         try:
@@ -420,8 +436,11 @@ class UnboundHostAdapter:
         uuid: str,
     ) -> UnboundHostSpec:
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "GET", UNBOUND_HOST_GET.format(uuid=uuid),
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "GET",
+            UNBOUND_HOST_GET.format(uuid=uuid),
         )
         try:
             data: Any = response.json()
@@ -447,14 +466,20 @@ class UnboundController:
     def reconfigure(self, client: HttpClient, ctx: RequestContext) -> None:
         try:
             client.call(
-                ctx.target, ctx.key, ctx.secret,
-                "POST", UNBOUND_RECONFIGURE,
+                ctx.target,
+                ctx.key,
+                ctx.secret,
+                "POST",
+                UNBOUND_RECONFIGURE,
                 json={},
                 timeout_override_s=client.tuning.reconfigure_timeout_s,
             )
         except (
-            UnreachableError, AuthError, ValidationError,
-            ApiError, EgressDeniedError,
+            UnreachableError,
+            AuthError,
+            ValidationError,
+            ApiError,
+            EgressDeniedError,
         ) as exc:
             raise ReconfigureError(
                 "Reconfigure des Unbound-Subsystems fehlgeschlagen.",
@@ -498,7 +523,7 @@ class UnboundDomainSpec:
     """Soll-Beschreibung eines Domain-Override-Eintrags."""
 
     domain: str
-    server: str = ""        # Ziel-Resolver (IPv4/IPv6)
+    server: str = ""  # Ziel-Resolver (IPv4/IPv6)
     description: str = ""
     enabled: bool = True
 
@@ -584,8 +609,11 @@ class UnboundDomainAdapter:
     ) -> AddOutcome:
         payload = {"domain": self.to_payload(spec)}
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", UNBOUND_DOMAIN_ADD,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            UNBOUND_DOMAIN_ADD,
             json=payload,
         )
         _raise_if_saved_failed(response, UNBOUND_DOMAIN_ADD, ctx)
@@ -609,8 +637,7 @@ class UnboundDomainAdapter:
         existing_uuid = self._search_uuid(client, ctx, spec.to_identity())
         if existing_uuid is None:
             raise ValidationError(
-                f"Domain-Override {spec.domain} existiert nicht - "
-                "Update nicht moeglich.",
+                f"Domain-Override {spec.domain} existiert nicht - Update nicht moeglich.",
                 context=make_context(
                     host=ctx.target.host,
                     port=ctx.target.port,
@@ -622,8 +649,11 @@ class UnboundDomainAdapter:
         payload = {"domain": self.to_payload(spec)}
         set_path = UNBOUND_DOMAIN_SET.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", set_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            set_path,
             json=payload,
         )
         _raise_if_saved_failed(response, set_path, ctx)
@@ -640,8 +670,11 @@ class UnboundDomainAdapter:
             return AddOutcome(uuid=None, raw_status=0)
         del_path = UNBOUND_DOMAIN_DEL.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", del_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            del_path,
             json={},
         )
         _raise_if_saved_failed(response, del_path, ctx)
@@ -650,15 +683,14 @@ class UnboundDomainAdapter:
     # ----- diff -----
 
     def diff(
-        self, current: UnboundDomainSpec | None, target_spec: UnboundDomainSpec,
+        self,
+        current: UnboundDomainSpec | None,
+        target_spec: UnboundDomainSpec,
     ) -> Diff:
         if current is None:
             return Diff(
                 kind=DiffKind.NEW,
-                summary=(
-                    f"Neuer Domain-Override "
-                    f"{target_spec.domain} -> {target_spec.server}"
-                ),
+                summary=(f"Neuer Domain-Override {target_spec.domain} -> {target_spec.server}"),
             )
         same_server = current.server == target_spec.server
         same_descr = (current.description or "") == (target_spec.description or "")
@@ -667,8 +699,7 @@ class UnboundDomainAdapter:
             return Diff(
                 kind=DiffKind.SKIP,
                 summary=(
-                    f"Domain-Override {target_spec.domain} bereits "
-                    "identisch - uebersprungen."
+                    f"Domain-Override {target_spec.domain} bereits identisch - uebersprungen."
                 ),
             )
         return Diff(
@@ -681,7 +712,9 @@ class UnboundDomainAdapter:
         )
 
     def diff_for_update(
-        self, current: UnboundDomainSpec | None, target_spec: UnboundDomainSpec,
+        self,
+        current: UnboundDomainSpec | None,
+        target_spec: UnboundDomainSpec,
     ) -> Diff:
         if current is None:
             return Diff(
@@ -698,8 +731,7 @@ class UnboundDomainAdapter:
             return Diff(
                 kind=DiffKind.SKIP,
                 summary=(
-                    f"Domain-Override {target_spec.domain} bereits "
-                    "identisch - uebersprungen."
+                    f"Domain-Override {target_spec.domain} bereits identisch - uebersprungen."
                 ),
             )
         changes = []
@@ -711,22 +743,18 @@ class UnboundDomainAdapter:
             changes.append("Beschreibung geaendert")
         return Diff(
             kind=DiffKind.UPDATE,
-            summary=(
-                f"Domain-Override {target_spec.domain} aktualisieren "
-                f"({', '.join(changes)})"
-            ),
+            summary=(f"Domain-Override {target_spec.domain} aktualisieren ({', '.join(changes)})"),
         )
 
     def diff_for_delete(
-        self, current: UnboundDomainSpec | None, ident: UnboundDomainIdentity,
+        self,
+        current: UnboundDomainSpec | None,
+        ident: UnboundDomainIdentity,
     ) -> Diff:
         if current is None:
             return Diff(
                 kind=DiffKind.SKIP,
-                summary=(
-                    f"Domain-Override {ident.domain} existiert nicht - "
-                    "bereits weg."
-                ),
+                summary=(f"Domain-Override {ident.domain} existiert nicht - bereits weg."),
             )
         return Diff(
             kind=DiffKind.DELETE,
@@ -742,8 +770,11 @@ class UnboundDomainAdapter:
         ident: UnboundDomainIdentity,
     ) -> str | None:
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", UNBOUND_DOMAIN_SEARCH,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            UNBOUND_DOMAIN_SEARCH,
             json={"current": 1, "rowCount": -1},
         )
         try:
@@ -773,8 +804,11 @@ class UnboundDomainAdapter:
         uuid: str,
     ) -> UnboundDomainSpec:
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "GET", UNBOUND_DOMAIN_GET.format(uuid=uuid),
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "GET",
+            UNBOUND_DOMAIN_GET.format(uuid=uuid),
         )
         try:
             data: Any = response.json()
@@ -800,14 +834,20 @@ class UnboundDomainsController:
     def reconfigure(self, client: HttpClient, ctx: RequestContext) -> None:
         try:
             client.call(
-                ctx.target, ctx.key, ctx.secret,
-                "POST", UNBOUND_RECONFIGURE,
+                ctx.target,
+                ctx.key,
+                ctx.secret,
+                "POST",
+                UNBOUND_RECONFIGURE,
                 json={},
                 timeout_override_s=client.tuning.reconfigure_timeout_s,
             )
         except (
-            UnreachableError, AuthError, ValidationError,
-            ApiError, EgressDeniedError,
+            UnreachableError,
+            AuthError,
+            ValidationError,
+            ApiError,
+            EgressDeniedError,
         ) as exc:
             raise ReconfigureError(
                 "Reconfigure des Unbound-Subsystems fehlgeschlagen.",
@@ -860,17 +900,19 @@ _FORWARD_ALLOWED_TYPES: tuple[str, ...] = ("forward", "dot")
 class UnboundForwardSpec:
     """Soll-Beschreibung eines Query-Forwards."""
 
-    domain: str = ""                       # leer = "alle Queries"
-    server: str = ""                       # Upstream-IP
-    port: int = _FORWARD_DEFAULT_PORT      # 53 (plain), 853 (DoT), ...
-    type: str = _FORWARD_TYPE_FORWARD      # "forward" oder "dot"
-    verify: str = ""                       # DoT: Server-CN fuer Cert-Verify
+    domain: str = ""  # leer = "alle Queries"
+    server: str = ""  # Upstream-IP
+    port: int = _FORWARD_DEFAULT_PORT  # 53 (plain), 853 (DoT), ...
+    type: str = _FORWARD_TYPE_FORWARD  # "forward" oder "dot"
+    verify: str = ""  # DoT: Server-CN fuer Cert-Verify
     description: str = ""
     enabled: bool = True
 
     def to_identity(self) -> UnboundForwardIdentity:
         return UnboundForwardIdentity(
-            domain=self.domain, server=self.server, port=self.port,
+            domain=self.domain,
+            server=self.server,
+            port=self.port,
         )
 
 
@@ -888,8 +930,7 @@ def _forward_row_to_spec(row: dict[str, Any]) -> UnboundForwardSpec:
         domain=str(row.get("domain", "")).strip(),
         server=str(row.get("server", row.get("forward_addr", ""))).strip(),
         port=_parse_forward_port(row.get("port")),
-        type=str(row.get("type", _FORWARD_TYPE_FORWARD)).strip()
-        or _FORWARD_TYPE_FORWARD,
+        type=str(row.get("type", _FORWARD_TYPE_FORWARD)).strip() or _FORWARD_TYPE_FORWARD,
         verify=str(row.get("verify", "")).strip(),
         description=str(row.get("description", row.get("descr", ""))).strip(),
         enabled=_as_bool(row.get("enabled", "1")),
@@ -962,10 +1003,7 @@ class UnboundForwardAdapter:
         domain_label = current.domain or "(alle)"
         return VerifyOutcome(
             found=True,
-            detail=(
-                f"{domain_label} -> {current.server}:{current.port} "
-                f"({current.type})"
-            ),
+            detail=(f"{domain_label} -> {current.server}:{current.port} ({current.type})"),
         )
 
     # ----- add / update / delete -----
@@ -978,8 +1016,11 @@ class UnboundForwardAdapter:
     ) -> AddOutcome:
         payload = {"forward": self.to_payload(spec)}
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", UNBOUND_FORWARD_ADD,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            UNBOUND_FORWARD_ADD,
             json=payload,
         )
         _raise_if_saved_failed(response, UNBOUND_FORWARD_ADD, ctx)
@@ -1017,8 +1058,11 @@ class UnboundForwardAdapter:
         payload = {"forward": self.to_payload(spec)}
         set_path = UNBOUND_FORWARD_SET.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", set_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            set_path,
             json=payload,
         )
         _raise_if_saved_failed(response, set_path, ctx)
@@ -1035,8 +1079,11 @@ class UnboundForwardAdapter:
             return AddOutcome(uuid=None, raw_status=0)
         del_path = UNBOUND_FORWARD_DEL.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", del_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            del_path,
             json={},
         )
         _raise_if_saved_failed(response, del_path, ctx)
@@ -1146,10 +1193,7 @@ class UnboundForwardAdapter:
             )
         return Diff(
             kind=DiffKind.DELETE,
-            summary=(
-                f"Query-Forward {domain_label} -> "
-                f"{ident.server}:{ident.port} wird geloescht"
-            ),
+            summary=(f"Query-Forward {domain_label} -> {ident.server}:{ident.port} wird geloescht"),
         )
 
     # ----- API-Helfer -----
@@ -1161,8 +1205,11 @@ class UnboundForwardAdapter:
         ident: UnboundForwardIdentity,
     ) -> str | None:
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", UNBOUND_FORWARD_SEARCH,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            UNBOUND_FORWARD_SEARCH,
             json={"current": 1, "rowCount": -1},
         )
         try:
@@ -1180,11 +1227,7 @@ class UnboundForwardAdapter:
             domain = str(row.get("domain", "")).strip()
             server = str(row.get("server", row.get("forward_addr", ""))).strip()
             port = _parse_forward_port(row.get("port"))
-            if (
-                domain != ident.domain
-                or server != ident.server
-                or port != ident.port
-            ):
+            if domain != ident.domain or server != ident.server or port != ident.port:
                 continue
             uuid = row.get("uuid")
             if isinstance(uuid, str) and uuid:
@@ -1198,8 +1241,11 @@ class UnboundForwardAdapter:
         uuid: str,
     ) -> UnboundForwardSpec:
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "GET", UNBOUND_FORWARD_GET.format(uuid=uuid),
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "GET",
+            UNBOUND_FORWARD_GET.format(uuid=uuid),
         )
         try:
             data: Any = response.json()
@@ -1225,14 +1271,20 @@ class UnboundForwardsController:
     def reconfigure(self, client: HttpClient, ctx: RequestContext) -> None:
         try:
             client.call(
-                ctx.target, ctx.key, ctx.secret,
-                "POST", UNBOUND_RECONFIGURE,
+                ctx.target,
+                ctx.key,
+                ctx.secret,
+                "POST",
+                UNBOUND_RECONFIGURE,
                 json={},
                 timeout_override_s=client.tuning.reconfigure_timeout_s,
             )
         except (
-            UnreachableError, AuthError, ValidationError,
-            ApiError, EgressDeniedError,
+            UnreachableError,
+            AuthError,
+            ValidationError,
+            ApiError,
+            EgressDeniedError,
         ) as exc:
             raise ReconfigureError(
                 "Reconfigure des Unbound-Subsystems fehlgeschlagen.",
@@ -1252,8 +1304,8 @@ __all__ = [
     "UnboundController",
     "UnboundDomainAdapter",
     "UnboundDomainIdentity",
-    "UnboundDomainsController",
     "UnboundDomainSpec",
+    "UnboundDomainsController",
     "UnboundForwardAdapter",
     "UnboundForwardIdentity",
     "UnboundForwardSpec",

@@ -41,11 +41,9 @@ class AuditBackend(Protocol):
     Connection transactional handhaben).
     """
 
-    def append(self, event: AuditEventKind, /, **fields_in: Any) -> AuditRecord:
-        ...
+    def append(self, event: AuditEventKind, /, **fields_in: Any) -> AuditRecord: ...
 
-    def read_all(self) -> list[AuditRecord]:
-        ...
+    def read_all(self) -> list[AuditRecord]: ...
 
     def filter(
         self,
@@ -56,8 +54,7 @@ class AuditBackend(Protocol):
         actor: str | None = None,
         since_iso: str | None = None,
         until_iso: str | None = None,
-    ) -> list[AuditRecord]:
-        ...
+    ) -> list[AuditRecord]: ...
 
 
 def get_audit_backend() -> AuditBackend:

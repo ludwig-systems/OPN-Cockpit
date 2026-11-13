@@ -118,11 +118,14 @@ class AuditRecord:
     # ----- Serialisierung -----
 
     def to_json_line(self) -> str:
-        return json.dumps(
-            self.to_dict(),
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ) + "\n"
+        return (
+            json.dumps(
+                self.to_dict(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -171,9 +174,7 @@ class AuditRecord:
 
 # Felder, die in :meth:`AuditLog.append` als Keyword-Argumente erlaubt sind.
 _APPEND_WHITELIST: frozenset[str] = frozenset(
-    f.name
-    for f in fields(AuditRecord)
-    if f.name not in {"timestamp_utc", "actor", "event"}
+    f.name for f in fields(AuditRecord) if f.name not in {"timestamp_utc", "actor", "event"}
 )
 
 
@@ -243,9 +244,7 @@ class AuditLog:
         actor_override = fields_in.pop("actor", None)
         unknown = set(fields_in.keys()) - _APPEND_WHITELIST
         if unknown:
-            raise AuditFieldError(
-                "Unzulässige Audit-Felder: " + ", ".join(sorted(unknown))
-            )
+            raise AuditFieldError("Unzulässige Audit-Felder: " + ", ".join(sorted(unknown)))
 
         summary = str(fields_in.pop("summary", ""))
         if len(summary) > SUMMARY_MAX_LEN:
@@ -383,5 +382,3 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
