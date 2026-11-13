@@ -1,0 +1,18 @@
+# Manifest — einzige Wahrheitsquelle für dieses Projekt (PLATFORM SPEC §4).
+#
+# Gelesen wird es vom Projektübersicht-Sammler des Cockpits
+# (cockpit/deploy/cockpit-projekte-collector.py): Anzeigename, Beschreibung,
+# Phase und Adresse kommen ab dem 13.11.2026 von hier und nicht mehr aus einer
+# zentralen Liste. `CLAUDE/projekte.json` im PROJEKTE-Repo ist nur noch ein
+# Verzeichnis (welche Projekte es gibt, welches Repo, welcher Abschnitt der
+# Aufgabenliste).
+#
+# phase: konzept | entwicklung | betrieb | pflege | ausgesetzt
+
+name: opn-cockpit
+anzeigename: "OPN-Cockpit"
+was: "OPNsense-Multi-Site-Verwaltung. Einziges oeffentliches Repo des Hauses"
+phase: pflege
+repo: ludwig-systems/OPN-Cockpit
+aufgaben_abschnitt: 3
+url: null
