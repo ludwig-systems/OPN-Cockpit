@@ -10,7 +10,6 @@ hier. Aufrufer (web/api/vaults.py) packt die Werte in Pydantic-Modelle.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -18,7 +17,6 @@ from datetime import UTC, datetime
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.x509.oid import ExtensionOID, NameOID
-
 
 _PEM_BLOCK_RE = re.compile(
     r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
@@ -67,21 +65,21 @@ def parse_cert(pem: str) -> CertMetadata:
         raise ValueError(f"PEM nicht lesbar: {exc}") from exc
 
     fingerprint = cert.fingerprint(hashes.SHA256()).hex().upper()
-    fingerprint_colon = ":".join(
-        fingerprint[i : i + 2] for i in range(0, len(fingerprint), 2)
-    )
+    fingerprint_colon = ":".join(fingerprint[i : i + 2] for i in range(0, len(fingerprint), 2))
 
     subject_cn = _common_name(cert.subject) or _stringify_name(cert.subject)
     issuer_cn = _common_name(cert.issuer) or _stringify_name(cert.issuer)
 
     # cryptography 42+ liefert tz-aware datetimes (Aenderung in 42.0). Wir
     # behandeln beide Formen damit alte Installationen weiter funktionieren.
-    not_before = _as_utc(cert.not_valid_before_utc
-                         if hasattr(cert, "not_valid_before_utc")
-                         else cert.not_valid_before)
-    not_after = _as_utc(cert.not_valid_after_utc
-                        if hasattr(cert, "not_valid_after_utc")
-                        else cert.not_valid_after)
+    not_before = _as_utc(
+        cert.not_valid_before_utc
+        if hasattr(cert, "not_valid_before_utc")
+        else cert.not_valid_before
+    )
+    not_after = _as_utc(
+        cert.not_valid_after_utc if hasattr(cert, "not_valid_after_utc") else cert.not_valid_after
+    )
 
     now = datetime.now(UTC)
     delta_days = (not_after - now).days
@@ -147,7 +145,7 @@ def _common_name(name: x509.Name) -> str:
 
 
 def _stringify_name(name: x509.Name) -> str:
-    return ", ".join(f"{a.oid._name}={a.value}" for a in name)  # noqa: SLF001
+    return ", ".join(f"{a.oid._name}={a.value}" for a in name)
 
 
 def _as_utc(value: datetime) -> datetime:

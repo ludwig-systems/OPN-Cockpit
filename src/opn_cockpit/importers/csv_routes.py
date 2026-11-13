@@ -55,10 +55,7 @@ def parse_routes_csv(path: Path | str) -> CsvImportResult:
 
     result = CsvImportResult()
     reader = csv.DictReader(
-
-            line for line in text.splitlines()
-            if line.strip() and not line.strip().startswith("#")
-
+        line for line in text.splitlines() if line.strip() and not line.strip().startswith("#")
     )
     if reader.fieldnames is None:
         result.errors.append("CSV ist leer oder enthält keinen Header.")
@@ -66,9 +63,7 @@ def parse_routes_csv(path: Path | str) -> CsvImportResult:
     headers = [h.strip().lower() for h in reader.fieldnames]
     missing = [col for col in REQUIRED_COLUMNS if col not in headers]
     if missing:
-        result.errors.append(
-            f"Fehlende Pflicht-Spalten: {', '.join(missing)}"
-        )
+        result.errors.append(f"Fehlende Pflicht-Spalten: {', '.join(missing)}")
         return result
 
     # Map original-headers → normalisierte

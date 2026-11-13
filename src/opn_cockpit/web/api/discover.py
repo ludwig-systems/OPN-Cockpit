@@ -85,10 +85,7 @@ def discover_aliases(
     session.touch()
     return AliasDiscoveryResponse(
         device_id=device_id,
-        aliases=[
-            AliasSummaryResponse(name=a.name, type=a.type, descr=a.descr)
-            for a in aliases
-        ],
+        aliases=[AliasSummaryResponse(name=a.name, type=a.type, descr=a.descr) for a in aliases],
     )
 
 
@@ -109,10 +106,13 @@ def _find_device(session: Session, device_id: str) -> VaultDevice:
 
 
 def _target_and_tuning(
-    device: VaultDevice, session: Session,
+    device: VaultDevice,
+    session: Session,
 ) -> tuple[HttpTarget, HttpTuning]:
     target = HttpTarget(
-        host=device.host, port=device.port, verify=device.tls_verify,
+        host=device.host,
+        port=device.port,
+        verify=device.tls_verify,
     )
     tuning = tuning_from_settings(session.opened.data.settings)
     return target, tuning

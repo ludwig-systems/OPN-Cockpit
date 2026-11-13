@@ -44,8 +44,8 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from opn_cockpit.core.objects.unbound import UnboundForwardSpec, UnboundHostSpec
 
@@ -125,7 +125,8 @@ def _parse_port(raw: str) -> int:
 
 
 def _read_rows(
-    text: str, required: tuple[str, ...],
+    text: str,
+    required: tuple[str, ...],
 ) -> tuple[list[dict[str, str]], list[str]]:
     """Liefert (rows, errors).
 
@@ -135,11 +136,10 @@ def _read_rows(
     """
     # BOM abtrimmen falls Excel gespeichert hat.
     if text.startswith(UTF8_BOM):
-        text = text[len(UTF8_BOM):]
+        text = text[len(UTF8_BOM) :]
 
     reader = csv.DictReader(
-        line for line in text.splitlines()
-        if line.strip() and not line.strip().startswith("#")
+        line for line in text.splitlines() if line.strip() and not line.strip().startswith("#")
     )
     if reader.fieldnames is None:
         return [], ["CSV ist leer oder enthaelt keinen Header."]
@@ -212,13 +212,15 @@ def write_unbound_hosts_csv(specs: Iterable[UnboundHostSpec]) -> str:
     writer = csv.writer(buf, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
     writer.writerow(["host", "domain", "server", "description", "enabled"])
     for spec in specs:
-        writer.writerow([
-            spec.host,
-            spec.domain,
-            spec.server,
-            spec.description,
-            "true" if spec.enabled else "false",
-        ])
+        writer.writerow(
+            [
+                spec.host,
+                spec.domain,
+                spec.server,
+                spec.description,
+                "true" if spec.enabled else "false",
+            ]
+        )
     return buf.getvalue()
 
 
@@ -268,20 +270,29 @@ def write_unbound_forwards_csv(specs: Iterable[UnboundForwardSpec]) -> str:
     buf = io.StringIO()
     buf.write(UTF8_BOM)
     writer = csv.writer(buf, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
-    writer.writerow([
-        "domain", "server", "port", "type", "verify",
-        "description", "enabled",
-    ])
+    writer.writerow(
+        [
+            "domain",
+            "server",
+            "port",
+            "type",
+            "verify",
+            "description",
+            "enabled",
+        ]
+    )
     for spec in specs:
-        writer.writerow([
-            spec.domain,
-            spec.server,
-            str(spec.port),
-            spec.type or "forward",
-            spec.verify,
-            spec.description,
-            "true" if spec.enabled else "false",
-        ])
+        writer.writerow(
+            [
+                spec.domain,
+                spec.server,
+                str(spec.port),
+                spec.type or "forward",
+                spec.verify,
+                spec.description,
+                "true" if spec.enabled else "false",
+            ]
+        )
     return buf.getvalue()
 
 

@@ -84,7 +84,8 @@ def create_app() -> FastAPI:
     # damit Tests einen tmp_path injizieren koennen.
     retry_queue_path = get_app_data_dir() / "state" / QUEUE_FILE_NAME
     app.state.retry_watcher = RetryWatcher(
-        session_manager, queue_path=retry_queue_path,
+        session_manager,
+        queue_path=retry_queue_path,
     )
     app.state.server_state = ServerState.from_settings()
     # Scheduler kennt jetzt sowohl SessionManager (Single-User) als auch
@@ -93,7 +94,8 @@ def create_app() -> FastAPI:
     # weil nur Sessions iteriert wurden. Mit server_state laeuft der
     # Scheduler durchgehend solange der Container an ist.
     app.state.backup_scheduler = BackupScheduler(
-        session_manager, server_state=app.state.server_state,
+        session_manager,
+        server_state=app.state.server_state,
     )
     app.state.backup_scheduler.start()
     # SafetyNetWatcher v2: Cleanup-Retry + Fire-Marker-Detection.
@@ -106,6 +108,7 @@ def create_app() -> FastAPI:
     from opn_cockpit.web.safety_net_watcher import (  # noqa: PLC0415
         QUEUE_FILE_NAME as SAFETY_NET_QUEUE_FILE_NAME,
     )
+
     safety_net_queue_path = get_app_data_dir() / "state" / SAFETY_NET_QUEUE_FILE_NAME
     app.state.safety_net_watcher = SafetyNetWatcher(
         session_manager,
@@ -122,6 +125,7 @@ def create_app() -> FastAPI:
         get_restart_callback,
     )
     from opn_cockpit.web.tls_watcher import TlsWatcher  # noqa: PLC0415
+
     app.state.tls_watcher = TlsWatcher(
         get_audit_backend(),
         restart_callback=get_restart_callback(),
@@ -133,12 +137,13 @@ def create_app() -> FastAPI:
     # <app_data>/state/firmware-rollout.json damit ein Cockpit-Restart
     # waehrend eines Rollouts den Fortschritt nicht killt.
     from opn_cockpit.web.firmware_rollout_watcher import (  # noqa: PLC0415
-        FirmwareRolloutWatcher,
         QUEUE_FILE_NAME as FIRMWARE_ROLLOUT_QUEUE_FILE_NAME,
     )
-    firmware_rollout_queue_path = (
-        get_app_data_dir() / "state" / FIRMWARE_ROLLOUT_QUEUE_FILE_NAME
+    from opn_cockpit.web.firmware_rollout_watcher import (  # noqa: PLC0415
+        FirmwareRolloutWatcher,
     )
+
+    firmware_rollout_queue_path = get_app_data_dir() / "state" / FIRMWARE_ROLLOUT_QUEUE_FILE_NAME
     app.state.firmware_rollout_watcher = FirmwareRolloutWatcher(
         session_manager,
         get_audit_backend(),
@@ -148,13 +153,16 @@ def create_app() -> FastAPI:
     app.state.login_rate_limiter = RateLimiter()
     app.state.bootstrap_rate_limiter = RateLimiter(
         # Bootstrap ist seltener als Login — strenger limitieren.
-        max_attempts=5, window_s=60 * 60.0, cooldown_s=10 * 60.0,
+        max_attempts=5,
+        window_s=60 * 60.0,
+        cooldown_s=10 * 60.0,
     )
     # TOTP-Challenge-HMAC-Secret. Wird beim ersten Login-Schritt
     # gebraucht um die Challenge zu signieren, beim zweiten zum
     # Verifizieren. Lazy-laden + im App-State haengen damit Worker und
     # Background-Threads dasselbe Secret sehen.
     from opn_cockpit.security.totp import load_or_generate_challenge_secret  # noqa: PLC0415
+
     app.state.totp_challenge_secret = load_or_generate_challenge_secret()
 
     _install_security_middleware(app)

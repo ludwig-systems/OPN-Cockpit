@@ -110,7 +110,8 @@ class SqlitePlanStore:
             raise PlanStoreError(f"Ungueltige Plan-ID: {plan_id!r}")
         with self.db.transaction() as conn:
             cur = conn.execute(
-                "DELETE FROM plans WHERE plan_id = ?", (plan_id,),
+                "DELETE FROM plans WHERE plan_id = ?",
+                (plan_id,),
             )
         return cur.rowcount > 0
 
@@ -134,7 +135,8 @@ class SqlitePlanStore:
             raise PlanStoreError(f"Ungueltige Plan-ID: {plan_id!r}")
         with self.db.cursor() as cur:
             row = cur.execute(
-                "SELECT report_json FROM plans WHERE plan_id = ?", (plan_id,),
+                "SELECT report_json FROM plans WHERE plan_id = ?",
+                (plan_id,),
             ).fetchone()
         if row is None or not row["report_json"]:
             return None

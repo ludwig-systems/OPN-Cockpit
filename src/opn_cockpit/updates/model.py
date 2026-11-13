@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 UpdateStatus = Literal[
-    "available",   # Neue Version verfuegbar
+    "available",  # Neue Version verfuegbar
     "up-to-date",  # Aktuelle Version ist die neueste
-    "unknown",     # Konnte nicht ermittelt werden (Netzwerk, 404, ...)
-    "disabled",    # Check ist per Settings/Env deaktiviert
+    "unknown",  # Konnte nicht ermittelt werden (Netzwerk, 404, ...)
+    "disabled",  # Check ist per Settings/Env deaktiviert
 ]
 
 

@@ -43,9 +43,9 @@ from opn_cockpit.web.auth.manager import SessionManager
 
 _log = logging.getLogger(__name__)
 
-DEFAULT_INTERVAL_S = 180     # 3 Min zwischen Versuchen pro Job
+DEFAULT_INTERVAL_S = 180  # 3 Min zwischen Versuchen pro Job
 DEFAULT_MAX_DURATION_S = 3600  # 1 h Gesamtdauer pro Job
-LOOP_TICK_S = 10              # wie oft der Loop checkt, ob ein Job faellig ist
+LOOP_TICK_S = 10  # wie oft der Loop checkt, ob ein Job faellig ist
 QUEUE_FILE_NAME = "retry-queue.json"
 QUEUE_FORMAT_VERSION = 1
 
@@ -263,7 +263,9 @@ class RetryWatcher:
 
         try:
             _plan, report = run_apply(
-                session, job.plan_id, device_ids=list(job.device_ids),
+                session,
+                job.plan_id,
+                device_ids=list(job.device_ids),
             )
         except Exception:  # Job darf nie crashen
             with self._lock:
@@ -282,7 +284,8 @@ class RetryWatcher:
             pending.attempts += 1
             pending.last_failure_count = failures
             new_failed = [
-                r.device_id for r in report.results
+                r.device_id
+                for r in report.results
                 if str(r.status) not in ("Verifiziert", "Übersprungen")
             ]
             if not new_failed:
@@ -319,7 +322,8 @@ class RetryWatcher:
                         self._save_to_disk()
                 _log.info(
                     "RetryWatcher: Job %s adoptiert via vault_path %s",
-                    job.plan_id, target,
+                    job.plan_id,
+                    target,
                 )
                 return session
         return None
@@ -400,7 +404,8 @@ class RetryWatcher:
         if loaded:
             _log.info(
                 "RetryWatcher: %d persistente Jobs geladen aus %s",
-                loaded, self._queue_path,
+                loaded,
+                self._queue_path,
             )
 
 

@@ -96,13 +96,17 @@ def canonical_record(record: AuditRecord) -> bytes:
     if "event" in payload:
         payload["event"] = str(payload["event"])
     return json.dumps(
-        payload, sort_keys=True, ensure_ascii=False,
+        payload,
+        sort_keys=True,
+        ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
 
 
 def compute_this_hash(
-    secret: bytes, prev_hash: str, record: AuditRecord,
+    secret: bytes,
+    prev_hash: str,
+    record: AuditRecord,
 ) -> str:
     """HMAC-SHA256 ueber prev_hash + canonical_record."""
     mac = hmac.new(secret, digestmod=hashlib.sha256)
@@ -112,7 +116,8 @@ def compute_this_hash(
 
 
 def verify_chain(
-    chained: list[ChainedRecord], secret: bytes,
+    chained: list[ChainedRecord],
+    secret: bytes,
 ) -> list[int]:
     """Prueft die Hash-Chain. Liefert Liste der gebrochenen Index-Positionen.
 

@@ -74,7 +74,7 @@ class CarpStatus:
 
     reachable: bool
     authenticated: bool
-    endpoint_available: bool     # False wenn 404 — Box hat keinen CARP-VIP-Endpoint
+    endpoint_available: bool  # False wenn 404 — Box hat keinen CARP-VIP-Endpoint
     state: str
     vip_count: int
     master_count: int
@@ -139,29 +139,49 @@ def fetch_carp_status(
 ) -> CarpStatus:
     """Holt VIP-/CARP-Zustand."""
     reachable, authenticated, body, ep_available = _safe_fetch(
-        client, target, key, secret, CARP_STATUS_ENDPOINT, method="POST",
+        client,
+        target,
+        key,
+        secret,
+        CARP_STATUS_ENDPOINT,
+        method="POST",
     )
     if not reachable:
         return CarpStatus(
-            reachable=False, authenticated=False,
-            endpoint_available=False, state=STATE_UNKNOWN,
-            vip_count=0, master_count=0, backup_count=0, init_count=0,
+            reachable=False,
+            authenticated=False,
+            endpoint_available=False,
+            state=STATE_UNKNOWN,
+            vip_count=0,
+            master_count=0,
+            backup_count=0,
+            init_count=0,
             maintenance_mode=False,
             summary="Box nicht erreichbar",
         )
     if not authenticated:
         return CarpStatus(
-            reachable=True, authenticated=False,
-            endpoint_available=False, state=STATE_UNKNOWN,
-            vip_count=0, master_count=0, backup_count=0, init_count=0,
+            reachable=True,
+            authenticated=False,
+            endpoint_available=False,
+            state=STATE_UNKNOWN,
+            vip_count=0,
+            master_count=0,
+            backup_count=0,
+            init_count=0,
             maintenance_mode=False,
             summary="Auth abgelehnt",
         )
     if not ep_available:
         return CarpStatus(
-            reachable=True, authenticated=True,
-            endpoint_available=False, state=STATE_UNKNOWN,
-            vip_count=0, master_count=0, backup_count=0, init_count=0,
+            reachable=True,
+            authenticated=True,
+            endpoint_available=False,
+            state=STATE_UNKNOWN,
+            vip_count=0,
+            master_count=0,
+            backup_count=0,
+            init_count=0,
             maintenance_mode=False,
             summary="kein CARP-Endpoint (OPNsense-Version?)",
         )
@@ -191,9 +211,14 @@ def fetch_carp_status(
 
     if vip_count == 0:
         return CarpStatus(
-            reachable=True, authenticated=True,
-            endpoint_available=True, state=STATE_UNKNOWN,
-            vip_count=0, master_count=0, backup_count=0, init_count=0,
+            reachable=True,
+            authenticated=True,
+            endpoint_available=True,
+            state=STATE_UNKNOWN,
+            vip_count=0,
+            master_count=0,
+            backup_count=0,
+            init_count=0,
             maintenance_mode=maintenance,
             summary="Kein HA-Setup",
         )
@@ -224,10 +249,14 @@ def fetch_carp_status(
         summary = f"{master} MASTER, {backup} BACKUP, {init} INIT"
 
     return CarpStatus(
-        reachable=True, authenticated=True,
-        endpoint_available=True, state=state,
-        vip_count=vip_count, master_count=master,
-        backup_count=backup, init_count=init,
+        reachable=True,
+        authenticated=True,
+        endpoint_available=True,
+        state=state,
+        vip_count=vip_count,
+        master_count=master,
+        backup_count=backup,
+        init_count=init,
         maintenance_mode=maintenance,
         summary=summary,
     )
@@ -267,36 +296,61 @@ def fetch_interfaces_status(
     Aeltere Versionen liefern eine Liste direkt (ohne ``rows``-Wrapper).
     """
     reachable, authenticated, body, ep_available = _safe_fetch(
-        client, target, key, secret, INTERFACES_INFO_ENDPOINT, method="POST",
+        client,
+        target,
+        key,
+        secret,
+        INTERFACES_INFO_ENDPOINT,
+        method="POST",
     )
     if not reachable:
         return InterfacesStatus(
-            reachable=False, authenticated=False,
-            endpoint_available=False, state=STATE_UNKNOWN,
-            total=0, up_count=0, down_count=0, down_names=(),
+            reachable=False,
+            authenticated=False,
+            endpoint_available=False,
+            state=STATE_UNKNOWN,
+            total=0,
+            up_count=0,
+            down_count=0,
+            down_names=(),
             summary="Box nicht erreichbar",
         )
     if not authenticated:
         return InterfacesStatus(
-            reachable=True, authenticated=False,
-            endpoint_available=False, state=STATE_UNKNOWN,
-            total=0, up_count=0, down_count=0, down_names=(),
+            reachable=True,
+            authenticated=False,
+            endpoint_available=False,
+            state=STATE_UNKNOWN,
+            total=0,
+            up_count=0,
+            down_count=0,
+            down_names=(),
             summary="Auth abgelehnt",
         )
     if not ep_available:
         return InterfacesStatus(
-            reachable=True, authenticated=True,
-            endpoint_available=False, state=STATE_UNKNOWN,
-            total=0, up_count=0, down_count=0, down_names=(),
+            reachable=True,
+            authenticated=True,
+            endpoint_available=False,
+            state=STATE_UNKNOWN,
+            total=0,
+            up_count=0,
+            down_count=0,
+            down_names=(),
             summary="Kein Interfaces-Endpoint",
         )
 
     rows = _extract_rows(body)
     if not rows:
         return InterfacesStatus(
-            reachable=True, authenticated=True,
-            endpoint_available=True, state=STATE_UNKNOWN,
-            total=0, up_count=0, down_count=0, down_names=(),
+            reachable=True,
+            authenticated=True,
+            endpoint_available=True,
+            state=STATE_UNKNOWN,
+            total=0,
+            up_count=0,
+            down_count=0,
+            down_names=(),
             summary="Keine Interfaces gemeldet",
         )
 
@@ -321,10 +375,7 @@ def fetch_interfaces_status(
         # Prüfen ob die Box das Interface als "up" meldet.
         status_val = str(row.get("status", "")).strip().lower()
         link_val = str(row.get("link", "")).strip().lower()
-        is_up = (
-            status_val in {"up", "1", "active", "assoc"}
-            or link_val in {"up", "1", "active"}
-        )
+        is_up = status_val in {"up", "1", "active", "assoc"} or link_val in {"up", "1", "active"}
         # Label bevorzugt der User-Facing "identifier" (wan/lan/opt1),
         # sonst description, sonst device (em0).
         label = (
@@ -355,9 +406,13 @@ def fetch_interfaces_status(
         summary = f"{up}/{total} up ({down} down)"
 
     return InterfacesStatus(
-        reachable=True, authenticated=True,
-        endpoint_available=True, state=state,
-        total=total, up_count=up, down_count=down,
+        reachable=True,
+        authenticated=True,
+        endpoint_available=True,
+        state=state,
+        total=total,
+        up_count=up,
+        down_count=down,
         down_names=tuple(down_names),
         summary=summary,
     )
@@ -385,19 +440,30 @@ def fetch_ntp_status(
     """
     for endpoint in NTP_STATUS_ENDPOINT_CANDIDATES:
         reachable, authenticated, body, ep_available = _safe_fetch(
-            client, target, key, secret, endpoint, method="POST",
+            client,
+            target,
+            key,
+            secret,
+            endpoint,
+            method="POST",
         )
         if not reachable:
             return NtpStatus(
-                reachable=False, authenticated=False,
-                endpoint_available=False, state=STATE_UNKNOWN,
-                system_time="", summary="Box nicht erreichbar",
+                reachable=False,
+                authenticated=False,
+                endpoint_available=False,
+                state=STATE_UNKNOWN,
+                system_time="",
+                summary="Box nicht erreichbar",
             )
         if not authenticated:
             return NtpStatus(
-                reachable=True, authenticated=False,
-                endpoint_available=False, state=STATE_UNKNOWN,
-                system_time="", summary="Auth abgelehnt",
+                reachable=True,
+                authenticated=False,
+                endpoint_available=False,
+                state=STATE_UNKNOWN,
+                system_time="",
+                summary="Auth abgelehnt",
             )
         if not ep_available:
             # naechsten Kandidaten probieren
@@ -406,23 +472,31 @@ def fetch_ntp_status(
         system_time = _extract_system_time(body)
         if system_time:
             return NtpStatus(
-                reachable=True, authenticated=True,
-                endpoint_available=True, state=STATE_OK,
+                reachable=True,
+                authenticated=True,
+                endpoint_available=True,
+                state=STATE_OK,
                 system_time=system_time,
                 summary=f"Zeit: {system_time}",
             )
         # Endpoint da, aber kein date/time extrahierbar -> unknown
         return NtpStatus(
-            reachable=True, authenticated=True,
-            endpoint_available=True, state=STATE_UNKNOWN,
-            system_time="", summary="System-Zeit nicht auslesbar",
+            reachable=True,
+            authenticated=True,
+            endpoint_available=True,
+            state=STATE_UNKNOWN,
+            system_time="",
+            summary="System-Zeit nicht auslesbar",
         )
 
     # Kein Kandidat lieferte einen brauchbaren Endpoint.
     return NtpStatus(
-        reachable=True, authenticated=True,
-        endpoint_available=False, state=STATE_UNKNOWN,
-        system_time="", summary="Kein NTP-Info-Endpoint",
+        reachable=True,
+        authenticated=True,
+        endpoint_available=False,
+        state=STATE_UNKNOWN,
+        system_time="",
+        summary="Kein NTP-Info-Endpoint",
     )
 
 
@@ -550,9 +624,7 @@ def _is_unassigned_interface(row: dict[str, Any]) -> bool:
     if not identifier:
         return True
     device = str(row.get("device", "")).strip()
-    if device and identifier.lower() == device.lower():
-        return True
-    return False
+    return bool(device and identifier.lower() == device.lower())
 
 
 # ---------------------------------------------------------------------------
@@ -572,19 +644,19 @@ class InterfaceDetail:
     * ``enabled=true`` + ``link_up=false`` -> gelb (Kabel raus / no-carrier)
     """
 
-    identifier: str        # "wan", "lan", "opt1"
-    description: str       # OPNsense-Description ("HQ WAN Uplink")
-    device: str            # OS-Device-Name ("em0", "igb1", "vtnet0")
-    enabled: bool          # Admin-Up
-    link_up: bool          # Physik-Link
-    status_raw: str        # Rohes Status-Wort von OPNsense (fuer Tooltip)
-    ipv4: str              # Primaere IPv4-Adresse
-    ipv4_subnetbits: int   # /24, /29, ...
-    ipv6: str              # Primaere IPv6-Adresse
+    identifier: str  # "wan", "lan", "opt1"
+    description: str  # OPNsense-Description ("HQ WAN Uplink")
+    device: str  # OS-Device-Name ("em0", "igb1", "vtnet0")
+    enabled: bool  # Admin-Up
+    link_up: bool  # Physik-Link
+    status_raw: str  # Rohes Status-Wort von OPNsense (fuer Tooltip)
+    ipv4: str  # Primaere IPv4-Adresse
+    ipv4_subnetbits: int  # /24, /29, ...
+    ipv6: str  # Primaere IPv6-Adresse
     ipv6_subnetbits: int
-    mtu: str               # OPNsense liefert das als String — wir uebernehmen 1:1
+    mtu: str  # OPNsense liefert das als String — wir uebernehmen 1:1
     macaddr: str
-    media: str             # z. B. "1000baseTX <full-duplex>"
+    media: str  # z. B. "1000baseTX <full-duplex>"
     # Traffic-Counter (kumulativ seit Interface-Up). 0 wenn OPNsense keinen
     # Traffic-Endpoint bietet oder das OS-Device dort nicht auftaucht.
     bytes_received: int = 0
@@ -655,7 +727,12 @@ def _fetch_traffic_counters(
     kaputt ist.
     """
     reachable, authenticated, body, ep_available = _safe_fetch(
-        client, target, key, secret, INTERFACES_TRAFFIC_ENDPOINT, method="POST",
+        client,
+        target,
+        key,
+        secret,
+        INTERFACES_TRAFFIC_ENDPOINT,
+        method="POST",
     )
     if not reachable or not authenticated or not ep_available:
         return {}
@@ -676,18 +753,30 @@ def _fetch_traffic_counters(
             continue
         # OPNsense-Schluesselvariante: "bytes received" (Space)
         # oder in aelteren Builds "bytes_received" — beide abfangen.
-        bytes_rx = _int(dev_stats.get(
-            "bytes received", dev_stats.get("bytes_received", 0),
-        ))
-        bytes_tx = _int(dev_stats.get(
-            "bytes transmitted", dev_stats.get("bytes_transmitted", 0),
-        ))
-        packets_rx = _int(dev_stats.get(
-            "packets received", dev_stats.get("packets_received", 0),
-        ))
-        packets_tx = _int(dev_stats.get(
-            "packets transmitted", dev_stats.get("packets_transmitted", 0),
-        ))
+        bytes_rx = _int(
+            dev_stats.get(
+                "bytes received",
+                dev_stats.get("bytes_received", 0),
+            )
+        )
+        bytes_tx = _int(
+            dev_stats.get(
+                "bytes transmitted",
+                dev_stats.get("bytes_transmitted", 0),
+            )
+        )
+        packets_rx = _int(
+            dev_stats.get(
+                "packets received",
+                dev_stats.get("packets_received", 0),
+            )
+        )
+        packets_tx = _int(
+            dev_stats.get(
+                "packets transmitted",
+                dev_stats.get("packets_transmitted", 0),
+            )
+        )
         out[str(dev_name)] = (bytes_rx, bytes_tx, packets_rx, packets_tx)
     return out
 
@@ -706,18 +795,27 @@ def fetch_interfaces_detailed(
     RX/TX-Counter (fehlt der Endpoint, bleiben die Zahlen bei 0).
     """
     reachable, authenticated, body, ep_available = _safe_fetch(
-        client, target, key, secret, INTERFACES_INFO_ENDPOINT, method="POST",
+        client,
+        target,
+        key,
+        secret,
+        INTERFACES_INFO_ENDPOINT,
+        method="POST",
     )
     if not reachable or not authenticated or not ep_available:
         summary = (
-            "Box nicht erreichbar" if not reachable
-            else "Auth abgelehnt" if not authenticated
+            "Box nicht erreichbar"
+            if not reachable
+            else "Auth abgelehnt"
+            if not authenticated
             else "Interfaces-Endpoint nicht verfuegbar"
         )
         return InterfacesDetailResult(
-            reachable=reachable, authenticated=authenticated,
+            reachable=reachable,
+            authenticated=authenticated,
             endpoint_available=ep_available,
-            interfaces=(), summary=summary,
+            interfaces=(),
+            summary=summary,
         )
 
     traffic_by_device = _fetch_traffic_counters(client, target, key, secret)
@@ -725,10 +823,7 @@ def fetch_interfaces_detailed(
     rows = _extract_rows(body)
     entries: list[InterfaceDetail] = []
     for row in rows:
-        identifier = (
-            str(row.get("identifier", ""))
-            or str(row.get("name", ""))
-        ).strip()
+        identifier = (str(row.get("identifier", "")) or str(row.get("name", ""))).strip()
         device = str(row.get("device", "")).strip()
         # Zeilen ohne Identifier UND ohne Device sind Datenmuell.
         if not identifier and not device:
@@ -737,41 +832,41 @@ def fetch_interfaces_detailed(
         enabled = _as_bool(row.get("enabled", True))
         status_val = str(row.get("status", "")).strip().lower()
         link_val = str(row.get("link", "")).strip().lower()
-        link_up = (
-            status_val in {"up", "1", "active", "assoc"}
-            or link_val in {"up", "1", "active"}
-        )
+        link_up = status_val in {"up", "1", "active", "assoc"} or link_val in {"up", "1", "active"}
 
         ipv4, ipv4_bits = _extract_first_ip(row, "ipv4")
         ipv6, ipv6_bits = _extract_first_ip(row, "ipv6")
 
         rx_b, tx_b, rx_p, tx_p = traffic_by_device.get(device, (0, 0, 0, 0))
 
-        entries.append(InterfaceDetail(
-            identifier=identifier,
-            description=str(row.get("description", "")).strip(),
-            device=device,
-            enabled=enabled,
-            link_up=link_up,
-            status_raw=str(row.get("status", "")).strip(),
-            ipv4=ipv4,
-            ipv4_subnetbits=ipv4_bits,
-            ipv6=ipv6,
-            ipv6_subnetbits=ipv6_bits,
-            mtu=str(row.get("mtu", "")).strip(),
-            macaddr=str(row.get("macaddr", "")).strip(),
-            media=str(row.get("media", "")).strip(),
-            bytes_received=rx_b,
-            bytes_transmitted=tx_b,
-            packets_received=rx_p,
-            packets_transmitted=tx_p,
-        ))
+        entries.append(
+            InterfaceDetail(
+                identifier=identifier,
+                description=str(row.get("description", "")).strip(),
+                device=device,
+                enabled=enabled,
+                link_up=link_up,
+                status_raw=str(row.get("status", "")).strip(),
+                ipv4=ipv4,
+                ipv4_subnetbits=ipv4_bits,
+                ipv6=ipv6,
+                ipv6_subnetbits=ipv6_bits,
+                mtu=str(row.get("mtu", "")).strip(),
+                macaddr=str(row.get("macaddr", "")).strip(),
+                media=str(row.get("media", "")).strip(),
+                bytes_received=rx_b,
+                bytes_transmitted=tx_b,
+                packets_received=rx_p,
+                packets_transmitted=tx_p,
+            )
+        )
 
     # Nach Identifier alphabetisch sortieren (wan, lan, opt1..); Interfaces
     # ohne Identifier ans Ende.
     entries.sort(key=lambda e: (not e.identifier, e.identifier.lower(), e.device))
     return InterfacesDetailResult(
-        reachable=True, authenticated=True,
+        reachable=True,
+        authenticated=True,
         endpoint_available=True,
         interfaces=tuple(entries),
         summary=f"{len(entries)} Interface(s) live geladen.",
@@ -780,20 +875,20 @@ def fetch_interfaces_detailed(
 
 __all__ = [
     "CARP_STATUS_ENDPOINT",
-    "CarpStatus",
     "INTERFACES_INFO_ENDPOINT",
     "INTERFACES_RELOAD_ENDPOINT_TEMPLATE",
     "INTERFACES_TRAFFIC_ENDPOINT",
-    "InterfaceDetail",
-    "InterfacesDetailResult",
-    "InterfacesStatus",
     "NTP_STATUS_ENDPOINT_CANDIDATES",
-    "NtpStatus",
     "STATE_FAIL",
     "STATE_OK",
     "STATE_UNKNOWN",
     "STATE_WARN",
     "SYSTEM_INFO_ENDPOINT",
+    "CarpStatus",
+    "InterfaceDetail",
+    "InterfacesDetailResult",
+    "InterfacesStatus",
+    "NtpStatus",
     "fetch_carp_status",
     "fetch_interfaces_detailed",
     "fetch_interfaces_status",

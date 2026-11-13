@@ -106,8 +106,13 @@ from opn_cockpit.web.api.schemas import (
     DeviceAliasesResponse,
     DeviceApiKeyResponse,
     DeviceCreateRequest,
+    DeviceInterfacesResponse,
     DeviceResponse,
     DeviceRoutesResponse,
+    DeviceRulesResponse,
+    DeviceUnboundDomainsResponse,
+    DeviceUnboundForwardsResponse,
+    DeviceUnboundHostsResponse,
     DeviceUpdateRequest,
     DriftStatusEntry,
     DriftStatusRequest,
@@ -121,22 +126,23 @@ from opn_cockpit.web.api.schemas import (
     HeartbeatEntry,
     HeartbeatRequest,
     HeartbeatResponse,
-    InventoryResponse,
-    DeviceRulesResponse,
-    DeviceUnboundDomainsResponse,
-    DeviceUnboundForwardsResponse,
-    DeviceUnboundHostsResponse,
-    RouteEntryResponse,
-    RuleEntryResponse,
-    SafetyNetTestResponse,
-    DeviceInterfacesResponse,
     InterfaceDetailEntry,
     InterfaceReloadResponse,
+    InventoryResponse,
     KachelWidgetsEntry,
     KachelWidgetsRequest,
     KachelWidgetsResponse,
+    RouteEntryResponse,
+    RuleEntryResponse,
+    SafetyNetTestResponse,
     SyncAliasRequest,
     SyncAliasResponse,
+    SyncUnboundHostRequest,
+    SyncUnboundHostResponse,
+    TagSummary,
+    UnboundDomainEntryResponse,
+    UnboundForwardEntryResponse,
+    UnboundHostEntryResponse,
     UnboundImportAction,
     UnboundImportRequest,
     UnboundImportResponse,
@@ -146,12 +152,6 @@ from opn_cockpit.web.api.schemas import (
     WidgetCarpEntry,
     WidgetInterfacesEntry,
     WidgetNtpEntry,
-    SyncUnboundHostRequest,
-    SyncUnboundHostResponse,
-    TagSummary,
-    UnboundDomainEntryResponse,
-    UnboundForwardEntryResponse,
-    UnboundHostEntryResponse,
 )
 from opn_cockpit.web.auth.dependencies import require_session
 from opn_cockpit.web.server_state import ServerState
@@ -385,10 +385,13 @@ def heartbeat(
     # es als maintenance — die UI rendert daraus den eigenen Status-Dot.
     maintenance_results = [
         HeartbeatEntry(
-            device_id=vd.id, reachable=True, checked_at_iso=timestamp,
+            device_id=vd.id,
+            reachable=True,
+            checked_at_iso=timestamp,
             maintenance=True,
         )
-        for vd in targets if vd.maintenance
+        for vd in targets
+        if vd.maintenance
     ]
     active_targets = [vd for vd in targets if not vd.maintenance]
     if not active_targets:
@@ -398,7 +401,9 @@ def heartbeat(
     def probe(vd: VaultDevice) -> HeartbeatEntry:
         ok = tcp_probe(vd.host, vd.port, timeout_s=payload.timeout_s)
         return HeartbeatEntry(
-            device_id=vd.id, reachable=ok, checked_at_iso=timestamp,
+            device_id=vd.id,
+            reachable=ok,
+            checked_at_iso=timestamp,
             maintenance=False,
         )
 
@@ -458,22 +463,35 @@ def kachel_widgets(
                 device_id=vd.id,
                 checked_at_iso=timestamp,
                 carp=WidgetCarpEntry(
-                    reachable=False, authenticated=False,
-                    endpoint_available=False, state="unknown",
-                    vip_count=0, master_count=0, backup_count=0,
-                    init_count=0, maintenance_mode=False,
+                    reachable=False,
+                    authenticated=False,
+                    endpoint_available=False,
+                    state="unknown",
+                    vip_count=0,
+                    master_count=0,
+                    backup_count=0,
+                    init_count=0,
+                    maintenance_mode=False,
                     summary="Wartungsmodus",
                 ),
                 interfaces=WidgetInterfacesEntry(
-                    reachable=False, authenticated=False,
-                    endpoint_available=False, state="unknown",
-                    total=0, up_count=0, down_count=0, down_names=[],
+                    reachable=False,
+                    authenticated=False,
+                    endpoint_available=False,
+                    state="unknown",
+                    total=0,
+                    up_count=0,
+                    down_count=0,
+                    down_names=[],
                     summary="Wartungsmodus",
                 ),
                 ntp=WidgetNtpEntry(
-                    reachable=False, authenticated=False,
-                    endpoint_available=False, state="unknown",
-                    system_time="", summary="Wartungsmodus",
+                    reachable=False,
+                    authenticated=False,
+                    endpoint_available=False,
+                    state="unknown",
+                    system_time="",
+                    summary="Wartungsmodus",
                 ),
             )
         tgt = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
@@ -555,25 +573,32 @@ def get_device_interfaces(
 
     with HttpClient(targets=[tgt], tuning=tuning) as client:
         result = fetch_interfaces_detailed(
-            client, tgt, device.api_key, device.api_secret,
+            client,
+            tgt,
+            device.api_key,
+            device.api_secret,
         )
 
     session.touch()
     if not result.reachable or not result.authenticated:
         return DeviceInterfacesResponse(
-            device_id=device.id, device_name=device.name,
-            reachable=False, summary=f"Interfaces nicht ladbar: {result.summary}",
-            interfaces=[], checked_at_iso=timestamp,
+            device_id=device.id,
+            device_name=device.name,
+            reachable=False,
+            summary=f"Interfaces nicht ladbar: {result.summary}",
+            interfaces=[],
+            checked_at_iso=timestamp,
         )
     if not result.endpoint_available:
         return DeviceInterfacesResponse(
-            device_id=device.id, device_name=device.name,
+            device_id=device.id,
+            device_name=device.name,
             reachable=True,
             summary=(
-                "OPNsense-Version hat keinen "
-                "/api/interfaces/overview/interfacesInfo-Endpoint."
+                "OPNsense-Version hat keinen /api/interfaces/overview/interfacesInfo-Endpoint."
             ),
-            interfaces=[], checked_at_iso=timestamp,
+            interfaces=[],
+            checked_at_iso=timestamp,
         )
     entries = [
         InterfaceDetailEntry(
@@ -598,9 +623,12 @@ def get_device_interfaces(
         for iface in result.interfaces
     ]
     return DeviceInterfacesResponse(
-        device_id=device.id, device_name=device.name,
-        reachable=True, summary=result.summary,
-        interfaces=entries, checked_at_iso=timestamp,
+        device_id=device.id,
+        device_name=device.name,
+        reachable=True,
+        summary=result.summary,
+        interfaces=entries,
+        checked_at_iso=timestamp,
     )
 
 
@@ -654,8 +682,12 @@ def reload_device_interface(
     with HttpClient(targets=[tgt], tuning=tuning) as client:
         try:
             response = client.call(
-                tgt, device.api_key, device.api_secret,
-                "POST", endpoint, json={},
+                tgt,
+                device.api_key,
+                device.api_secret,
+                "POST",
+                endpoint,
+                json={},
             )
         except OpnCockpitError as exc:
             reason = exc.context.summary or exc.context.error_kind or "unbekannt"
@@ -667,14 +699,15 @@ def reload_device_interface(
                 target_device_name=device.name,
                 error_kind=exc.context.error_kind,
                 summary=(
-                    f"Interface-Reload '{identifier}' auf '{device.name}' "
-                    f"gescheitert: {reason}"
+                    f"Interface-Reload '{identifier}' auf '{device.name}' gescheitert: {reason}"
                 ),
             )
             session.touch()
             return InterfaceReloadResponse(
-                device_id=device.id, device_name=device.name,
-                identifier=identifier, ok=False,
+                device_id=device.id,
+                device_name=device.name,
+                identifier=identifier,
+                ok=False,
                 message=f"Reload gescheitert: {reason}",
                 triggered_at_iso=timestamp,
             )
@@ -687,10 +720,7 @@ def reload_device_interface(
     message = ""
     if isinstance(body, dict):
         message = str(
-            body.get("message")
-            or body.get("status")
-            or body.get("result")
-            or "",
+            body.get("message") or body.get("status") or body.get("result") or "",
         ).strip()
     if not message:
         message = "Interface-Reload gestartet."
@@ -701,16 +731,16 @@ def reload_device_interface(
         action="interface_reload",
         target_device_id=device.id,
         target_device_name=device.name,
-        summary=(
-            f"Interface-Reload '{identifier}' auf '{device.name}' "
-            f"ausgeloest: {message}"
-        ),
+        summary=(f"Interface-Reload '{identifier}' auf '{device.name}' ausgeloest: {message}"),
     )
     session.touch()
     return InterfaceReloadResponse(
-        device_id=device.id, device_name=device.name,
-        identifier=identifier, ok=True,
-        message=message, triggered_at_iso=timestamp,
+        device_id=device.id,
+        device_name=device.name,
+        identifier=identifier,
+        ok=True,
+        message=message,
+        triggered_at_iso=timestamp,
     )
 
 
@@ -728,9 +758,7 @@ def test_connection(
     session: Session = Depends(require_session),
 ) -> ConnectionTestResponse:
     """Vollwertiger HTTP-Auth-Probe gegen ein einzelnes Geraet."""
-    vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None
-    )
+    vault_device = next((d for d in session.opened.data.devices if d.id == device_id), None)
     if vault_device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -779,9 +807,7 @@ def reveal_device_api_key(
     Pfad.
     """
     require_write_role(session)
-    vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None
-    )
+    vault_device = next((d for d in session.opened.data.devices if d.id == device_id), None)
     if vault_device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -794,9 +820,7 @@ def reveal_device_api_key(
         action="api_key_revealed",
         target_device_id=device_id,
         target_device_name=vault_device.name,
-        summary=(
-            f"API-Key fuer Geraet '{vault_device.name}' im Edit-Dialog sichtbar gemacht."
-        ),
+        summary=(f"API-Key fuer Geraet '{vault_device.name}' im Edit-Dialog sichtbar gemacht."),
     )
     session.touch()
     return DeviceApiKeyResponse(
@@ -840,7 +864,10 @@ def firmware_status(
         target = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
         with HttpClient(targets=[target], tuning=tuning) as client:
             fw: FirmwareStatus = fetch_firmware_status(
-                client, target, vd.api_key, vd.api_secret,
+                client,
+                target,
+                vd.api_key,
+                vd.api_secret,
             )
         return FirmwareStatusEntry(
             device_id=vd.id,
@@ -896,7 +923,10 @@ def cert_status(
         tgt = HttpTarget(host=vd.host, port=vd.port, verify=vd.tls_verify)
         with HttpClient(targets=[tgt], tuning=tuning) as client:
             cs: CertificateStatus = fetch_certificates(
-                client, tgt, vd.api_key, vd.api_secret,
+                client,
+                tgt,
+                vd.api_key,
+                vd.api_secret,
             )
         return CertStatusEntry(
             device_id=vd.id,
@@ -965,10 +995,12 @@ def drift_status(
         if not baseline_records:
             return DriftStatusEntry(
                 device_id=vd.id,
-                reachable=False, authenticated=False,
+                reachable=False,
+                authenticated=False,
                 summary="Kein lokales Backup als Baseline vorhanden.",
                 checked_at_iso=timestamp,
-                has_baseline=False, drift_detected=None,
+                has_baseline=False,
+                drift_detected=None,
             )
         baseline = baseline_records[0]  # Neueste zuerst
         try:
@@ -976,10 +1008,12 @@ def drift_status(
         except (BackupNotFoundError, BackupStoreError) as exc:
             return DriftStatusEntry(
                 device_id=vd.id,
-                reachable=False, authenticated=False,
+                reachable=False,
+                authenticated=False,
                 summary=f"Baseline-Backup nicht lesbar: {exc}",
                 checked_at_iso=timestamp,
-                has_baseline=False, drift_detected=None,
+                has_baseline=False,
+                drift_detected=None,
             )
         baseline_hash = compute_drift_hash(baseline_bytes)
 
@@ -995,7 +1029,8 @@ def drift_status(
                 authenticated=False,
                 summary=f"Drift-Check fehlgeschlagen: {reason}",
                 checked_at_iso=timestamp,
-                has_baseline=True, drift_detected=None,
+                has_baseline=True,
+                drift_detected=None,
                 baseline_backup_id=baseline.id,
                 baseline_backup_iso=baseline.timestamp_utc,
                 baseline_trigger=baseline.trigger,
@@ -1009,15 +1044,16 @@ def drift_status(
             )
         else:
             summary = (
-                f"Keine Drift gegen Backup vom {baseline.timestamp_utc[:19]} "
-                f"({baseline.trigger})."
+                f"Keine Drift gegen Backup vom {baseline.timestamp_utc[:19]} ({baseline.trigger})."
             )
         return DriftStatusEntry(
             device_id=vd.id,
-            reachable=True, authenticated=True,
+            reachable=True,
+            authenticated=True,
             summary=summary,
             checked_at_iso=timestamp,
-            has_baseline=True, drift_detected=drift,
+            has_baseline=True,
+            drift_detected=drift,
             baseline_backup_id=baseline.id,
             baseline_backup_iso=baseline.timestamp_utc,
             baseline_trigger=baseline.trigger,
@@ -1081,30 +1117,29 @@ def compare_configs(
     xml_by_device: dict[str, bytes | None] = {}
     for vd, xml_bytes, summary in probe_results:
         column_order.append(vd.id)
-        columns_info.append(CompareColumnInfo(
-            device_id=vd.id,
-            device_name=vd.name,
-            reachable=xml_bytes is not None,
-            summary=summary,
-        ))
+        columns_info.append(
+            CompareColumnInfo(
+                device_id=vd.id,
+                device_name=vd.name,
+                reachable=xml_bytes is not None,
+                summary=summary,
+            )
+        )
         xml_by_device[vd.id] = xml_bytes
 
     if payload.subsystem == "aliases":
         per_device_aliases: dict[str, list[AliasItem] | None] = {
-            did: extract_aliases(x) if x is not None else None
-            for did, x in xml_by_device.items()
+            did: extract_aliases(x) if x is not None else None for did, x in xml_by_device.items()
         }
         comparison = compare_aliases(per_device_aliases, column_order)
     elif payload.subsystem == "routes":
         per_device_routes: dict[str, list[RouteItem] | None] = {
-            did: extract_routes(x) if x is not None else None
-            for did, x in xml_by_device.items()
+            did: extract_routes(x) if x is not None else None for did, x in xml_by_device.items()
         }
         comparison = compare_routes(per_device_routes, column_order)
     elif payload.subsystem == "rules":
         per_device_rules: dict[str, list[RuleItem] | None] = {
-            did: extract_rules(x) if x is not None else None
-            for did, x in xml_by_device.items()
+            did: extract_rules(x) if x is not None else None for did, x in xml_by_device.items()
         }
         comparison = compare_rules(per_device_rules, column_order)
     elif payload.subsystem == "unbound":
@@ -1228,8 +1263,7 @@ def sync_alias_from_master(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
-                f"Alias '{payload.alias_name}' existiert auf Master-Geraet "
-                f"'{master.name}' nicht."
+                f"Alias '{payload.alias_name}' existiert auf Master-Geraet '{master.name}' nicht."
             ),
         )
 
@@ -1255,8 +1289,7 @@ def sync_alias_from_master(
         alias_name=source.name,
         target_count=len(target_devices),
         source_summary=(
-            f"{source.name} ({source.type}, "
-            f"{len(source.content)} Eintraege) von {master.name}"
+            f"{source.name} ({source.type}, {len(source.content)} Eintraege) von {master.name}"
         ),
     )
 
@@ -1315,11 +1348,11 @@ def sync_unbound_host_from_master(
     # display_name matchen: f"{host}.{domain}" oder f"{host}" wenn domain leer.
     target_display = payload.display_name.strip().lower()
     source = next(
-        (h for h in extract_unbound_hosts(master_xml)
-         if (
-             (f"{h.host}.{h.domain}" if h.domain else h.host).lower()
-             == target_display
-         )),
+        (
+            h
+            for h in extract_unbound_hosts(master_xml)
+            if ((f"{h.host}.{h.domain}" if h.domain else h.host).lower() == target_display)
+        ),
         None,
     )
     if source is None:
@@ -1352,9 +1385,7 @@ def sync_unbound_host_from_master(
         host=source.host,
         domain=source.domain,
         target_count=len(target_devices),
-        source_summary=(
-            f"{source.host}.{source.domain} → {source.server} von {master.name}"
-        ),
+        source_summary=(f"{source.host}.{source.domain} → {source.server} von {master.name}"),
     )
 
 
@@ -1465,8 +1496,11 @@ def get_device_routes(
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
             response = client.call(
-                tgt, device.api_key, device.api_secret,
-                "POST", ROUTES_SEARCH,
+                tgt,
+                device.api_key,
+                device.api_secret,
+                "POST",
+                ROUTES_SEARCH,
                 json={"current": 1, "rowCount": -1},
             )
     except OpnCockpitError as exc:
@@ -1494,12 +1528,14 @@ def get_device_routes(
             continue
         raw_disabled = row.get("disabled", "0")
         disabled = str(raw_disabled).strip() not in ("", "0", "false", "False")
-        entries.append(RouteEntryResponse(
-            network=str(row.get("network", "")),
-            gateway=str(row.get("gateway", "")),
-            descr=str(row.get("descr", "")),
-            disabled=disabled,
-        ))
+        entries.append(
+            RouteEntryResponse(
+                network=str(row.get("network", "")),
+                gateway=str(row.get("gateway", "")),
+                descr=str(row.get("descr", "")),
+                disabled=disabled,
+            )
+        )
 
     session.touch()
     return DeviceRoutesResponse(
@@ -1558,8 +1594,11 @@ def get_device_firewall_rules(
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
             response = client.call(
-                tgt, device.api_key, device.api_secret,
-                "POST", RULE_SEARCH,
+                tgt,
+                device.api_key,
+                device.api_secret,
+                "POST",
+                RULE_SEARCH,
                 json={"current": 1, "rowCount": -1},
             )
     except OpnCockpitError as exc:
@@ -1592,25 +1631,27 @@ def get_device_firewall_rules(
             continue
         uuid = str(row.get("uuid", ""))
         spec = _row_to_spec(row, uuid=uuid)
-        entries.append(RuleEntryResponse(
-            uuid=spec.uuid,
-            enabled=spec.enabled,
-            action=spec.action,
-            interface=spec.interface,
-            direction=spec.direction,
-            ipprotocol=spec.ipprotocol,
-            protocol=spec.protocol,
-            source_net=spec.source_net,
-            source_port=spec.source_port,
-            source_not=spec.source_not,
-            destination_net=spec.destination_net,
-            destination_port=spec.destination_port,
-            destination_not=spec.destination_not,
-            gateway=spec.gateway,
-            log=spec.log,
-            description=spec.description,
-            sequence=spec.sequence,
-        ))
+        entries.append(
+            RuleEntryResponse(
+                uuid=spec.uuid,
+                enabled=spec.enabled,
+                action=spec.action,
+                interface=spec.interface,
+                direction=spec.direction,
+                ipprotocol=spec.ipprotocol,
+                protocol=spec.protocol,
+                source_net=spec.source_net,
+                source_port=spec.source_port,
+                source_not=spec.source_not,
+                destination_net=spec.destination_net,
+                destination_port=spec.destination_port,
+                destination_not=spec.destination_not,
+                gateway=spec.gateway,
+                log=spec.log,
+                description=spec.description,
+                sequence=spec.sequence,
+            )
+        )
 
     session.touch()
     return DeviceRulesResponse(
@@ -1655,8 +1696,11 @@ def get_device_unbound_hosts(
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
             response = client.call(
-                tgt, device.api_key, device.api_secret,
-                "POST", UNBOUND_HOST_SEARCH,
+                tgt,
+                device.api_key,
+                device.api_secret,
+                "POST",
+                UNBOUND_HOST_SEARCH,
                 json={"current": 1, "rowCount": -1},
             )
     except OpnCockpitError as exc:
@@ -1686,14 +1730,16 @@ def get_device_unbound_hosts(
         if not uuid:
             continue
         enabled_raw = str(row.get("enabled", "1"))
-        entries.append(UnboundHostEntryResponse(
-            uuid=uuid,
-            enabled=enabled_raw not in ("", "0", "false", "False"),
-            host=str(row.get("hostname", row.get("host", ""))).strip(),
-            domain=str(row.get("domain", "")).strip(),
-            server=str(row.get("server", row.get("rr", ""))).strip(),
-            description=str(row.get("description", row.get("descr", ""))).strip(),
-        ))
+        entries.append(
+            UnboundHostEntryResponse(
+                uuid=uuid,
+                enabled=enabled_raw not in ("", "0", "false", "False"),
+                host=str(row.get("hostname", row.get("host", ""))).strip(),
+                domain=str(row.get("domain", "")).strip(),
+                server=str(row.get("server", row.get("rr", ""))).strip(),
+                description=str(row.get("description", row.get("descr", ""))).strip(),
+            )
+        )
 
     session.touch()
     return DeviceUnboundHostsResponse(
@@ -1744,8 +1790,11 @@ def get_device_unbound_domains(
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
             response = client.call(
-                tgt, device.api_key, device.api_secret,
-                "POST", UNBOUND_DOMAIN_SEARCH,
+                tgt,
+                device.api_key,
+                device.api_secret,
+                "POST",
+                UNBOUND_DOMAIN_SEARCH,
                 json={"current": 1, "rowCount": -1},
             )
     except OpnCockpitError as exc:
@@ -1775,13 +1824,15 @@ def get_device_unbound_domains(
         if not uuid:
             continue
         enabled_raw = str(row.get("enabled", "1"))
-        entries.append(UnboundDomainEntryResponse(
-            uuid=uuid,
-            enabled=enabled_raw not in ("", "0", "false", "False"),
-            domain=str(row.get("domain", "")).strip(),
-            server=str(row.get("server", row.get("ip", ""))).strip(),
-            description=str(row.get("description", row.get("descr", ""))).strip(),
-        ))
+        entries.append(
+            UnboundDomainEntryResponse(
+                uuid=uuid,
+                enabled=enabled_raw not in ("", "0", "false", "False"),
+                domain=str(row.get("domain", "")).strip(),
+                server=str(row.get("server", row.get("ip", ""))).strip(),
+                description=str(row.get("description", row.get("descr", ""))).strip(),
+            )
+        )
 
     session.touch()
     return DeviceUnboundDomainsResponse(
@@ -1834,8 +1885,11 @@ def get_device_unbound_forwards(
     try:
         with HttpClient(targets=[tgt], tuning=tuning) as client:
             response = client.call(
-                tgt, device.api_key, device.api_secret,
-                "POST", UNBOUND_FORWARD_SEARCH,
+                tgt,
+                device.api_key,
+                device.api_secret,
+                "POST",
+                UNBOUND_FORWARD_SEARCH,
                 json={"current": 1, "rowCount": -1},
             )
     except OpnCockpitError as exc:
@@ -1871,16 +1925,18 @@ def get_device_unbound_forwards(
             port = int(str(port_raw)) if port_raw not in ("", None) else 53
         except (TypeError, ValueError):
             port = 53
-        entries.append(UnboundForwardEntryResponse(
-            uuid=uuid,
-            enabled=enabled_raw not in ("", "0", "false", "False"),
-            domain=str(row.get("domain", "")).strip(),
-            server=str(row.get("server", row.get("forward_addr", ""))).strip(),
-            port=port,
-            type=str(row.get("type", "forward")).strip(),
-            verify=str(row.get("verify", "")).strip(),
-            description=str(row.get("description", row.get("descr", ""))).strip(),
-        ))
+        entries.append(
+            UnboundForwardEntryResponse(
+                uuid=uuid,
+                enabled=enabled_raw not in ("", "0", "false", "False"),
+                domain=str(row.get("domain", "")).strip(),
+                server=str(row.get("server", row.get("forward_addr", ""))).strip(),
+                port=port,
+                type=str(row.get("type", "forward")).strip(),
+                verify=str(row.get("verify", "")).strip(),
+                description=str(row.get("description", row.get("descr", ""))).strip(),
+            )
+        )
 
     session.touch()
     return DeviceUnboundForwardsResponse(
@@ -1901,7 +1957,8 @@ def get_device_unbound_forwards(
 def _resolve_device_or_404(session: Session, device_id: str):
     """Gemeinsamer Lookup + Zugriffs-Check fuer die Unbound-CSV-Endpoints."""
     device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None,
+        (d for d in session.opened.data.devices if d.id == device_id),
+        None,
     )
     if device is None:
         raise HTTPException(
@@ -1918,9 +1975,13 @@ def _fetch_live_unbound_hosts(client, target, key, secret):
         UNBOUND_HOST_SEARCH,
     )
     from opn_cockpit.core.objects.unbound import UnboundHostSpec  # noqa: PLC0415
+
     response = client.call(
-        target, key, secret,
-        "POST", UNBOUND_HOST_SEARCH,
+        target,
+        key,
+        secret,
+        "POST",
+        UNBOUND_HOST_SEARCH,
         json={"current": 1, "rowCount": -1},
     )
     try:
@@ -1935,13 +1996,15 @@ def _fetch_live_unbound_hosts(client, target, key, secret):
         if not isinstance(row, dict):
             continue
         enabled_raw = str(row.get("enabled", "1"))
-        specs.append(UnboundHostSpec(
-            host=str(row.get("hostname", row.get("host", ""))).strip(),
-            domain=str(row.get("domain", "")).strip(),
-            server=str(row.get("server", row.get("rr", ""))).strip(),
-            description=str(row.get("description", row.get("descr", ""))).strip(),
-            enabled=enabled_raw not in ("", "0", "false", "False"),
-        ))
+        specs.append(
+            UnboundHostSpec(
+                host=str(row.get("hostname", row.get("host", ""))).strip(),
+                domain=str(row.get("domain", "")).strip(),
+                server=str(row.get("server", row.get("rr", ""))).strip(),
+                description=str(row.get("description", row.get("descr", ""))).strip(),
+                enabled=enabled_raw not in ("", "0", "false", "False"),
+            )
+        )
     return specs
 
 
@@ -1951,9 +2014,13 @@ def _fetch_live_unbound_forwards(client, target, key, secret):
         UNBOUND_FORWARD_SEARCH,
     )
     from opn_cockpit.core.objects.unbound import UnboundForwardSpec  # noqa: PLC0415
+
     response = client.call(
-        target, key, secret,
-        "POST", UNBOUND_FORWARD_SEARCH,
+        target,
+        key,
+        secret,
+        "POST",
+        UNBOUND_FORWARD_SEARCH,
         json={"current": 1, "rowCount": -1},
     )
     try:
@@ -1973,15 +2040,17 @@ def _fetch_live_unbound_forwards(client, target, key, secret):
             port = int(str(port_raw)) if port_raw not in ("", None) else 53
         except (TypeError, ValueError):
             port = 53
-        specs.append(UnboundForwardSpec(
-            domain=str(row.get("domain", "")).strip(),
-            server=str(row.get("server", row.get("forward_addr", ""))).strip(),
-            port=port,
-            type=(str(row.get("type", "forward")).strip() or "forward"),
-            verify=str(row.get("verify", "")).strip(),
-            description=str(row.get("description", row.get("descr", ""))).strip(),
-            enabled=enabled_raw not in ("", "0", "false", "False"),
-        ))
+        specs.append(
+            UnboundForwardSpec(
+                domain=str(row.get("domain", "")).strip(),
+                server=str(row.get("server", row.get("forward_addr", ""))).strip(),
+                port=port,
+                type=(str(row.get("type", "forward")).strip() or "forward"),
+                verify=str(row.get("verify", "")).strip(),
+                description=str(row.get("description", row.get("descr", ""))).strip(),
+                enabled=enabled_raw not in ("", "0", "false", "False"),
+            )
+        )
     return specs
 
 
@@ -2007,13 +2076,14 @@ def export_device_unbound_hosts_csv(
     tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
     with HttpClient(targets=[tgt], tuning=tuning) as client:
         specs = _fetch_live_unbound_hosts(
-            client, tgt, device.api_key, device.api_secret,
+            client,
+            tgt,
+            device.api_key,
+            device.api_secret,
         )
     csv_body = write_unbound_hosts_csv(specs)
     session.touch()
-    safe_name = "".join(
-        c if c.isalnum() or c in "_-" else "_" for c in device.name
-    ) or "device"
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in device.name) or "device"
     filename = f"unbound-hosts-{safe_name}.csv"
     return Response(
         content=csv_body,
@@ -2041,13 +2111,14 @@ def export_device_unbound_forwards_csv(
     tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
     with HttpClient(targets=[tgt], tuning=tuning) as client:
         specs = _fetch_live_unbound_forwards(
-            client, tgt, device.api_key, device.api_secret,
+            client,
+            tgt,
+            device.api_key,
+            device.api_secret,
         )
     csv_body = write_unbound_forwards_csv(specs)
     session.touch()
-    safe_name = "".join(
-        c if c.isalnum() or c in "_-" else "_" for c in device.name
-    ) or "device"
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in device.name) or "device"
     filename = f"unbound-forwards-{safe_name}.csv"
     return Response(
         content=csv_body,
@@ -2064,7 +2135,7 @@ def _run_unbound_import(
     session: Session,
     device,
     payload: UnboundImportRequest,
-    subsystem: str,      # "unbound_hosts" | "unbound_forwards"
+    subsystem: str,  # "unbound_hosts" | "unbound_forwards"
 ) -> UnboundImportResponse:
     """Gemeinsame Import-Logik fuer beide Subsystems.
 
@@ -2138,7 +2209,9 @@ def _run_unbound_import(
     tuning = tuning_from_settings(settings)
     tgt = HttpTarget(host=device.host, port=device.port, verify=device.tls_verify)
     ctx = RequestContext(
-        target=tgt, key=device.api_key, secret=device.api_secret,
+        target=tgt,
+        key=device.api_key,
+        secret=device.api_secret,
     )
 
     with HttpClient(targets=[tgt], tuning=tuning) as client:
@@ -2154,33 +2227,45 @@ def _run_unbound_import(
             row_num = pos + 2  # CSV: Zeile 1 = Header
             current = live_by_ident.get(ident)
             if current is None:
-                actions.append(UnboundImportAction(
-                    row_num=row_num, action="add",
-                    identity=_label(spec),
-                    summary=f"Neu: {_label(spec)}",
-                ))
+                actions.append(
+                    UnboundImportAction(
+                        row_num=row_num,
+                        action="add",
+                        identity=_label(spec),
+                        summary=f"Neu: {_label(spec)}",
+                    )
+                )
             elif _is_identical(current, spec):
-                actions.append(UnboundImportAction(
-                    row_num=row_num, action="skip",
-                    identity=_label(spec),
-                    summary="Identisch - uebersprungen.",
-                ))
+                actions.append(
+                    UnboundImportAction(
+                        row_num=row_num,
+                        action="skip",
+                        identity=_label(spec),
+                        summary="Identisch - uebersprungen.",
+                    )
+                )
             else:
-                actions.append(UnboundImportAction(
-                    row_num=row_num, action="update",
-                    identity=_label(spec),
-                    summary=f"Update: {_label(spec)}",
-                ))
+                actions.append(
+                    UnboundImportAction(
+                        row_num=row_num,
+                        action="update",
+                        identity=_label(spec),
+                        summary=f"Update: {_label(spec)}",
+                    )
+                )
 
         if payload.reconcile:
             for ident, current in live_by_ident.items():
                 if ident in csv_idents:
                     continue
-                actions.append(UnboundImportAction(
-                    row_num=0, action="delete",
-                    identity=_label(current),
-                    summary=f"Loeschen (Live-only): {_label(current)}",
-                ))
+                actions.append(
+                    UnboundImportAction(
+                        row_num=0,
+                        action="delete",
+                        identity=_label(current),
+                        summary=f"Loeschen (Live-only): {_label(current)}",
+                    )
+                )
 
         # ------ Zaehlungen ------
         def _cnt(kind: str) -> int:
@@ -2211,15 +2296,17 @@ def _run_unbound_import(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    f"CSV enthaelt {len(parse_result.errors)} Parse-Fehler. "
-                    "Bitte erst korrigieren."
+                    f"CSV enthaelt {len(parse_result.errors)} Parse-Fehler. Bitte erst korrigieren."
                 ),
             )
 
         # Pre-Apply-Backup ziehen (blockierend)
         try:
             content = download_backup(
-                client, tgt, device.api_key, device.api_secret,
+                client,
+                tgt,
+                device.api_key,
+                device.api_secret,
             )
             backup_record = append_backup(
                 device.id,
@@ -2279,7 +2366,9 @@ def _run_unbound_import(
                 if action_entry.action in ("add", "update"):
                     # Nach identity_label rueckwaerts das Spec finden.
                     spec = _find_spec_by_label(
-                        parsed_by_ident, action_entry.identity, subsystem,
+                        parsed_by_ident,
+                        action_entry.identity,
+                        subsystem,
                     )
                     if spec is None:
                         action_entry.action = "failed"
@@ -2293,13 +2382,13 @@ def _run_unbound_import(
                     any_write_success = True
                 elif action_entry.action == "delete":
                     ident_key = _label_to_ident(
-                        action_entry.identity, live_by_ident_current, subsystem,
+                        action_entry.identity,
+                        live_by_ident_current,
+                        subsystem,
                     )
                     if ident_key is None:
                         action_entry.action = "failed"
-                        action_entry.summary = (
-                            "Live-Entry nicht mehr gefunden (Race?)."
-                        )
+                        action_entry.summary = "Live-Entry nicht mehr gefunden (Race?)."
                         continue
                     adapter.delete(client, ctx, _build_ident(ident_key, subsystem))
                     action_entry.summary = f"Geloescht: {action_entry.identity}"
@@ -2318,9 +2407,10 @@ def _run_unbound_import(
                 reason = exc.context.summary or exc.context.error_kind or "unbekannt"
                 # Rerun ist nicht zwingend, der User erfaehrt aber vom Fail.
                 for a in actions:
-                    if a.action in ("add", "update", "delete"):
-                        if a.summary.startswith("OK") or a.summary.startswith("Geloescht"):
-                            a.summary = f"{a.summary} — reconfigure gescheitert: {reason}"
+                    if a.action in ("add", "update", "delete") and a.summary.startswith(
+                        ("OK", "Geloescht"),
+                    ):
+                        a.summary = f"{a.summary} — reconfigure gescheitert: {reason}"
 
     # Response aktualisieren
     response.applied = True
@@ -2384,6 +2474,7 @@ def _build_ident(ident_tuple, subsystem: str):
         UnboundForwardIdentity,
         UnboundHostIdentity,
     )
+
     if subsystem == "unbound_hosts":
         host, domain = ident_tuple
         return UnboundHostIdentity(host=host, domain=domain)
@@ -2410,7 +2501,9 @@ def import_device_unbound_hosts(
     require_write_role(session)
     device = _resolve_device_or_404(session, device_id)
     return _run_unbound_import(
-        session=session, device=device, payload=payload,
+        session=session,
+        device=device,
+        payload=payload,
         subsystem="unbound_hosts",
     )
 
@@ -2428,7 +2521,9 @@ def import_device_unbound_forwards(
     require_write_role(session)
     device = _resolve_device_or_404(session, device_id)
     return _run_unbound_import(
-        session=session, device=device, payload=payload,
+        session=session,
+        device=device,
+        payload=payload,
         subsystem="unbound_forwards",
     )
 
@@ -2476,31 +2571,38 @@ def import_unbound_multi_device(
             None,
         )
         if device is None:
-            results.append(UnboundMultiImportDeviceResult(
-                device_id=device_id,
-                device_name="(unbekannt)",
-                ok=False,
-                error_summary=f"Geraet '{device_id}' nicht im Tresor.",
-            ))
+            results.append(
+                UnboundMultiImportDeviceResult(
+                    device_id=device_id,
+                    device_name="(unbekannt)",
+                    ok=False,
+                    error_summary=f"Geraet '{device_id}' nicht im Tresor.",
+                )
+            )
             continue
 
         try:
             require_device_access(device, session)
         except HTTPException as exc:
-            results.append(UnboundMultiImportDeviceResult(
-                device_id=device.id,
-                device_name=device.name,
-                ok=False,
-                error_summary=(
-                    exc.detail if isinstance(exc.detail, str)
-                    else "Kein Zugriff auf dieses Geraet."
-                ),
-            ))
+            results.append(
+                UnboundMultiImportDeviceResult(
+                    device_id=device.id,
+                    device_name=device.name,
+                    ok=False,
+                    error_summary=(
+                        exc.detail
+                        if isinstance(exc.detail, str)
+                        else "Kein Zugriff auf dieses Geraet."
+                    ),
+                )
+            )
             continue
 
         try:
             report = _run_unbound_import(
-                session=session, device=device, payload=single_payload,
+                session=session,
+                device=device,
+                payload=single_payload,
                 subsystem=payload.subsystem,
             )
         except HTTPException as exc:
@@ -2508,20 +2610,24 @@ def import_unbound_multi_device(
             # Aufruf pro Geraet raist. Wir kapseln das statt den ganzen
             # Multi-Endpoint zu killen.
             detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-            results.append(UnboundMultiImportDeviceResult(
-                device_id=device.id,
-                device_name=device.name,
-                ok=False,
-                error_summary=detail,
-            ))
+            results.append(
+                UnboundMultiImportDeviceResult(
+                    device_id=device.id,
+                    device_name=device.name,
+                    ok=False,
+                    error_summary=detail,
+                )
+            )
             continue
-        except Exception as exc:  # noqa: BLE001
-            results.append(UnboundMultiImportDeviceResult(
-                device_id=device.id,
-                device_name=device.name,
-                ok=False,
-                error_summary=f"Interner Fehler: {exc}",
-            ))
+        except Exception as exc:
+            results.append(
+                UnboundMultiImportDeviceResult(
+                    device_id=device.id,
+                    device_name=device.name,
+                    ok=False,
+                    error_summary=f"Interner Fehler: {exc}",
+                )
+            )
             continue
 
         # Parse-Errors sind fuer alle Geraete gleich (dieselbe CSV) —
@@ -2532,12 +2638,14 @@ def import_unbound_multi_device(
         if report.applied:
             any_applied = True
 
-        results.append(UnboundMultiImportDeviceResult(
-            device_id=device.id,
-            device_name=device.name,
-            ok=True,
-            report=report,
-        ))
+        results.append(
+            UnboundMultiImportDeviceResult(
+                device_id=device.id,
+                device_name=device.name,
+                ok=True,
+                report=report,
+            )
+        )
 
     ok_reports = [r.report for r in results if r.ok and r.report is not None]
     executed_iso = ""
@@ -2600,9 +2708,7 @@ def trigger_device_firmware_check(
     aktualisiert" sauberer ist als "klick - irgendwann mal manuell
     nachladen".
     """
-    vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None
-    )
+    vault_device = next((d for d in session.opened.data.devices if d.id == device_id), None)
     if vault_device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2619,7 +2725,10 @@ def trigger_device_firmware_check(
     timestamp = _iso_now()
     with HttpClient(targets=[target], tuning=tuning) as client:
         ok, msg = trigger_firmware_check(
-            client, target, vault_device.api_key, vault_device.api_secret,
+            client,
+            target,
+            vault_device.api_key,
+            vault_device.api_secret,
         )
         if not ok:
             raise HTTPException(
@@ -2627,7 +2736,10 @@ def trigger_device_firmware_check(
                 detail=f"Update-Check konnte nicht angestossen werden: {msg}",
             )
         fw = _wait_for_firmware_check(
-            client, target, vault_device.api_key, vault_device.api_secret,
+            client,
+            target,
+            vault_device.api_key,
+            vault_device.api_secret,
         )
     session.touch()
     return FirmwareStatusEntry(
@@ -2711,7 +2823,8 @@ def trigger_device_firmware_update(
         payload = FirmwareTriggerRequest()
 
     vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None,
+        (d for d in session.opened.data.devices if d.id == device_id),
+        None,
     )
     if vault_device is None:
         raise HTTPException(
@@ -2732,20 +2845,24 @@ def trigger_device_firmware_update(
     with HttpClient(targets=[target], tuning=tuning) as client:
         if payload.mode == "upgrade":
             ok, msg = trigger_firmware_upgrade(
-                client, target, vault_device.api_key, vault_device.api_secret,
+                client,
+                target,
+                vault_device.api_key,
+                vault_device.api_secret,
             )
         else:
             ok, msg = trigger_firmware_update(
-                client, target, vault_device.api_key, vault_device.api_secret,
+                client,
+                target,
+                vault_device.api_key,
+                vault_device.api_secret,
             )
 
     audit_kind = (
-        AuditEventKind.FIRMWARE_UPDATE_STARTED if ok
-        else AuditEventKind.FIRMWARE_UPDATE_FAILED
+        AuditEventKind.FIRMWARE_UPDATE_STARTED if ok else AuditEventKind.FIRMWARE_UPDATE_FAILED
     )
     audit_action = (
-        f"firmware_{payload.mode}_started" if ok
-        else f"firmware_{payload.mode}_trigger_failed"
+        f"firmware_{payload.mode}_started" if ok else f"firmware_{payload.mode}_trigger_failed"
     )
     get_audit_backend().append(
         audit_kind,
@@ -2797,7 +2914,8 @@ def get_device_firmware_upgrade_status(
     Reboot wieder ``status="done"``.
     """
     vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None,
+        (d for d in session.opened.data.devices if d.id == device_id),
+        None,
     )
     if vault_device is None:
         raise HTTPException(
@@ -2817,7 +2935,10 @@ def get_device_firmware_upgrade_status(
 
     with HttpClient(targets=[target], tuning=tuning) as client:
         us: UpgradeStatus = fetch_upgrade_status(
-            client, target, vault_device.api_key, vault_device.api_secret,
+            client,
+            target,
+            vault_device.api_key,
+            vault_device.api_secret,
         )
     session.touch()
     return FirmwareUpgradeStatusResponse(
@@ -2874,9 +2995,7 @@ def download_device_backup(
 
 
 def _download_device_backup_impl(device_id: str, session: Session) -> Response:
-    vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None
-    )
+    vault_device = next((d for d in session.opened.data.devices if d.id == device_id), None)
     if vault_device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2948,7 +3067,7 @@ def _download_device_backup_impl(device_id: str, session: Session) -> Response:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Backup-Download fehlgeschlagen ({exc.context.error_kind}): "
-                   f"{exc.context.summary or '-'}.",
+            f"{exc.context.summary or '-'}.",
         ) from exc
 
     # Datei-Name: device-name + ISO-Datum (ohne Doppelpunkte, sonst meckert Windows).
@@ -2988,9 +3107,7 @@ def _download_device_backup_impl(device_id: str, session: Session) -> Response:
             device_id,
         )
 
-    audit_summary = (
-        f"Konfig-Backup geladen von {vault_device.name} ({len(content)} Bytes)"
-    )
+    audit_summary = f"Konfig-Backup geladen von {vault_device.name} ({len(content)} Bytes)"
     if persisted_record_id:
         audit_summary += f", lokal persistiert als {persisted_record_id}"
     get_audit_backend().append(
@@ -3033,9 +3150,7 @@ def create_device_backup(
     die Metadaten. Use-Case: User will "schnell mal sichern" ohne
     Save-Dialog.
     """
-    vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None
-    )
+    vault_device = next((d for d in session.opened.data.devices if d.id == device_id), None)
     if vault_device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -3053,14 +3168,15 @@ def create_device_backup(
     try:
         with HttpClient(targets=[target], tuning=tuning) as client:
             content = download_backup(
-                client, target, vault_device.api_key, vault_device.api_secret,
+                client,
+                target,
+                vault_device.api_key,
+                vault_device.api_secret,
             )
     except AuthError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=(
-                f"Backup abgelehnt: {exc.context.summary or 'API-Schluessel ungueltig'}."
-            ),
+            detail=(f"Backup abgelehnt: {exc.context.summary or 'API-Schluessel ungueltig'}."),
         ) from exc
     except UnreachableError as exc:
         sc = (
@@ -3086,7 +3202,7 @@ def create_device_backup(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Backup-Erzeugung fehlgeschlagen ({exc.context.error_kind}): "
-                   f"{exc.context.summary or '-'}.",
+            f"{exc.context.summary or '-'}.",
         ) from exc
 
     try:
@@ -3145,9 +3261,7 @@ def list_device_backups(
     session: Session = Depends(require_session),
 ) -> BackupListResponse:
     """Liefert die lokal gespeicherten Backups eines Geraets, neueste zuerst."""
-    vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None
-    )
+    vault_device = next((d for d in session.opened.data.devices if d.id == device_id), None)
     if vault_device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -3175,9 +3289,7 @@ def download_stored_backup(
     session: Session = Depends(require_session),
 ) -> Response:
     """Liefert einen lokal gespeicherten Backup als XML-Download."""
-    vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None
-    )
+    vault_device = next((d for d in session.opened.data.devices if d.id == device_id), None)
     if vault_device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -3205,7 +3317,9 @@ def download_stored_backup(
     trigger_label = (record.trigger if record else "stored").replace("-", "_")
     ts_for_name = (
         (record.timestamp_utc if record else _iso_now())
-        .replace(":", "").replace("-", "").replace(".", "_")
+        .replace(":", "")
+        .replace("-", "")
+        .replace(".", "_")
     )
     filename = f"opnsense-config-{safe_name}-{trigger_label}-{ts_for_name}.xml"
     get_audit_backend().append(
@@ -3215,8 +3329,7 @@ def download_stored_backup(
         target_device_id=device_id,
         target_device_name=vault_device.name,
         summary=(
-            f"Lokal gespeichertes Backup heruntergeladen "
-            f"({vault_device.name}, id={backup_id})"
+            f"Lokal gespeichertes Backup heruntergeladen ({vault_device.name}, id={backup_id})"
         ),
     )
     session.touch()
@@ -3238,9 +3351,7 @@ def delete_stored_backup(
 ) -> None:
     """Loescht ein einzelnes lokal gespeichertes Backup."""
     require_write_role(session)
-    vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None
-    )
+    vault_device = next((d for d in session.opened.data.devices if d.id == device_id), None)
     if vault_device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -3273,7 +3384,8 @@ def delete_stored_backup(
     except BackupStoreError:
         _log.exception(
             "Backup-Index-Update nach DELETE fehlgeschlagen fuer %s/%s",
-            device_id, backup_id,
+            device_id,
+            backup_id,
         )
     get_audit_backend().append(
         AuditEventKind.BACKUP_DOWNLOADED,
@@ -3281,9 +3393,7 @@ def delete_stored_backup(
         action="backup_deleted",
         target_device_id=device_id,
         target_device_name=vault_device.name,
-        summary=(
-            f"Lokales Backup geloescht ({vault_device.name}, id={backup_id})"
-        ),
+        summary=(f"Lokales Backup geloescht ({vault_device.name}, id={backup_id})"),
     )
     session.touch()
 
@@ -3324,16 +3434,18 @@ def test_safety_net(
     """
     from opn_cockpit.core import ssh_safety_net  # noqa: PLC0415
 
-    vault_device = next(
-        (d for d in session.opened.data.devices if d.id == device_id), None
-    )
+    vault_device = next((d for d in session.opened.data.devices if d.id == device_id), None)
     if vault_device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Geraet mit ID '{device_id}' nicht im Tresor.",
         )
     require_device_access(vault_device, session)
-    if not vault_device.ssh_enabled or not vault_device.ssh_user or not vault_device.ssh_private_key_pem:
+    if (
+        not vault_device.ssh_enabled
+        or not vault_device.ssh_user
+        or not vault_device.ssh_private_key_pem
+    ):
         return SafetyNetTestResponse(
             success=False,
             summary=(
@@ -3417,8 +3529,6 @@ def _require_vault_path(session: Session) -> Path:
             detail="Tresor-Pfad fehlt in der Session.",
         )
     return vault_path
-
-
 
 
 def _to_device_response(device: Device) -> DeviceResponse:

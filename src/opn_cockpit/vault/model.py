@@ -140,7 +140,7 @@ class VaultSettings:
     # wieder erreichbar zu werden und wendet den Plan dann ohne weiteres
     # Zutun an. Solange die Session lebt, laeuft der Watcher weiter.
     auto_retry_enabled: bool = True
-    auto_retry_max_hours: int = 168     # 7 Tage - mobile Racks koennen lang offline sein
+    auto_retry_max_hours: int = 168  # 7 Tage - mobile Racks koennen lang offline sein
     auto_retry_interval_minutes: int = 5
 
     # v0.9 #1 Safety-Net via SSH (On-Device Dead-Man's-Switch).
@@ -191,9 +191,7 @@ class VaultData:
         try:
             decoded = json.loads(data.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise CorruptVaultError(
-                f"Tresor-Inhalt ist kein gültiges JSON: {exc}"
-            ) from exc
+            raise CorruptVaultError(f"Tresor-Inhalt ist kein gültiges JSON: {exc}") from exc
         if not isinstance(decoded, dict):
             raise CorruptVaultError("Tresor-Wurzelobjekt ist kein JSON-Objekt.")
         return cls._from_dict(decoded)
@@ -202,11 +200,7 @@ class VaultData:
 
     @classmethod
     def _from_dict(cls, raw: dict[str, Any]) -> VaultData:
-        devices = [
-            _device_from_dict(d)
-            for d in raw.get("devices", [])
-            if isinstance(d, dict)
-        ]
+        devices = [_device_from_dict(d) for d in raw.get("devices", []) if isinstance(d, dict)]
         settings = _settings_from_dict(raw.get("settings") or {})
         return cls(
             schema_version=int(raw.get("schema_version", SCHEMA_VERSION_CURRENT)),
@@ -294,7 +288,8 @@ def _smtp_from_dict(raw: dict[str, Any]) -> SmtpSettings:
     recipients_raw = raw.get("default_recipients", [])
     recipients = (
         [str(r).strip() for r in recipients_raw if str(r).strip()]
-        if isinstance(recipients_raw, list) else []
+        if isinstance(recipients_raw, list)
+        else []
     )
     tls_mode = str(raw.get("tls_mode", defaults.tls_mode)).strip().lower()
     if tls_mode not in ("starttls", "tls", "none"):

@@ -66,10 +66,10 @@ DEFAULT_ADMIN_PASSWORD = "OPN-Cockpit!"  # 12 Zeichen — entspricht MIN_PASSWOR
 
 # Lifecycle-Stati.
 BootstrapStatus = Literal[
-    "single-user",        # Single-User-Mode, kein Bootstrap noetig
-    "needs-admin",        # Multi-User: noch kein Admin in der DB
-    "needs-vault-unlock", # Multi-User: Admin existiert, Vault noch nicht entsperrt
-    "ready",              # Multi-User: User koennen sich einloggen
+    "single-user",  # Single-User-Mode, kein Bootstrap noetig
+    "needs-admin",  # Multi-User: noch kein Admin in der DB
+    "needs-vault-unlock",  # Multi-User: Admin existiert, Vault noch nicht entsperrt
+    "ready",  # Multi-User: User koennen sich einloggen
 ]
 
 
@@ -135,7 +135,8 @@ class ServerState:
             return
         if self._user_store.get_user_by_name(DEFAULT_ADMIN_USERNAME) is not None:
             return
-        from opn_cockpit.security.users import UserStoreError
+        from opn_cockpit.security.users import UserStoreError  # noqa: PLC0415
+
         with contextlib.suppress(UserStoreError):
             self._user_store.create_user(
                 username=DEFAULT_ADMIN_USERNAME,
@@ -147,12 +148,18 @@ class ServerState:
         # Windows-Service zeigt install-service.ps1 das gleiche im Dialog.
         msg = (
             "\n"
-            + "=" * 60 + "\n"
+            + "=" * 60
+            + "\n"
             + "  OPN-Cockpit Default-Admin angelegt\n"
-            + "  Username: " + DEFAULT_ADMIN_USERNAME + "\n"
-            + "  Passwort: " + DEFAULT_ADMIN_PASSWORD + "\n"
+            + "  Username: "
+            + DEFAULT_ADMIN_USERNAME
+            + "\n"
+            + "  Passwort: "
+            + DEFAULT_ADMIN_PASSWORD
+            + "\n"
             + "  Beim ersten Login MUSS das Passwort geaendert werden.\n"
-            + "=" * 60 + "\n"
+            + "=" * 60
+            + "\n"
         )
         sys.stderr.write(msg)
         sys.stderr.flush()
@@ -209,7 +216,8 @@ class ServerState:
         """
         self._bootstrap_token = None
         with contextlib.suppress(OSError, ImportError):
-            from opn_cockpit.config import get_app_data_dir
+            from opn_cockpit.config import get_app_data_dir  # noqa: PLC0415
+
             token_file = get_app_data_dir() / "BOOTSTRAP-TOKEN.txt"
             if token_file.exists():
                 token_file.unlink()
@@ -419,10 +427,7 @@ class ServerState:
         """
         with self._lock:
             new_opened = save_vault(vault_path, opened, password)
-            if (
-                self.is_multi_user_mode
-                and self._vault_path == vault_path
-            ):
+            if self.is_multi_user_mode and self._vault_path == vault_path:
                 self._opened_vault = new_opened
                 self._master_password = password
             return new_opened

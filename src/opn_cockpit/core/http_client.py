@@ -411,9 +411,7 @@ class HttpClient:
                     )
                 else:
                     kind = "timeout"
-                    summary = (
-                        f"Timeout gegen {target.host}:{target.port} ({method} {url})."
-                    )
+                    summary = f"Timeout gegen {target.host}:{target.port} ({method} {url})."
                 raise UnreachableError(
                     summary,
                     context=make_context(
@@ -571,10 +569,7 @@ class HttpClient:
                     snippets.append(f"{key}={value.strip()}")
             if snippets:
                 summary = "; ".join(snippets)
-                return (
-                    summary if len(summary) <= max_len
-                    else summary[: max_len - 1] + "…"
-                )
+                return summary if len(summary) <= max_len else summary[: max_len - 1] + "…"
             keys = ",".join(sorted(data.keys())[:6])
             return f"json-keys={keys}"
         if isinstance(data, list):

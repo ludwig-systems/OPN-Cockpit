@@ -87,9 +87,7 @@ _MIGRATIONS = (
 )
 
 _APPEND_WHITELIST: frozenset[str] = frozenset(
-    f.name
-    for f in fields(AuditRecord)
-    if f.name not in {"timestamp_utc", "actor", "event"}
+    f.name for f in fields(AuditRecord) if f.name not in {"timestamp_utc", "actor", "event"}
 )
 
 
@@ -165,7 +163,9 @@ class SqliteAuditBackend:
                 ).fetchone()
                 prev_hash = row["this_hash"] if row and row["this_hash"] else GENESIS_HASH
                 this_hash = compute_this_hash(
-                    self.chain_secret, prev_hash, record,
+                    self.chain_secret,
+                    prev_hash,
+                    record,
                 )
             conn.execute(
                 "INSERT INTO audit (timestamp_utc, actor, event, summary, action, "

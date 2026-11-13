@@ -34,9 +34,6 @@ from opn_cockpit.migrations import MigrationError, run_pending_migrations
 from opn_cockpit.web.server import create_app
 from opn_cockpit.web.settings import (
     TLS_SOURCE_AUTO,
-    TLS_SOURCE_CUSTOM,
-    TLS_SOURCE_ENV,
-    TLS_SOURCE_NONE,
     WebSettings,
 )
 
@@ -86,13 +83,16 @@ def _redirect_stdio_if_windowless() -> None:
                 log_path.rename(rotated)
         # buffering=1 = line-buffer; reicht fuer Tail-Anwendungen.
         handle = open(  # noqa: SIM115 - lifetime = Prozess-Lebenszeit
-            log_path, "a", buffering=1, encoding="utf-8", errors="replace",
+            log_path,
+            "a",
+            buffering=1,
+            encoding="utf-8",
+            errors="replace",
         )
         sys.stdout = handle
         sys.stderr = handle
         handle.write(
-            f"\n[opn-cockpit] Windowless-Start (PID {os.getpid()}), "
-            f"Logs in {log_path}\n",
+            f"\n[opn-cockpit] Windowless-Start (PID {os.getpid()}), Logs in {log_path}\n",
         )
         handle.flush()
     except OSError:
@@ -143,7 +143,7 @@ def run(settings: WebSettings | None = None) -> int:
     _audit_boot_tls_mode(settings)
 
     app = create_app()
-    app.state.web_settings = settings   # damit Endpoints das lesen koennen
+    app.state.web_settings = settings  # damit Endpoints das lesen koennen
 
     if settings.auto_open_browser:
         _schedule_browser_open(settings.base_url)
@@ -228,7 +228,7 @@ def _ensure_tls_or_http(settings: WebSettings) -> WebSettings:
                 "  Fuer ein produktives Cert bitte im Server-TLS-Modal hochladen.\n\n",
             )
             sys.stderr.flush()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.exception("Auto-Cert-Generation crashed")
             sys.stderr.write(
                 f"[opn-cockpit] Auto-Cert-Generation FEHLGESCHLAGEN: {exc}\n"
@@ -242,8 +242,7 @@ def _ensure_tls_or_http(settings: WebSettings) -> WebSettings:
         fp = read_fingerprint(auto_paths)
         if fp:
             sys.stderr.write(
-                f"[opn-cockpit] HTTPS aktiv (Cert-Quelle: auto)\n"
-                f"  Fingerprint: SHA-256:{fp}\n",
+                f"[opn-cockpit] HTTPS aktiv (Cert-Quelle: auto)\n  Fingerprint: SHA-256:{fp}\n",
             )
             sys.stderr.flush()
 
@@ -268,7 +267,7 @@ def _audit_boot_tls_mode(settings: WebSettings) -> None:
     try:
         from opn_cockpit.audit.backend import get_audit_backend  # noqa: PLC0415
         from opn_cockpit.audit.log import AuditEventKind  # noqa: PLC0415
-    except Exception:  # noqa: BLE001
+    except Exception:
         return
     tls_summary = {
         "env": "TLS aktiv (Env-Cert)",
@@ -276,19 +275,15 @@ def _audit_boot_tls_mode(settings: WebSettings) -> None:
         "auto": "TLS aktiv (Auto-generiertes Self-Signed)",
         "none": "HTTP-only (OPNCOCKPIT_ALLOW_HTTP=1)",
     }.get(settings.tls_source, f"TLS-Modus: {settings.tls_source}")
-    try:
+    # Audit-Backend nicht ansprechbar (Filesystem-Rechte, SQLite-Lock, o. ae.)
+    # -> nicht fatal, Server startet trotzdem.
+    with contextlib.suppress(Exception):
         get_audit_backend().append(
             AuditEventKind.SERVER_RESTARTED,
             actor="system",
             action="server_boot",
-            summary=(
-                f"Server-Boot: {tls_summary}, bind {settings.host}:{settings.port}"
-            ),
+            summary=(f"Server-Boot: {tls_summary}, bind {settings.host}:{settings.port}"),
         )
-    except Exception:  # noqa: BLE001
-        # Audit-Backend nicht ansprechbar (Filesystem-Rechte, SQLite-Lock,
-        # o. ae.) -> nicht fatal, Server startet trotzdem.
-        pass
 
 
 def _schedule_browser_open(url: str) -> None:

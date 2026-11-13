@@ -129,8 +129,11 @@ def list_aliases(
     """
     try:
         response = client.call(
-            target, key, secret,
-            "POST", ALIAS_SEARCH,
+            target,
+            key,
+            secret,
+            "POST",
+            ALIAS_SEARCH,
             json={"current": 1, "rowCount": -1, "searchPhrase": ""},
         )
     except OpnCockpitError as exc:

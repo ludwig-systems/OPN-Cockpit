@@ -265,9 +265,14 @@ class AppSettings:
         if storage_backend not in STORAGE_BACKENDS:
             storage_backend = "filesystem"
         update_enabled_raw = raw.get("update_check_enabled", True)
-        update_enabled = bool(update_enabled_raw) if isinstance(
-            update_enabled_raw, bool,
-        ) else True
+        update_enabled = (
+            bool(update_enabled_raw)
+            if isinstance(
+                update_enabled_raw,
+                bool,
+            )
+            else True
+        )
         try:
             interval = int(raw.get("update_check_interval_hours", 24))
         except (TypeError, ValueError):
@@ -280,9 +285,7 @@ class AppSettings:
         key_path = str(key_raw) if isinstance(key_raw, str) and key_raw.strip() else None
         auto_dir_raw = raw.get("auto_cert_dir")
         auto_dir = (
-            str(auto_dir_raw)
-            if isinstance(auto_dir_raw, str) and auto_dir_raw.strip()
-            else None
+            str(auto_dir_raw) if isinstance(auto_dir_raw, str) and auto_dir_raw.strip() else None
         )
         allow_http_raw = raw.get("allow_http_fallback", False)
         allow_http = bool(allow_http_raw) if isinstance(allow_http_raw, bool) else False

@@ -113,7 +113,9 @@ def start_rollout(
     """
     require_write_role(session)
     require_device_ids_accessible(
-        payload.device_ids, session.opened.data.devices, session,
+        payload.device_ids,
+        session.opened.data.devices,
+        session,
     )
 
     devices_by_id = {d.id: d for d in session.opened.data.devices}

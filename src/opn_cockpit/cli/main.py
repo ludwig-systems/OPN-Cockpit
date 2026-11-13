@@ -136,15 +136,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument("--host", required=True)
     p_add.add_argument("--port", type=int, default=443)
     p_add.add_argument(
-        "--tls-verify", dest="tls_verify", action="store_true", default=True,
+        "--tls-verify",
+        dest="tls_verify",
+        action="store_true",
+        default=True,
         help="TLS-Zertifikat prüfen (Default)",
     )
     p_add.add_argument(
-        "--no-tls-verify", dest="tls_verify", action="store_false",
+        "--no-tls-verify",
+        dest="tls_verify",
+        action="store_false",
         help="TLS-Verifikation deaktivieren (Risiko — wird im UI markiert)",
     )
     p_add.add_argument(
-        "--tags", default="",
+        "--tags",
+        default="",
         help="Komma-separierte Tags, z. B. 'branches,germany'",
     )
     p_add.add_argument("--descr", default="")
@@ -156,9 +162,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_test = sub.add_parser("test-connection", help="Erreichbarkeit + Auth eines Geräts prüfen")
     p_test.add_argument(
-        "--target", default="all",
-        help="Selektor: 'all', 'tag:X', 'group:X', 'id:X', 'name:X' "
-             "(siehe Inventar-Selektoren)",
+        "--target",
+        default="all",
+        help="Selektor: 'all', 'tag:X', 'group:X', 'id:X', 'name:X' (siehe Inventar-Selektoren)",
     )
 
     # ----- Plan -----
@@ -175,11 +181,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_plan_alias = p_plan_sub.add_parser("add-alias", help="Plan für neuen Alias")
     p_plan_alias.add_argument("--name", required=True)
     p_plan_alias.add_argument(
-        "--type", required=True, dest="alias_type",
+        "--type",
+        required=True,
+        dest="alias_type",
         help="host, network, port, url, ...",
     )
     p_plan_alias.add_argument(
-        "--content", required=True,
+        "--content",
+        required=True,
         help="Komma-separierte Einträge, z. B. '10.0.0.1,10.0.0.2'",
     )
     p_plan_alias.add_argument("--descr", default="")
@@ -191,11 +200,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_plan_append.add_argument("--name", required=True)
     p_plan_append.add_argument(
-        "--type", required=True, dest="alias_type",
+        "--type",
+        required=True,
+        dest="alias_type",
         help="host, network, port, url, ... (für Plan-Vorschau)",
     )
     p_plan_append.add_argument(
-        "--content", required=True,
+        "--content",
+        required=True,
         help="Komma-separierte Einträge zum Anhängen",
     )
     p_plan_append.add_argument("--target", default="all", help="Geräte-Selektor")
@@ -213,17 +225,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_discover_sub = p_discover.add_subparsers(dest="discover_action", required=True)
     p_discover_gw = p_discover_sub.add_parser(
-        "gateways", help="Konfigurierte Gateways auf einem Gerät auflisten",
+        "gateways",
+        help="Konfigurierte Gateways auf einem Gerät auflisten",
     )
     p_discover_gw.add_argument(
-        "--target", required=True,
+        "--target",
+        required=True,
         help="Geräte-Selektor (z. B. id:..., name:..., tag:...).",
     )
     p_discover_aliases = p_discover_sub.add_parser(
-        "aliases", help="Bestehende Aliase auf einem Gerät auflisten",
+        "aliases",
+        help="Bestehende Aliase auf einem Gerät auflisten",
     )
     p_discover_aliases.add_argument(
-        "--target", required=True,
+        "--target",
+        required=True,
         help="Geräte-Selektor (z. B. id:..., name:..., tag:...).",
     )
 
@@ -233,17 +249,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_import_sub = p_import.add_subparsers(dest="import_action", required=True)
     p_import_routes = p_import_sub.add_parser(
-        "routes", help="Routen aus CSV (Spalten: network, gateway, descr, disabled)",
+        "routes",
+        help="Routen aus CSV (Spalten: network, gateway, descr, disabled)",
     )
     p_import_routes.add_argument("file", help="Pfad zur CSV-Datei")
     p_import_routes.add_argument("--target", default="all", help="Geräte-Selektor")
     p_import_aliases = p_import_sub.add_parser(
-        "aliases", help="Aliasse aus JSON-Liste",
+        "aliases",
+        help="Aliasse aus JSON-Liste",
     )
     p_import_aliases.add_argument("file", help="Pfad zur JSON-Datei")
     p_import_aliases.add_argument("--target", default="all", help="Geräte-Selektor")
     p_import_aliases.add_argument(
-        "--append", action="store_true",
+        "--append",
+        action="store_true",
         help="Alle Aliasse als append/merge anwenden (überschreibt JSON-Felder)",
     )
 
@@ -253,15 +272,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_profile_delete = p_profile_sub.add_parser("delete", help="Profil löschen")
     p_profile_delete.add_argument("profile_id")
     p_profile_apply = p_profile_sub.add_parser(
-        "apply", help="Profil laden und sofort ausrollen",
+        "apply",
+        help="Profil laden und sofort ausrollen",
     )
     p_profile_apply.add_argument("profile_id_or_name")
     p_profile_apply.add_argument(
-        "--target", default=None,
+        "--target",
+        default=None,
         help="Selektor überschreiben (Default: aus dem Profil)",
     )
     p_profile_save = p_profile_sub.add_parser(
-        "save-route", help="Routen-Aktion als Profil speichern",
+        "save-route",
+        help="Routen-Aktion als Profil speichern",
     )
     p_profile_save.add_argument("--name", required=True, dest="profile_name")
     p_profile_save.add_argument("--network", required=True)
@@ -271,7 +293,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_profile_save.add_argument("--target", default="all")
 
     p_profile_save_alias = p_profile_sub.add_parser(
-        "save-alias", help="Alias-Aktion als Profil speichern",
+        "save-alias",
+        help="Alias-Aktion als Profil speichern",
     )
     p_profile_save_alias.add_argument("--name", required=True, dest="profile_name")
     p_profile_save_alias.add_argument("--alias-name", required=True, dest="alias_name")
@@ -279,7 +302,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_profile_save_alias.add_argument("--content", required=True)
     p_profile_save_alias.add_argument("--descr", default="")
     p_profile_save_alias.add_argument(
-        "--append", action="store_true",
+        "--append",
+        action="store_true",
         help="Profil als append/merge speichern (Default: create)",
     )
     p_profile_save_alias.add_argument("--target", default="all")
@@ -296,8 +320,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_verify_pdf = sub.add_parser(
         "audit-verify-pdf",
         help=(
-            "Signatur eines PDF-Audit-Reports gegen den live Audit-Log "
-            "verifizieren (HMAC-SHA256)"
+            "Signatur eines PDF-Audit-Reports gegen den live Audit-Log verifizieren (HMAC-SHA256)"
         ),
     )
     p_verify_pdf.add_argument(
@@ -311,11 +334,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_verify_pdf.add_argument(
-        "--event", help="Filter: nur diesen event-kind pruefen",
+        "--event",
+        help="Filter: nur diesen event-kind pruefen",
     )
     p_verify_pdf.add_argument("--action", help="Filter: nur diese action")
     p_verify_pdf.add_argument(
-        "--device-id", dest="target_device_id",
+        "--device-id",
+        dest="target_device_id",
         help="Filter: nur diese target_device_id",
     )
     p_verify_pdf.add_argument("--actor", help="Filter: nur diesen actor")
@@ -329,11 +354,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Offene Datenmigrationen anzeigen oder anwenden",
     )
     p_migrate.add_argument(
-        "--apply", action="store_true",
+        "--apply",
+        action="store_true",
         help="Pending Migrationen anwenden (Default: nur Status anzeigen)",
     )
     p_migrate.add_argument(
-        "--skip-backup", action="store_true",
+        "--skip-backup",
+        action="store_true",
         help="Pre-Update-Backup ueberspringen (NICHT empfohlen, nur fuer Tests)",
     )
 
@@ -719,10 +746,12 @@ def cmd_apply(args: argparse.Namespace, settings: AppSettings) -> int:
             client=client,
         )
     emit("")
-    emit(format_rollout_matrix(
-        report,
-        devices_by_id={d.id: d.name for d in devices_in_plan},
-    ))
+    emit(
+        format_rollout_matrix(
+            report,
+            devices_by_id={d.id: d.name for d in devices_in_plan},
+        )
+    )
     return EXIT_OK if report.failures == 0 else EXIT_NETWORK_ERROR
 
 
@@ -818,8 +847,10 @@ def _bulk_routes(args: argparse.Namespace, settings: AppSettings) -> int:
     if result.has_errors and not confirm("Trotz Fehlern weitermachen?"):
         return EXIT_USER_ABORT
     return _bulk_plan_and_apply(
-        args, settings,
-        action_name="add_route", subsystem="routes",
+        args,
+        settings,
+        action_name="add_route",
+        subsystem="routes",
         specs=list(result.specs),
     )
 
@@ -838,8 +869,10 @@ def _bulk_aliases(args: argparse.Namespace, settings: AppSettings) -> int:
     has_append = any(s.merge_mode == "append" for s in result.specs)
     action_name = "append_alias" if has_append else "add_alias"
     return _bulk_plan_and_apply(
-        args, settings,
-        action_name=action_name, subsystem="firewall_alias",
+        args,
+        settings,
+        action_name=action_name,
+        subsystem="firewall_alias",
         specs=list(result.specs),
     )
 
@@ -865,13 +898,17 @@ def _bulk_plan_and_apply(
     targets = [HttpTarget(host=d.host, port=d.port, verify=d.tls_verify) for d in devices]
     audit = AuditLog(path=default_audit_path())
     planner = Planner(
-        audit=audit, session=session,
+        audit=audit,
+        session=session,
         max_workers=session.opened.data.settings.max_workers,
     )
     with HttpClient(targets=targets, tuning=tuning) as client:
         plan = planner.create_bulk_plan(
-            action=action_name, specs=specs,
-            devices=devices, adapter=binding.adapter, client=client,
+            action=action_name,
+            specs=specs,
+            devices=devices,
+            adapter=binding.adapter,
+            client=client,
         )
         plan_store = PlanStore(base_dir=get_app_data_dir() / "plans")
         plan_store.save(plan)
@@ -881,22 +918,27 @@ def _bulk_plan_and_apply(
         emit("")
         if not confirm("Diese Aktionen jetzt ausrollen?"):
             emit(
-                f"Abbruch — Plan {plan.plan_id} ist gespeichert und kann "
-                "später ausgerollt werden.",
+                f"Abbruch — Plan {plan.plan_id} ist gespeichert und kann später ausgerollt werden.",
             )
             return EXIT_USER_ABORT
         executor = Executor(
-            session=session, audit=audit,
+            session=session,
+            audit=audit,
             max_workers=session.opened.data.settings.max_workers,
         )
         report = executor.apply(
-            plan, adapter=binding.adapter, controller=binding.controller, client=client,
+            plan,
+            adapter=binding.adapter,
+            controller=binding.controller,
+            client=client,
         )
     emit("")
-    emit(format_rollout_matrix(
-        report,
-        devices_by_id={d.id: d.name for d in devices},
-    ))
+    emit(
+        format_rollout_matrix(
+            report,
+            devices_by_id={d.id: d.name for d in devices},
+        )
+    )
     return EXIT_OK if report.failures == 0 else EXIT_NETWORK_ERROR
 
 
@@ -1038,8 +1080,11 @@ def _profile_apply(
     )
     with HttpClient(targets=targets, tuning=tuning) as client:
         plan = planner.create_plan(
-            action=profile.action, spec=spec,
-            devices=devices, adapter=binding.adapter, client=client,
+            action=profile.action,
+            spec=spec,
+            devices=devices,
+            adapter=binding.adapter,
+            client=client,
         )
         emit(format_plan_preview(plan))
         emit("")
@@ -1047,17 +1092,23 @@ def _profile_apply(
             emit("Abbruch — nichts wurde ausgeführt.")
             return EXIT_USER_ABORT
         executor = Executor(
-            session=session, audit=audit,
+            session=session,
+            audit=audit,
             max_workers=session.opened.data.settings.max_workers,
         )
         report = executor.apply(
-            plan, adapter=binding.adapter, controller=binding.controller, client=client,
+            plan,
+            adapter=binding.adapter,
+            controller=binding.controller,
+            client=client,
         )
     emit("")
-    emit(format_rollout_matrix(
-        report,
-        devices_by_id={d.id: d.name for d in devices},
-    ))
+    emit(
+        format_rollout_matrix(
+            report,
+            devices_by_id={d.id: d.name for d in devices},
+        )
+    )
     return EXIT_OK if report.failures == 0 else EXIT_NETWORK_ERROR
 
 
@@ -1092,8 +1143,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
             emit("Bereits angewandt:")
             for applied in state.applied:
                 emit(
-                    f"  - {applied.id}  "
-                    f"({applied.applied_at_iso}, v{applied.app_version})",
+                    f"  - {applied.id}  ({applied.applied_at_iso}, v{applied.app_version})",
                 )
         if pending:
             emit("Offen:")
@@ -1139,9 +1189,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
         return EXIT_OK
     for rec in records:
         action = rec.action or "-"
-        emit(
-            f"{rec.timestamp_utc}  {rec.actor:<12}  {rec.event:<22}  {action:<12}  {rec.summary}"
-        )
+        emit(f"{rec.timestamp_utc}  {rec.actor:<12}  {rec.event:<22}  {action:<12}  {rec.summary}")
     return EXIT_OK
 
 
@@ -1167,7 +1215,7 @@ def cmd_audit_verify_pdf(args: argparse.Namespace) -> int:
     signature = args.signature.strip()
     # Trim des Prefix, falls User den mitkopiert hat.
     if signature.startswith(SIG_PREFIX):
-        signature = signature[len(SIG_PREFIX):].strip()
+        signature = signature[len(SIG_PREFIX) :].strip()
 
     try:
         event = AuditEventKind(args.event) if args.event else None

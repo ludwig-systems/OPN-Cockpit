@@ -82,14 +82,15 @@ def _parse_release_payload(payload: object) -> LatestRelease:
 
 
 def _check_status(
-    response: httpx.Response, owner: str, repo: str,
+    response: httpx.Response,
+    owner: str,
+    repo: str,
 ) -> None:
     """Wirft GitHubReleaseError fuer alles ausser 200 (und 304 oben behandelt)."""
     status = response.status_code
     if status == HTTPStatus.NOT_FOUND:
         raise GitHubReleaseError(
-            f"Repository {owner}/{repo} hat noch kein Release "
-            "(oder ist privat).",
+            f"Repository {owner}/{repo} hat noch kein Release (oder ist privat).",
         )
     if status == HTTPStatus.FORBIDDEN and "rate limit" in response.text.lower():
         raise GitHubReleaseError("GitHub-Rate-Limit erreicht.")

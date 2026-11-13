@@ -49,11 +49,12 @@ from opn_cockpit.core.http_client import HttpClient, HttpTarget, tuning_from_set
 from opn_cockpit.vault.model import VaultData, VaultDevice
 
 if TYPE_CHECKING:
+    from opn_cockpit.core.http_client import HttpTuning
     from opn_cockpit.web.auth.manager import SessionManager
     from opn_cockpit.web.server_state import ServerState
 
-LOOP_TICK_S = 300            # 5 Min: pruefe Faelligkeit
-MIN_INTERVAL_HOURS = 1       # User-Settings darf nicht unter 1h fallen
+LOOP_TICK_S = 300  # 5 Min: pruefe Faelligkeit
+MIN_INTERVAL_HOURS = 1  # User-Settings darf nicht unter 1h fallen
 
 _LOG = logging.getLogger(__name__)
 
@@ -106,7 +107,9 @@ class BackupScheduler:
                 return
             self._stop = False
             self._thread = Thread(
-                target=self._loop, daemon=True, name="opn-backup-scheduler",
+                target=self._loop,
+                daemon=True,
+                name="opn-backup-scheduler",
             )
             self._thread.start()
 
@@ -278,8 +281,7 @@ class BackupScheduler:
                 target_device_name=device.name,
                 error_kind="store_error",
                 summary=(
-                    f"Scheduled-Backup KONNTE NICHT GESPEICHERT werden bei "
-                    f"'{device.name}': {exc}"
+                    f"Scheduled-Backup KONNTE NICHT GESPEICHERT werden bei '{device.name}': {exc}"
                 ),
             )
             return False

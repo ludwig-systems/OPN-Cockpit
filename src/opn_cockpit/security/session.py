@@ -90,9 +90,7 @@ class Session:
         ohne Passwort entsperrt wurde (CLI/GUI-Default).
         """
         if self._opened is None or self._password is None:
-            raise SessionLockedError(
-                "Session hat kein gecachtes Master-Passwort."
-            )
+            raise SessionLockedError("Session hat kein gecachtes Master-Passwort.")
         return self._password
 
     # ----- Lifecycle -----
@@ -199,6 +197,4 @@ class Session:
         for device in opened.data.devices:
             if device.id == device_id:
                 return device.api_key, device.api_secret
-        raise UnknownDeviceError(
-            f"Gerät mit ID '{device_id}' nicht im Tresor."
-        )
+        raise UnknownDeviceError(f"Gerät mit ID '{device_id}' nicht im Tresor.")

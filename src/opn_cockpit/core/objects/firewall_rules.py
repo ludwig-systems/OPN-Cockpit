@@ -40,7 +40,6 @@ from opn_cockpit.core.objects._endpoints import (
     RULE_APPLY,
     RULE_DEL,
     RULE_GET,
-    RULE_SEARCH,
     RULE_SET,
 )
 from opn_cockpit.core.objects.base import (
@@ -131,9 +130,7 @@ def _raise_if_saved_failed(response: Any, path: str, ctx: RequestContext) -> Non
     validations = body.get("validations")
     detail = ""
     if isinstance(validations, dict) and validations:
-        detail = "; ".join(
-            f"{k}: {v}" for k, v in validations.items() if v
-        )
+        detail = "; ".join(f"{k}: {v}" for k, v in validations.items() if v)
     msg = (
         f"OPNsense lehnte den Schreibvorgang ab "
         f"(result='{result}'{(': ' + detail) if detail else ''})."
@@ -278,9 +275,7 @@ class RuleAdapter:
     def spec_from_dict(self, raw: dict[str, Any]) -> RuleSpec:
         sequence_raw = raw.get("sequence")
         try:
-            sequence = (
-                int(sequence_raw) if sequence_raw not in (None, "") else None
-            )
+            sequence = int(sequence_raw) if sequence_raw not in (None, "") else None
         except (TypeError, ValueError):
             sequence = None
         return RuleSpec(
@@ -320,8 +315,11 @@ class RuleAdapter:
             return None
         try:
             response = client.call(
-                ctx.target, ctx.key, ctx.secret,
-                "GET", RULE_GET.format(uuid=ident.uuid),
+                ctx.target,
+                ctx.key,
+                ctx.secret,
+                "GET",
+                RULE_GET.format(uuid=ident.uuid),
             )
         except ValidationError:
             # OPNsense liefert 404 als ValidationError - wir interpretieren
@@ -361,8 +359,11 @@ class RuleAdapter:
     ) -> AddOutcome:
         payload = {"rule": self.to_payload(spec)}
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", RULE_ADD,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            RULE_ADD,
             json=payload,
         )
         _raise_if_saved_failed(response, RULE_ADD, ctx)
@@ -397,8 +398,11 @@ class RuleAdapter:
         payload = {"rule": self.to_payload(spec)}
         set_path = RULE_SET.format(uuid=spec.uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", set_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            set_path,
             json=payload,
         )
         _raise_if_saved_failed(response, set_path, ctx)
@@ -414,8 +418,11 @@ class RuleAdapter:
             return AddOutcome(uuid=None, raw_status=0)
         del_path = RULE_DEL.format(uuid=ident.uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", del_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            del_path,
             json={},
         )
         _raise_if_saved_failed(response, del_path, ctx)
@@ -440,7 +447,9 @@ class RuleAdapter:
         )
 
     def diff_for_update(
-        self, current: RuleSpec | None, target_spec: RuleSpec,
+        self,
+        current: RuleSpec | None,
+        target_spec: RuleSpec,
     ) -> Diff:
         if current is None:
             return Diff(
@@ -464,7 +473,9 @@ class RuleAdapter:
         )
 
     def diff_for_delete(
-        self, current: RuleSpec | None, ident: RuleIdentity,
+        self,
+        current: RuleSpec | None,
+        ident: RuleIdentity,
     ) -> Diff:
         if current is None:
             return Diff(
@@ -492,7 +503,9 @@ def _field_diffs(current: RuleSpec, target: RuleSpec) -> list[str]:
     if current.protocol != target.protocol:
         changes.append(f"Protocol {current.protocol}->{target.protocol}")
     if (current.source_net, current.source_port, current.source_not) != (
-        target.source_net, target.source_port, target.source_not
+        target.source_net,
+        target.source_port,
+        target.source_not,
     ):
         changes.append("Source geaendert")
     if (
@@ -527,14 +540,20 @@ class RulesController:
     def reconfigure(self, client: HttpClient, ctx: RequestContext) -> None:
         try:
             client.call(
-                ctx.target, ctx.key, ctx.secret,
-                "POST", RULE_APPLY,
+                ctx.target,
+                ctx.key,
+                ctx.secret,
+                "POST",
+                RULE_APPLY,
                 json={},
                 timeout_override_s=client.tuning.reconfigure_timeout_s,
             )
         except (
-            UnreachableError, AuthError, ValidationError,
-            ApiError, EgressDeniedError,
+            UnreachableError,
+            AuthError,
+            ValidationError,
+            ApiError,
+            EgressDeniedError,
         ) as exc:
             raise ReconfigureError(
                 "Apply des Filter-Subsystems fehlgeschlagen.",

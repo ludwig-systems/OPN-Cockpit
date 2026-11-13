@@ -134,20 +134,41 @@ def export_audit_csv(
     )
     buffer = io.StringIO()
     writer = csv.writer(buffer, quoting=csv.QUOTE_MINIMAL)
-    writer.writerow([
-        "timestamp_utc", "actor", "event", "summary", "action",
-        "target_device_id", "target_device_name", "target_count",
-        "status", "error_kind", "failed_phase", "duration_ms", "vault_path",
-    ])
+    writer.writerow(
+        [
+            "timestamp_utc",
+            "actor",
+            "event",
+            "summary",
+            "action",
+            "target_device_id",
+            "target_device_name",
+            "target_count",
+            "status",
+            "error_kind",
+            "failed_phase",
+            "duration_ms",
+            "vault_path",
+        ]
+    )
     for r in records:
-        writer.writerow([
-            r.timestamp_utc, r.actor, str(r.event), r.summary,
-            r.action or "", r.target_device_id or "", r.target_device_name or "",
-            r.target_count if r.target_count is not None else "",
-            r.status or "", r.error_kind or "", r.failed_phase or "",
-            r.duration_ms if r.duration_ms is not None else "",
-            r.vault_path or "",
-        ])
+        writer.writerow(
+            [
+                r.timestamp_utc,
+                r.actor,
+                str(r.event),
+                r.summary,
+                r.action or "",
+                r.target_device_id or "",
+                r.target_device_name or "",
+                r.target_count if r.target_count is not None else "",
+                r.status or "",
+                r.error_kind or "",
+                r.failed_phase or "",
+                r.duration_ms if r.duration_ms is not None else "",
+                r.vault_path or "",
+            ]
+        )
     buffer.seek(0)
     return StreamingResponse(
         iter([buffer.getvalue()]),

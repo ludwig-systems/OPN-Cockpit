@@ -122,9 +122,7 @@ def _raise_if_saved_failed(response: Any, path: str, ctx: RequestContext) -> Non
     validations = body.get("validations")
     detail = ""
     if isinstance(validations, dict) and validations:
-        detail = "; ".join(
-            f"{k}: {v}" for k, v in validations.items() if v
-        )
+        detail = "; ".join(f"{k}: {v}" for k, v in validations.items() if v)
     msg = (
         f"OPNsense lehnte den Schreibvorgang ab "
         f"(result='{result}'{(': ' + detail) if detail else ''})."
@@ -278,9 +276,7 @@ class RouteAdapter:
                 validations = body.get("validations")
                 detail = ""
                 if isinstance(validations, dict) and validations:
-                    detail = "; ".join(
-                        f"{k}: {v}" for k, v in validations.items() if v
-                    )
+                    detail = "; ".join(f"{k}: {v}" for k, v in validations.items() if v)
                 msg = (
                     f"OPNsense lehnte den Schreibvorgang ab "
                     f"(result='{result}'{(': ' + detail) if detail else ''})."
@@ -320,8 +316,7 @@ class RouteAdapter:
         existing_uuid = self._search_uuid(client, ctx, spec.to_identity())
         if existing_uuid is None:
             raise ValidationError(
-                f"Route {spec.network} via {spec.gateway} existiert nicht - "
-                "Update nicht moeglich.",
+                f"Route {spec.network} via {spec.gateway} existiert nicht - Update nicht moeglich.",
                 context=make_context(
                     host=ctx.target.host,
                     port=ctx.target.port,
@@ -333,8 +328,11 @@ class RouteAdapter:
         payload = {"route": self.to_payload(spec)}
         set_path = ROUTES_SET.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", set_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            set_path,
             json=payload,
         )
         _raise_if_saved_failed(response, set_path, ctx)
@@ -357,8 +355,11 @@ class RouteAdapter:
             return AddOutcome(uuid=None, raw_status=0)
         del_path = ROUTES_DEL.format(uuid=existing_uuid)
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", del_path,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            del_path,
             json={},
         )
         _raise_if_saved_failed(response, del_path, ctx)
@@ -411,15 +412,12 @@ class RouteAdapter:
             return Diff(
                 kind=DiffKind.SKIP,
                 summary=(
-                    f"Route {ident.network} via {ident.gateway} existiert "
-                    "nicht - bereits weg."
+                    f"Route {ident.network} via {ident.gateway} existiert nicht - bereits weg."
                 ),
             )
         return Diff(
             kind=DiffKind.DELETE,
-            summary=(
-                f"Route {ident.network} via {ident.gateway} wird geloescht"
-            ),
+            summary=(f"Route {ident.network} via {ident.gateway} wird geloescht"),
         )
 
     def _search_uuid(
@@ -435,8 +433,11 @@ class RouteAdapter:
         gerufen - exists liefert nur den Spec, nicht die UUID.
         """
         response = client.call(
-            ctx.target, ctx.key, ctx.secret,
-            "POST", ROUTES_SEARCH,
+            ctx.target,
+            ctx.key,
+            ctx.secret,
+            "POST",
+            ROUTES_SEARCH,
             json={"current": 1, "rowCount": -1},
         )
         try:
@@ -492,9 +493,7 @@ class RouteAdapter:
         if current is None:
             return Diff(
                 kind=DiffKind.NEW,
-                summary=(
-                    f"Neue Route {target_spec.network} via {target_spec.gateway}"
-                ),
+                summary=(f"Neue Route {target_spec.network} via {target_spec.gateway}"),
             )
         return Diff(
             kind=DiffKind.SKIP,

@@ -92,14 +92,10 @@ class VaultHeader:
         und ``VaultVersionError`` bei unbekannter Format-Version.
         """
         if len(raw) < HEADER_SIZE:
-            raise CorruptVaultError(
-                f"Tresor-Datei zu kurz ({len(raw)} < {HEADER_SIZE} Bytes)."
-            )
+            raise CorruptVaultError(f"Tresor-Datei zu kurz ({len(raw)} < {HEADER_SIZE} Bytes).")
         magic = raw[:HEADER_MAGIC_SIZE]
         if magic != HEADER_MAGIC:
-            raise CorruptVaultError(
-                "Falsche Magic-Bytes — Datei ist kein OPN-Cockpit-Tresor."
-            )
+            raise CorruptVaultError("Falsche Magic-Bytes — Datei ist kein OPN-Cockpit-Tresor.")
         try:
             (
                 version,
@@ -114,9 +110,7 @@ class VaultHeader:
                 raw[HEADER_MAGIC_SIZE:HEADER_SIZE],
             )
         except struct.error as exc:
-            raise CorruptVaultError(
-                f"Tresor-Header nicht parsbar: {exc}"
-            ) from exc
+            raise CorruptVaultError(f"Tresor-Header nicht parsbar: {exc}") from exc
 
         if version != HEADER_VERSION:
             raise VaultVersionError(

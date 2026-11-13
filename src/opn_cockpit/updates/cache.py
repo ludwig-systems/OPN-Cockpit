@@ -73,7 +73,8 @@ class UpdateCache:
             return False
         try:
             checked = datetime.strptime(
-                self.last_checked_iso, "%Y-%m-%dT%H:%M:%SZ",
+                self.last_checked_iso,
+                "%Y-%m-%dT%H:%M:%SZ",
             ).replace(tzinfo=UTC)
         except ValueError:
             return False
@@ -100,6 +101,7 @@ class UpdateCache:
     def _from_dict(cls, raw: dict[str, Any]) -> UpdateCache:
         def _str_or_none(value: Any) -> str | None:
             return value if isinstance(value, str) and value else None
+
         return cls(
             last_checked_iso=_str_or_none(raw.get("last_checked_iso")),
             latest_version=_str_or_none(raw.get("latest_version")),

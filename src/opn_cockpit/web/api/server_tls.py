@@ -17,6 +17,7 @@ Antwort einen ``requires_restart``-Flag.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import ssl
 import stat
@@ -34,11 +35,11 @@ from opn_cockpit.security.self_signed import (
     read_fingerprint,
 )
 from opn_cockpit.security.session import Session
+from opn_cockpit.web.acl import require_admin_role
 from opn_cockpit.web.api.schemas import (
     ServerTlsStatusResponse,
     ServerTlsUploadRequest,
 )
-from opn_cockpit.web.acl import require_admin_role
 from opn_cockpit.web.auth.dependencies import require_session
 
 router = APIRouter(prefix="/api/server", tags=["server-tls"])
@@ -230,10 +231,7 @@ def upload_server_tls(
     except ssl.SSLError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Cert und Key passen nicht zusammen oder Key ist nicht "
-                f"lesbar: {exc}"
-            ),
+            detail=(f"Cert und Key passen nicht zusammen oder Key ist nicht lesbar: {exc}"),
         ) from exc
     except OSError as exc:
         # Sollte praktisch nicht passieren - temp-File-Probleme
@@ -246,10 +244,8 @@ def upload_server_tls(
     tls_dir.mkdir(parents=True, exist_ok=True)
     cert_file = tls_dir / _CERT_FILENAME
     key_file = tls_dir / _KEY_FILENAME
-    cert_file.write_text(cert_pem if cert_pem.endswith("\n") else cert_pem + "\n",
-                         encoding="ascii")
-    key_file.write_text(key_pem if key_pem.endswith("\n") else key_pem + "\n",
-                        encoding="ascii")
+    cert_file.write_text(cert_pem if cert_pem.endswith("\n") else cert_pem + "\n", encoding="ascii")
+    key_file.write_text(key_pem if key_pem.endswith("\n") else key_pem + "\n", encoding="ascii")
     # 0600 fuer den Key; 0644 fuer das Cert (Public). Auf Windows ist
     # chmod weitgehend ein No-Op, schadet aber nicht.
     try:
@@ -308,8 +304,7 @@ def disable_server_tls(
             AuditEventKind.VAULT_OPENED,
             actor=audit_actor(session),
             summary=(
-                "Server-TLS-Konfiguration entfernt - Cockpit faehrt nach "
-                "Restart wieder auf HTTP."
+                "Server-TLS-Konfiguration entfernt - Cockpit faehrt nach Restart wieder auf HTTP."
             ),
         )
 
@@ -322,30 +317,28 @@ def _verify_cert_and_key(cert_pem: str, key_pem: str) -> None:
     und sofort wieder geloescht.
     """
     cert_fd, cert_path = tempfile.mkstemp(
-        prefix="opncockpit-tls-probe-cert-", suffix=".pem",
+        prefix="opncockpit-tls-probe-cert-",
+        suffix=".pem",
     )
     key_fd, key_path = tempfile.mkstemp(
-        prefix="opncockpit-tls-probe-key-", suffix=".pem",
+        prefix="opncockpit-tls-probe-key-",
+        suffix=".pem",
     )
     try:
         with os.fdopen(cert_fd, "w", encoding="ascii") as f:
             f.write(cert_pem if cert_pem.endswith("\n") else cert_pem + "\n")
         with os.fdopen(key_fd, "w", encoding="ascii") as f:
             f.write(key_pem if key_pem.endswith("\n") else key_pem + "\n")
-        try:
+        with contextlib.suppress(OSError):
             os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
-        except OSError:
-            pass
         ctx = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
         # load_cert_chain wirft SSLError wenn Key nicht zum Cert passt
         # oder Key-Format unbekannt ist.
         ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
     finally:
         for path in (cert_path, key_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(path)
-            except OSError:
-                pass
 
 
 __all__ = ["router"]

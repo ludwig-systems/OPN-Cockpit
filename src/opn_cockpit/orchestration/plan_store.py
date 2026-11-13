@@ -169,9 +169,7 @@ def _action_to_dict(action: PlannedDeviceAction, adapter: Any) -> dict[str, Any]
         "device": _device_to_dict(action.device),
         "target_spec": adapter.spec_to_dict(action.target_spec),
         "current_state": (
-            adapter.spec_to_dict(action.current_state)
-            if action.current_state is not None
-            else None
+            adapter.spec_to_dict(action.current_state) if action.current_state is not None else None
         ),
         "diff": {"kind": str(action.diff.kind), "summary": action.diff.summary},
         "payload_masked": action.payload_masked,

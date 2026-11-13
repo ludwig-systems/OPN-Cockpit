@@ -18,13 +18,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from opn_cockpit.audit.backend import get_audit_backend
 from opn_cockpit.audit.log import AuditEventKind
-from opn_cockpit.security.session import Session
-from opn_cockpit.security.users import UserStoreError  # noqa: F401  (used by legacy 410 path)
+from opn_cockpit.security.users import UserStoreError
 from opn_cockpit.vault.errors import (
     CorruptVaultError,
     InvalidPasswordError,
@@ -34,7 +33,6 @@ from opn_cockpit.vault.errors import (
 )
 from opn_cockpit.web.auth.dependencies import (
     get_session_manager,
-    require_admin,
 )
 from opn_cockpit.web.auth.manager import SessionManager
 from opn_cockpit.web.rate_limit import RateLimiter
@@ -152,8 +150,12 @@ def _client_ip(request: Request) -> str:
     """Client-IP fuer Rate-Limit. Audit-Finding G2: XFF nur wenn
     ``OPNCOCKPIT_TRUST_FORWARDED_FOR=true`` (Reverse-Proxy-Setup)."""
     import os  # noqa: PLC0415 — vermeidet zirkulaere Imports im Bootstrap
+
     if os.environ.get("OPNCOCKPIT_TRUST_FORWARDED_FOR", "").strip().lower() in {
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     }:
         fwd = request.headers.get("X-Forwarded-For", "")
         if fwd:
@@ -165,7 +167,8 @@ def _client_ip(request: Request) -> str:
 
 
 def _check_bootstrap_token(
-    server: ServerState, supplied_token: str | None,
+    server: ServerState,
+    supplied_token: str | None,
 ) -> None:
     """Wirft 403 wenn der gelieferte Token nicht passt (Audit #5).
 
@@ -204,7 +207,10 @@ def bootstrap_status(
     """
     admin_must_change = False
     if server.is_multi_user_mode and server._user_store is not None:
-        from opn_cockpit.web.server_state import DEFAULT_ADMIN_USERNAME
+        from opn_cockpit.web.server_state import (  # noqa: PLC0415
+            DEFAULT_ADMIN_USERNAME,
+        )
+
         admin = server._user_store.get_user_by_name(DEFAULT_ADMIN_USERNAME)
         admin_must_change = bool(admin and admin.must_change_password)
     return BootstrapStatusResponse(
@@ -259,10 +265,7 @@ def bootstrap_vault(
     if server.bootstrap_status != "needs-vault-unlock":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Bootstrap-Vault nicht erlaubt — Server-Status: "
-                f"{server.bootstrap_status}."
-            ),
+            detail=(f"Bootstrap-Vault nicht erlaubt — Server-Status: {server.bootstrap_status}."),
         )
     if server.user_store is None:
         raise HTTPException(
@@ -284,7 +287,10 @@ def bootstrap_vault(
         limiter.register_failure(client_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Admin-Login fehlgeschlagen (User unbekannt, Passwort falsch oder keine Admin-Rolle).",
+            detail=(
+                "Admin-Login fehlgeschlagen (User unbekannt, Passwort falsch "
+                "oder keine Admin-Rolle)."
+            ),
         )
     if admin_user.must_change_password:
         if not payload.new_admin_password:
@@ -324,7 +330,8 @@ def bootstrap_vault(
         )
     try:
         created = server.bootstrap_unlock_vault(
-            path, payload.password,
+            path,
+            payload.password,
             create_if_missing=payload.create_if_missing,
         )
     except InvalidPasswordError as exc:
@@ -365,16 +372,18 @@ def bootstrap_vault(
     try:
         effective_pw = payload.new_admin_password or payload.admin_password
         backend = server.auth_backend()
-        auth_result = backend.authenticate({
-            "username": payload.admin_username,
-            "password": effective_pw,
-        })
+        auth_result = backend.authenticate(
+            {
+                "username": payload.admin_username,
+                "password": effective_pw,
+            }
+        )
         if auth_result is not None:
             token, session = manager.create_from(auth_result)
             vault_filename = auth_result.vault_path.name
             inactivity_timeout_s = int(session.inactivity_timeout_s)
             seconds_until_expiry = int(session.seconds_until_expiry())
-    except Exception:  # noqa: BLE001 - Session-Erzeugung darf den Bootstrap-Erfolg nie aushebeln
+    except Exception:
         # Fallback: kein Token mit zurueck, Frontend zeigt regulaeren Login.
         # Wir lassen das Unlock-Ergebnis stehen, der Vault ist offen.
         token = None

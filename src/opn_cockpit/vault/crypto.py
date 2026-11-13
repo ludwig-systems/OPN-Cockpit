@@ -88,6 +88,4 @@ def decrypt(ciphertext_and_tag: bytes, key: bytes, nonce: bytes, aad: bytes) -> 
     try:
         return AESGCM(key).decrypt(nonce, ciphertext_and_tag, aad)
     except InvalidTag as exc:
-        raise InvalidPasswordError(
-            "Master-Passwort falsch oder Tresor-Datei manipuliert."
-        ) from exc
+        raise InvalidPasswordError("Master-Passwort falsch oder Tresor-Datei manipuliert.") from exc

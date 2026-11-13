@@ -75,7 +75,8 @@ class UpdateChecker:
         owner, repo_name = repo
         try:
             release = fetch_latest_release(
-                owner, repo_name,
+                owner,
+                repo_name,
                 etag=cache.etag,
                 client=client,
             )

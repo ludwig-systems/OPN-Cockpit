@@ -31,8 +31,10 @@ def format_plan_preview(plan: Plan) -> str:
     lines.append(f"Aktion:    {plan.action}")
     lines.append(f"Subsystem: {plan.subsystem}")
     lines.append(f"Erstellt:  {plan.created_at_utc}")
-    lines.append(f"Ziele:     {plan.target_count} "
-                 f"(schreiben: {plan.to_apply_count}, überspringen: {plan.skip_count})")
+    lines.append(
+        f"Ziele:     {plan.target_count} "
+        f"(schreiben: {plan.to_apply_count}, überspringen: {plan.skip_count})"
+    )
     lines.append("")
     lines.append("Geräte:")
     for action in plan.actions:
@@ -105,9 +107,7 @@ def format_rollout_matrix(
         phase = _format_phase(result)
         duration = result.duration_ms
         msg = result.short_message
-        lines.append(
-            f"{name[:30]:<30} {badge:<8} {phase:<10} {duration:>6}  {msg}"
-        )
+        lines.append(f"{name[:30]:<30} {badge:<8} {phase:<10} {duration:>6}  {msg}")
     lines.append("")
     lines.append("Gesamt: " + format_rollout_summary(report))
     return "\n".join(lines)

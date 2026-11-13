@@ -202,7 +202,7 @@ class SafetyNetWatcher:
                 return
             try:
                 self._tick(_now_ms())
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.exception("SafetyNetWatcher-Tick crashte")
 
     def _tick(self, now_ms: int) -> None:
@@ -249,16 +249,16 @@ class SafetyNetWatcher:
             return
 
         now_ms = _now_ms()
-        window_elapsed = (
-            now_ms - entry.armed_at_ms
-        ) > (entry.window_s * 1000)
+        window_elapsed = (now_ms - entry.armed_at_ms) > (entry.window_s * 1000)
 
         if window_elapsed:
             # Window ist abgelaufen - entweder ist der Daemon schon
             # gefeuert (Marker da, Box hat rebootet, nach Reboot wieder
             # online), oder er feuert gleich. Marker pruefen.
             marker_res = ssh_safety_net.check_marker(
-                vault_device, jobid=entry.jobid, cleanup_if_found=True,
+                vault_device,
+                jobid=entry.jobid,
+                cleanup_if_found=True,
             )
             if not marker_res.success:
                 # Box weiterhin nicht erreichbar (eventuell mitten im
@@ -359,7 +359,7 @@ class SafetyNetWatcher:
         target = Path(entry.vault_path)
         try:
             sessions = list(self._manager.sessions())
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
         for session in sessions:
             opened = getattr(session, "opened", None)
@@ -382,7 +382,7 @@ class SafetyNetWatcher:
         """
         try:
             sessions = list(self._manager.sessions())
-        except Exception:  # noqa: BLE001
+        except Exception:
             return ""
         for session in sessions:
             opened = getattr(session, "opened", None)
@@ -465,7 +465,8 @@ class SafetyNetWatcher:
         if loaded:
             _log.info(
                 "SafetyNetWatcher: %d persistente Entries geladen aus %s",
-                loaded, self._queue_path,
+                loaded,
+                self._queue_path,
             )
 
 

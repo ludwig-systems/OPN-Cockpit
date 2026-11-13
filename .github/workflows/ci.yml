@@ -5,16 +5,26 @@ name: CI
 # `tests` ist ein hartes Tor: 1300 Tests, die heute gruen sind. Was sie brechen
 # wuerde, kommt nicht nach main.
 #
-# `stil` ist (noch) weich. Lint, Formatierung und Typen melden beim Stand vom
-# 11.11.2026 zusammen rund 250 Befunde -- nicht weil der Code verfallen waere,
-# sondern weil ruff und mypy in `pyproject.toml` ohne Obergrenze stehen
-# (`ruff>=0.5`, `mypy>=1.10`) und seither neue Regeln dazugekommen sind. Allein
-# 41 Befunde sind ueberfluessig gewordene `# noqa`-Kommentare.
+# `stil` war weich, weil Lint, Formatierung und Typen am 11.11.2026 zusammen
+# rund 250 Befunde meldeten -- nicht weil der Code verfallen waere, sondern weil
+# ruff und mypy in `pyproject.toml` ohne Obergrenze stehen (`ruff>=0.5`,
+# `mypy>=1.10`) und seither neue Regeln dazugekommen sind.
 #
-# Ein Tor, das von Tag eins rot ist, wird nach einer Woche ignoriert. Deshalb
-# laeuft `stil` zunaechst sichtbar mit, ohne den Lauf zu faellen. Sobald der
-# Rueckstand abgearbeitet ist: `continue-on-error` entfernen -- an EINER Stelle,
-# und das Tor ist scharf.
+# Stand 13.11.2026, zwei Drittel davon abgearbeitet:
+#   Lint         181 Befunde -> 0   HART, faellt den Lauf
+#   Formatierung 149 Dateien -> 0   HART, faellt den Lauf
+#   Typen         68 Fehler  -> 65  noch weich
+#
+# Die 65 mypy-Fehler bleiben, weil sie echte Arbeit am Code sind (fehlende
+# Annotationen, generische Typen) und keine Stilkorrektur. Ein Tor, das von Tag
+# eins rot ist, wird nach einer Woche ignoriert -- deshalb bleibt genau dieser
+# eine Schritt weich, bis die 65 weg sind. Dann faellt auch dort das
+# `continue-on-error`, und zwar als letztes.
+#
+# Beim Aufraeumen wurden fuenf Regelfamilien in `pyproject.toml` bewusst
+# stillgelegt (PLR0911/0912/0915/0917/PLR2004). Sie verlangen Umbauten, keine
+# Stilkorrekturen; die Begruendung steht dort. Das heisst: Das Tor ist scharf,
+# aber gegen ein kleineres Regelwerk als urspruenglich gesetzt.
 
 on:
   push:
@@ -81,7 +91,7 @@ jobs:
         run: uv run pytest -q -m "not live"
 
   stil:
-    name: Lint · Format · Typen (noch nicht scharf)
+    name: Lint · Format (hart) · Typen (noch weich)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -97,12 +107,20 @@ jobs:
         run: uv sync --extra dev --frozen
 
       - name: Ruff — Lint
-        continue-on-error: true
-        run: uv run ruff check src tests
+        # `tests/` steht in .gitignore und ist im CI-Checkout NICHT vorhanden
+        # (siehe Kopf dieser Datei). Lokal wird es mitgeprueft, hier nur wenn da.
+        run: |
+          ZIELE=src
+          if [ -d tests ]; then ZIELE="src tests"; fi
+          uv run ruff check $ZIELE
 
       - name: Ruff — Formatierung
-        continue-on-error: true
-        run: uv run ruff format --check src tests
+        # `tests/` steht in .gitignore und ist im CI-Checkout NICHT vorhanden
+        # (siehe Kopf dieser Datei). Lokal wird es mitgeprueft, hier nur wenn da.
+        run: |
+          ZIELE=src
+          if [ -d tests ]; then ZIELE="src tests"; fi
+          uv run ruff format --check $ZIELE
 
       - name: Mypy — Typen (strict)
         continue-on-error: true

@@ -50,7 +50,8 @@ class SqliteProfileStore:
     def get(self, profile_id: str) -> Profile:
         with self.db.cursor() as cur:
             row = cur.execute(
-                "SELECT * FROM profiles WHERE id = ?", (profile_id,),
+                "SELECT * FROM profiles WHERE id = ?",
+                (profile_id,),
             ).fetchone()
         if row is None:
             raise ProfileStoreError(f"Profil-ID nicht gefunden: {profile_id}")
@@ -59,7 +60,8 @@ class SqliteProfileStore:
     def find_by_name(self, name: str) -> Profile | None:
         with self.db.cursor() as cur:
             row = cur.execute(
-                "SELECT * FROM profiles WHERE name = ?", (name,),
+                "SELECT * FROM profiles WHERE name = ?",
+                (name,),
             ).fetchone()
         return _row_to_profile(row) if row else None
 
@@ -109,7 +111,8 @@ class SqliteProfileStore:
     def delete(self, profile_id: str) -> bool:
         with self.db.transaction() as conn:
             cur = conn.execute(
-                "DELETE FROM profiles WHERE id = ?", (profile_id,),
+                "DELETE FROM profiles WHERE id = ?",
+                (profile_id,),
             )
         return cur.rowcount > 0
 

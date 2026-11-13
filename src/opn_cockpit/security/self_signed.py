@@ -72,8 +72,8 @@ class GeneratedCert:
 
     cert_path: Path
     key_path: Path
-    fingerprint_sha256: str          # AB:CD:EF:...
-    fingerprint_sha256_hex: str      # ABCDEF... (ohne Trennzeichen)
+    fingerprint_sha256: str  # AB:CD:EF:...
+    fingerprint_sha256_hex: str  # ABCDEF... (ohne Trennzeichen)
     subject_cn: str
     not_before_iso: str
     not_after_iso: str
@@ -106,12 +106,10 @@ def generate_self_signed(
         hostname = socket.gethostname() or "opn-cockpit-host"
 
     private_key = ec.generate_private_key(ec.SECP256R1())
-    subject = issuer = x509.Name(
-        [x509.NameAttribute(NameOID.COMMON_NAME, COMMON_NAME)]
-    )
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, COMMON_NAME)])
 
     now = datetime.now(UTC)
-    not_before = now - timedelta(minutes=5)   # Clock-Skew-Puffer
+    not_before = now - timedelta(minutes=5)  # Clock-Skew-Puffer
     not_after = now + timedelta(days=int(valid_days))
 
     san_entries = _collect_san(hostname)
@@ -135,7 +133,7 @@ def generate_self_signed(
             x509.KeyUsage(
                 digital_signature=True,
                 content_commitment=False,
-                key_encipherment=False,   # bei EC nicht nutzbar
+                key_encipherment=False,  # bei EC nicht nutzbar
                 data_encipherment=False,
                 key_agreement=True,
                 key_cert_sign=False,
@@ -310,8 +308,8 @@ __all__ = [
     "AUTO_CERT_FILENAME",
     "AUTO_FINGERPRINT_FILENAME",
     "AUTO_KEY_FILENAME",
-    "AutoCertPaths",
     "DEFAULT_VALID_DAYS",
+    "AutoCertPaths",
     "GeneratedCert",
     "generate_self_signed",
     "needs_regeneration",

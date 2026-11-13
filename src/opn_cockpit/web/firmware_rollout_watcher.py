@@ -37,7 +37,8 @@ import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime, time as dt_time, timedelta
+from datetime import UTC, datetime, timedelta
+from datetime import time as dt_time
 from pathlib import Path
 from threading import RLock, Thread
 
@@ -47,7 +48,6 @@ from opn_cockpit.core.device_info import (
     UPGRADE_STATUS_DONE,
     UPGRADE_STATUS_ERROR,
     UPGRADE_STATUS_RUNNING,
-    UPGRADE_STATUS_UNKNOWN,
     fetch_firmware_status,
     fetch_upgrade_status,
     trigger_firmware_update,
@@ -68,10 +68,10 @@ _log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DEFAULT_TICK_S = 30.0
-DEFAULT_UNREACHABLE_TOLERANCE_S = 15 * 60   # 15 min Reboot-Fenster
-DEFAULT_UPGRADE_MAX_S = 30 * 60             # 30 min pro Box (running-Phase)
-DEFAULT_ROLLOUT_MAX_S = 6 * 3600            # 6 h Rollout-Total-Cap
-REPORT_TTL_S = 3600                          # fertige Rollouts bleiben 1 h sichtbar
+DEFAULT_UNREACHABLE_TOLERANCE_S = 15 * 60  # 15 min Reboot-Fenster
+DEFAULT_UPGRADE_MAX_S = 30 * 60  # 30 min pro Box (running-Phase)
+DEFAULT_ROLLOUT_MAX_S = 6 * 3600  # 6 h Rollout-Total-Cap
+REPORT_TTL_S = 3600  # fertige Rollouts bleiben 1 h sichtbar
 QUEUE_FILE_NAME = "firmware-rollout.json"
 QUEUE_FORMAT_VERSION = 1
 
@@ -88,15 +88,17 @@ DEV_STATE_SKIPPED = "skipped"
 _DEVICE_TERMINAL_STATES = {DEV_STATE_DONE, DEV_STATE_FAILED, DEV_STATE_SKIPPED}
 
 # Rollout-States
-ROLLOUT_STATE_SCHEDULED = "scheduled"   # wartet auf scheduled_start_at_ms
+ROLLOUT_STATE_SCHEDULED = "scheduled"  # wartet auf scheduled_start_at_ms
 ROLLOUT_STATE_RUNNING = "running"
-ROLLOUT_STATE_PAUSED = "paused"          # wartet auf naechstes Wartungsfenster
+ROLLOUT_STATE_PAUSED = "paused"  # wartet auf naechstes Wartungsfenster
 ROLLOUT_STATE_DONE = "done"
 ROLLOUT_STATE_FAILED = "failed"
 ROLLOUT_STATE_CANCELLED = "cancelled"
 
 _ROLLOUT_TERMINAL_STATES = {
-    ROLLOUT_STATE_DONE, ROLLOUT_STATE_FAILED, ROLLOUT_STATE_CANCELLED,
+    ROLLOUT_STATE_DONE,
+    ROLLOUT_STATE_FAILED,
+    ROLLOUT_STATE_CANCELLED,
 }
 _ROLLOUT_ACTIVE_STATES = {
     ROLLOUT_STATE_SCHEDULED,
@@ -116,7 +118,7 @@ class FirmwareRolloutDevice:
     device_name: str
     position: int
     state: str
-    mode: str = "update"                # update | upgrade
+    mode: str = "update"  # update | upgrade
     version_before: str = ""
     target_version: str = ""
     version_after: str = ""
@@ -132,7 +134,7 @@ class FirmwareRollout:
     rollout_id: str
     created_at_ms: int
     vault_path: str
-    mode: str                            # update | upgrade
+    mode: str  # update | upgrade
     continue_on_error: bool
     devices: list[FirmwareRolloutDevice] = field(default_factory=list)
     state: str = ROLLOUT_STATE_RUNNING
@@ -205,10 +207,7 @@ class FirmwareRolloutWatcher:
         self._tick_s = tick_s
         if queue_path is not None:
             self._load_from_disk()
-            if (
-                self._rollout is not None
-                and self._rollout.state == ROLLOUT_STATE_RUNNING
-            ):
+            if self._rollout is not None and self._rollout.state == ROLLOUT_STATE_RUNNING:
                 self.start()
 
     # ----- Lifecycle -----
@@ -270,10 +269,7 @@ class FirmwareRolloutWatcher:
         w_start = (window_start_hhmm or "").strip()
         w_end = (window_end_hhmm or "").strip()
         if bool(w_start) != bool(w_end):
-            msg = (
-                "Wartungsfenster: entweder BEIDE Werte (Start + Ende) "
-                "oder gar keinen setzen."
-            )
+            msg = "Wartungsfenster: entweder BEIDE Werte (Start + Ende) oder gar keinen setzen."
             raise ValueError(msg)
         if w_start and parse_hhmm(w_start) is None:
             msg = f"Ungueltiges Wartungsfenster-Start: {w_start!r} (erwartet HH:MM)"
@@ -286,10 +282,7 @@ class FirmwareRolloutWatcher:
             raise ValueError(msg)
 
         with self._lock:
-            if (
-                self._rollout is not None
-                and self._rollout.state in _ROLLOUT_ACTIVE_STATES
-            ):
+            if self._rollout is not None and self._rollout.state in _ROLLOUT_ACTIVE_STATES:
                 raise RolloutBusyError(
                     "Es laeuft bereits ein Firmware-Rollout (oder ist "
                     "geplant). Bitte warten oder erst abbrechen "
@@ -350,10 +343,7 @@ class FirmwareRolloutWatcher:
                 actor=initiator,
                 action=f"firmware_rollout_{mode}",
                 target_count=len(devices),
-                summary=(
-                    f"Firmware-Rollout ({mode}) gestartet fuer "
-                    f"{len(devices)} Geraet(e)."
-                ),
+                summary=(f"Firmware-Rollout ({mode}) gestartet fuer {len(devices)} Geraet(e)."),
             )
         self.start()
         return rollout
@@ -383,8 +373,7 @@ class FirmwareRolloutWatcher:
             actor=initiator,
             action="firmware_rollout_cancel_requested",
             summary=(
-                f"Firmware-Rollout {rollout.rollout_id} ({rollout.state}) "
-                "auf Abbruch gesetzt."
+                f"Firmware-Rollout {rollout.rollout_id} ({rollout.state}) auf Abbruch gesetzt."
             ),
         )
         return True
@@ -417,7 +406,7 @@ class FirmwareRolloutWatcher:
                 return
             try:
                 self._tick(_now_ms())
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.exception("FirmwareRolloutWatcher-Tick crashte")
 
     def _tick(self, now_ms: int) -> None:
@@ -429,11 +418,10 @@ class FirmwareRolloutWatcher:
 
         # Terminal + TTL abgelaufen: aufraeumen.
         if rollout.state in _ROLLOUT_TERMINAL_STATES:
-            if rollout.finished_at_ms > 0:
-                if now_ms - rollout.finished_at_ms > REPORT_TTL_S * 1000:
-                    with self._lock:
-                        self._rollout = None
-                        self._save_to_disk()
+            if rollout.finished_at_ms > 0 and now_ms - rollout.finished_at_ms > REPORT_TTL_S * 1000:
+                with self._lock:
+                    self._rollout = None
+                    self._save_to_disk()
             return
 
         # Cancel angefragt: alle noch-queued Devices skippen, dann prüfen ob
@@ -442,7 +430,8 @@ class FirmwareRolloutWatcher:
         if rollout.cancel_requested:
             if rollout.state in (ROLLOUT_STATE_SCHEDULED, ROLLOUT_STATE_PAUSED):
                 self._skip_remaining(
-                    rollout, reason="Rollout vor Start/im Wartungsfenster abgebrochen.",
+                    rollout,
+                    reason="Rollout vor Start/im Wartungsfenster abgebrochen.",
                 )
                 self._finalize(rollout, ROLLOUT_STATE_CANCELLED, now_ms)
                 return
@@ -478,10 +467,7 @@ class FirmwareRolloutWatcher:
         # Device". Andernfalls: pruefen ob Fenster offen ist.
         if rollout.window_start_hhmm:
             active = self._find_active_device(rollout)
-            has_active = (
-                active is not None
-                and active.state not in _DEVICE_TERMINAL_STATES
-            )
+            has_active = active is not None and active.state not in _DEVICE_TERMINAL_STATES
             if not has_active:
                 # Nur noch queued oder gar nichts mehr -> Fenster pruefen
                 now_local = datetime.fromtimestamp(now_ms / 1000.0)
@@ -523,10 +509,7 @@ class FirmwareRolloutWatcher:
                         AuditEventKind.FIRMWARE_ROLLOUT_STARTED,
                         actor=rollout.initiator,
                         action="firmware_rollout_resumed_in_window",
-                        summary=(
-                            f"Rollout {rollout.rollout_id} laeuft im "
-                            f"Wartungsfenster weiter."
-                        ),
+                        summary=(f"Rollout {rollout.rollout_id} laeuft im Wartungsfenster weiter."),
                     )
 
         # Total-Cap greift? Bei scheduled zaehlen wir ab created_at_ms,
@@ -535,11 +518,13 @@ class FirmwareRolloutWatcher:
         # Ausnahme: bei aktivem Wartungsfenster gilt kein Total-Cap —
         # Multi-Day-Iteration ist der Anwendungsfall, 6h waeren
         # sinnlos restriktiv.
-        if not rollout.window_start_hhmm:
-            if now_ms - rollout.created_at_ms > DEFAULT_ROLLOUT_MAX_S * 1000:
-                self._skip_remaining(rollout, reason="Rollout-Total-Timeout (6h).")
-                self._finalize(rollout, ROLLOUT_STATE_FAILED, now_ms)
-                return
+        if (
+            not rollout.window_start_hhmm
+            and now_ms - rollout.created_at_ms > DEFAULT_ROLLOUT_MAX_S * 1000
+        ):
+            self._skip_remaining(rollout, reason="Rollout-Total-Timeout (6h).")
+            self._finalize(rollout, ROLLOUT_STATE_FAILED, now_ms)
+            return
 
         # Aktive Box abarbeiten (oder naechste queued starten).
         self._process(rollout, now_ms)
@@ -558,7 +543,8 @@ class FirmwareRolloutWatcher:
             )
 
     def _find_active_device(
-        self, rollout: FirmwareRollout,
+        self,
+        rollout: FirmwareRollout,
     ) -> FirmwareRolloutDevice | None:
         for d in rollout.devices:
             if d.state not in {DEV_STATE_QUEUED, *_DEVICE_TERMINAL_STATES}:
@@ -604,7 +590,10 @@ class FirmwareRolloutWatcher:
                 verify=vault_device.tls_verify,
             )
             fw = fetch_firmware_status(
-                client, target, vault_device.api_key, vault_device.api_secret,
+                client,
+                target,
+                vault_device.api_key,
+                vault_device.api_secret,
             )
             if not fw.reachable or not fw.authenticated:
                 device.summary = f"Nicht erreichbar/Auth-Fehler: {fw.summary}"
@@ -623,11 +612,17 @@ class FirmwareRolloutWatcher:
             device.target_version = device.target_version or fw.new_version
             if rollout.mode == "upgrade":
                 ok, msg = trigger_firmware_upgrade(
-                    client, target, vault_device.api_key, vault_device.api_secret,
+                    client,
+                    target,
+                    vault_device.api_key,
+                    vault_device.api_secret,
                 )
             else:
                 ok, msg = trigger_firmware_update(
-                    client, target, vault_device.api_key, vault_device.api_secret,
+                    client,
+                    target,
+                    vault_device.api_key,
+                    vault_device.api_secret,
                 )
 
         if not ok:
@@ -647,8 +642,7 @@ class FirmwareRolloutWatcher:
             target_device_id=device.device_id,
             target_device_name=device.device_name,
             summary=(
-                f"[Rollout {rollout.rollout_id}] {rollout.mode} "
-                f"auf {device.device_name}: {msg}"
+                f"[Rollout {rollout.rollout_id}] {rollout.mode} auf {device.device_name}: {msg}"
             ),
         )
 
@@ -668,10 +662,13 @@ class FirmwareRolloutWatcher:
         if now_ms - device.started_at_ms > DEFAULT_UPGRADE_MAX_S * 1000:
             # Aber Reboot ist erlaubt, solange Unreachable-Toleranz noch da.
             reachable_lag = now_ms - device.last_reachable_at_ms
-            if device.state == DEV_STATE_REBOOTING and reachable_lag < DEFAULT_UNREACHABLE_TOLERANCE_S * 1000:
+            if (
+                device.state == DEV_STATE_REBOOTING
+                and reachable_lag < DEFAULT_UNREACHABLE_TOLERANCE_S * 1000
+            ):
                 pass  # noch im Reboot-Fenster
             else:
-                device.summary = f"Timeout ({DEFAULT_UPGRADE_MAX_S//60} min) ueberschritten."
+                device.summary = f"Timeout ({DEFAULT_UPGRADE_MAX_S // 60} min) ueberschritten."
                 self._mark_device_failed(rollout, device, now_ms)
                 return
 
@@ -685,15 +682,15 @@ class FirmwareRolloutWatcher:
             # Reboot-Zustand: nur health-check, kein upgradestatus (Box down).
             if device.state == DEV_STATE_REBOOTING:
                 fw = fetch_firmware_status(
-                    client, target, vault_device.api_key, vault_device.api_secret,
+                    client,
+                    target,
+                    vault_device.api_key,
+                    vault_device.api_secret,
                 )
                 if fw.reachable:
                     device.state = DEV_STATE_VERIFYING
                     device.last_reachable_at_ms = now_ms
-                    device.summary = (
-                        f"Box wieder erreichbar - Version pruefen "
-                        f"({fw.version})"
-                    )
+                    device.summary = f"Box wieder erreichbar - Version pruefen ({fw.version})"
                     device.version_after = fw.version
                     self._maybe_finish_verifying(rollout, device, fw, now_ms)
                     return
@@ -712,7 +709,10 @@ class FirmwareRolloutWatcher:
             # Verifying-Zustand: Version-Check erneut.
             if device.state == DEV_STATE_VERIFYING:
                 fw = fetch_firmware_status(
-                    client, target, vault_device.api_key, vault_device.api_secret,
+                    client,
+                    target,
+                    vault_device.api_key,
+                    vault_device.api_secret,
                 )
                 if fw.reachable:
                     device.version_after = fw.version
@@ -722,7 +722,10 @@ class FirmwareRolloutWatcher:
 
             # Standard-Fall: upgradestatus abfragen.
             us = fetch_upgrade_status(
-                client, target, vault_device.api_key, vault_device.api_secret,
+                client,
+                target,
+                vault_device.api_key,
+                vault_device.api_secret,
             )
 
         # Nicht erreichbar - moeglicherweise Reboot begonnen.
@@ -764,8 +767,10 @@ class FirmwareRolloutWatcher:
                         verify=vault_device.tls_verify,
                     )
                     fw = fetch_firmware_status(
-                        client, target,
-                        vault_device.api_key, vault_device.api_secret,
+                        client,
+                        target,
+                        vault_device.api_key,
+                        vault_device.api_secret,
                     )
                 if fw.reachable:
                     device.version_after = fw.version
@@ -787,7 +792,7 @@ class FirmwareRolloutWatcher:
         self,
         rollout: FirmwareRollout,
         device: FirmwareRolloutDevice,
-        fw: "object",
+        fw: object,
         now_ms: int,
     ) -> None:
         """Version-Check nach dem Update: passt sie? Dann done."""
@@ -798,9 +803,7 @@ class FirmwareRolloutWatcher:
         device.version_after = current
 
         if target and current and current != target and still_available:
-            device.summary = (
-                f"Version {current} - Target war {target}, weiter Update verfuegbar."
-            )
+            device.summary = f"Version {current} - Target war {target}, weiter Update verfuegbar."
             self._mark_device_failed(rollout, device, now_ms)
             return
 
@@ -858,7 +861,10 @@ class FirmwareRolloutWatcher:
                     d.summary = "Uebersprungen (Rollout-Abbruch nach Fehler)."
 
     def _skip_remaining(
-        self, rollout: FirmwareRollout, *, reason: str,
+        self,
+        rollout: FirmwareRollout,
+        *,
+        reason: str,
     ) -> None:
         now_ms = _now_ms()
         for d in rollout.devices:
@@ -881,15 +887,14 @@ class FirmwareRolloutWatcher:
             AuditEventKind.FIRMWARE_ROLLOUT_COMPLETED,
             actor=rollout.initiator,
             action=f"firmware_rollout_{final_state}",
-            summary=(
-                f"Firmware-Rollout {rollout.rollout_id} beendet "
-                f"({final_state})."
-            ),
+            summary=(f"Firmware-Rollout {rollout.rollout_id} beendet ({final_state})."),
         )
         self._send_completion_mail(rollout, final_state)
 
     def _send_completion_mail(
-        self, rollout: FirmwareRollout, final_state: str,
+        self,
+        rollout: FirmwareRollout,
+        final_state: str,
     ) -> None:
         """Best-Effort E-Mail-Benachrichtigung nach Rollout-Ende.
 
@@ -915,12 +920,8 @@ class FirmwareRolloutWatcher:
 
             # Zaehler + Zeilen aus dem Device-Zustand
             ok = sum(1 for d in rollout.devices if d.state == DEV_STATE_DONE)
-            failed = sum(
-                1 for d in rollout.devices if d.state == DEV_STATE_FAILED
-            )
-            skipped = sum(
-                1 for d in rollout.devices if d.state == DEV_STATE_SKIPPED
-            )
+            failed = sum(1 for d in rollout.devices if d.state == DEV_STATE_FAILED)
+            skipped = sum(1 for d in rollout.devices if d.state == DEV_STATE_SKIPPED)
             device_lines: list[str] = []
             for d in rollout.devices:
                 label = d.device_name or d.device_id
@@ -930,7 +931,8 @@ class FirmwareRolloutWatcher:
             finished_iso = ""
             if rollout.finished_at_ms:
                 finished_iso = datetime.fromtimestamp(
-                    rollout.finished_at_ms / 1000.0, tz=UTC,
+                    rollout.finished_at_ms / 1000.0,
+                    tz=UTC,
                 ).isoformat()
 
             from opn_cockpit.notifications.mail import (  # noqa: PLC0415
@@ -945,14 +947,17 @@ class FirmwareRolloutWatcher:
                     status=final_state,
                     finished_at_iso=finished_iso,
                     total=len(rollout.devices),
-                    ok=ok, failed=failed, skipped=skipped,
+                    ok=ok,
+                    failed=failed,
+                    skipped=skipped,
                     device_lines=device_lines,
                     initiator=rollout.initiator or "",
                 )
             except MailError as exc:
                 _log.warning(
                     "Rollout %s Mail-Send fehlgeschlagen: %s",
-                    rollout.rollout_id, exc,
+                    rollout.rollout_id,
+                    exc,
                 )
                 # Audit-Eintrag damit User sieht warum die erwartete
                 # Mail nicht kam.
@@ -966,12 +971,13 @@ class FirmwareRolloutWatcher:
                         f"gescheitert — {exc}"
                     ),
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Defensive-Wrapper: nichts an dieser Stelle darf den
             # Watcher stoppen.
             _log.exception(
                 "Rollout %s: unerwarteter Fehler beim Mail-Versand: %s",
-                rollout.rollout_id, exc,
+                rollout.rollout_id,
+                exc,
             )
 
     # ----- Session-Adoption + HTTP-Client -----
@@ -988,7 +994,7 @@ class FirmwareRolloutWatcher:
         target = Path(rollout.vault_path)
         try:
             sessions = list(self._manager.sessions())
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
         for session in sessions:
             opened = getattr(session, "opened", None)
@@ -1013,9 +1019,7 @@ class FirmwareRolloutWatcher:
         """Baut einen HttpClient mit denselben Trust-CAs wie der User-Vault."""
         session = self._find_session_for_rollout(rollout)
         settings = session.opened.data.settings if session else None
-        tuning = (
-            tuning_from_settings(settings) if settings is not None else HttpTuning()
-        )
+        tuning = tuning_from_settings(settings) if settings is not None else HttpTuning()
         target = HttpTarget(
             host=vault_device.host,
             port=vault_device.port,
@@ -1048,7 +1052,8 @@ class FirmwareRolloutWatcher:
                 os.chmod(self._queue_path, 0o600)
         except OSError as exc:
             _log.warning(
-                "FirmwareRolloutWatcher: Persistenz fehlgeschlagen (%s)", exc,
+                "FirmwareRolloutWatcher: Persistenz fehlgeschlagen (%s)",
+                exc,
             )
 
     def _load_from_disk(self) -> None:
@@ -1059,7 +1064,8 @@ class FirmwareRolloutWatcher:
             data = json.loads(raw)
         except (OSError, ValueError) as exc:
             _log.warning(
-                "FirmwareRolloutWatcher: Persistierte Queue nicht lesbar (%s)", exc,
+                "FirmwareRolloutWatcher: Persistierte Queue nicht lesbar (%s)",
+                exc,
             )
             return
         version = data.get("version")
@@ -1107,7 +1113,9 @@ def parse_hhmm(value: str) -> dt_time | None:
 
 
 def is_within_window(
-    now_local: datetime, start_hhmm: str, end_hhmm: str,
+    now_local: datetime,
+    start_hhmm: str,
+    end_hhmm: str,
 ) -> bool:
     """Prueft ob ``now_local`` (Server-lokale Zeit) im Wartungsfenster liegt.
 
@@ -1129,7 +1137,9 @@ def is_within_window(
 
 
 def next_window_open_ms(
-    now_local: datetime, start_hhmm: str, end_hhmm: str,
+    now_local: datetime,
+    start_hhmm: str,
+    end_hhmm: str,
 ) -> int:
     """Berechnet Unix-ms wann das naechste Fenster oeffnet.
 
@@ -1143,8 +1153,10 @@ def next_window_open_ms(
         return int(now_local.timestamp() * 1000)
     # Kandidat: heute um start:MM
     candidate = now_local.replace(
-        hour=start.hour, minute=start.minute,
-        second=0, microsecond=0,
+        hour=start.hour,
+        minute=start.minute,
+        second=0,
+        microsecond=0,
     )
     if candidate <= now_local:
         candidate = candidate + timedelta(days=1)
@@ -1174,9 +1186,6 @@ __all__ = [
     "DEV_STATE_SKIPPED",
     "DEV_STATE_TRIGGERED",
     "DEV_STATE_VERIFYING",
-    "FirmwareRollout",
-    "FirmwareRolloutDevice",
-    "FirmwareRolloutWatcher",
     "QUEUE_FILE_NAME",
     "ROLLOUT_STATE_CANCELLED",
     "ROLLOUT_STATE_DONE",
@@ -1184,6 +1193,9 @@ __all__ = [
     "ROLLOUT_STATE_PAUSED",
     "ROLLOUT_STATE_RUNNING",
     "ROLLOUT_STATE_SCHEDULED",
+    "FirmwareRollout",
+    "FirmwareRolloutDevice",
+    "FirmwareRolloutWatcher",
     "RolloutBusyError",
     "is_within_window",
     "next_window_open_ms",

@@ -42,12 +42,14 @@ def normalize_config_xml(content: bytes) -> str:
         text = ""
     for tag in _VOLATILE_TAGS:
         pattern = re.compile(
-            rf"<{tag}(\s[^>]*)?>.*?</{tag}>", flags=re.DOTALL | re.IGNORECASE,
+            rf"<{tag}(\s[^>]*)?>.*?</{tag}>",
+            flags=re.DOTALL | re.IGNORECASE,
         )
         text = pattern.sub("", text)
         # Self-closing-Varianten ("<lastchange/>") gleich mit
         pattern_self = re.compile(
-            rf"<{tag}(\s[^>]*)?/>", flags=re.IGNORECASE,
+            rf"<{tag}(\s[^>]*)?/>",
+            flags=re.IGNORECASE,
         )
         text = pattern_self.sub("", text)
     text = _RE_BLANK_BETWEEN_TAGS.sub("><", text)

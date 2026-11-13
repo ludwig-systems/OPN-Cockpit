@@ -45,7 +45,7 @@ from opn_cockpit.audit.log import AuditEventKind
 
 _log = logging.getLogger(__name__)
 
-DEFAULT_TICK_S = 6 * 3600     # 6 Stunden
+DEFAULT_TICK_S = 6 * 3600  # 6 Stunden
 INITIAL_DELAY_S = 10
 WARN_DAYS = 30
 CRITICAL_DAYS = 7
@@ -71,7 +71,7 @@ class TlsWatcher:
         audit_backend: AuditBackend,
         *,
         tick_interval_s: int = DEFAULT_TICK_S,
-        restart_callback=None,   # type: ignore[no-untyped-def]
+        restart_callback=None,  # type: ignore[no-untyped-def]
     ) -> None:
         self._audit = audit_backend
         self._tick_interval_s = tick_interval_s
@@ -101,7 +101,9 @@ class TlsWatcher:
                 return
             self._stop = False
             self._thread = Thread(
-                target=self._loop, daemon=True, name="opn-tls-watcher",
+                target=self._loop,
+                daemon=True,
+                name="opn-tls-watcher",
             )
             self._thread.start()
 
@@ -122,7 +124,7 @@ class TlsWatcher:
                 return
             try:
                 self._tick()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.exception("tls-watcher tick failed")
             time.sleep(self._tick_interval_s)
 
@@ -132,11 +134,11 @@ class TlsWatcher:
         from opn_cockpit.config import AppSettings  # noqa: PLC0415
         from opn_cockpit.security.self_signed import (  # noqa: PLC0415
             AutoCertPaths,
-            generate_self_signed,
         )
+
         try:
-            from cryptography import x509                       # noqa: PLC0415
-            from cryptography.hazmat.primitives import hashes   # noqa: PLC0415
+            from cryptography import x509  # noqa: PLC0415
+            from cryptography.hazmat.primitives import hashes  # noqa: PLC0415
         except ImportError:
             _log.warning("cryptography nicht verfuegbar - Watcher untaetig.")
             return
@@ -156,15 +158,17 @@ class TlsWatcher:
         else:
             # Kein Cert - HTTP-Fallback aktiv oder Boot hat versagt.
             with self._lock:
-                self._state.update({
-                    "status": STATUS_OK,
-                    "cert_type": "none",
-                    "days_left": None,
-                    "not_after_iso": "",
-                    "fingerprint_sha256": "",
-                    "subject_cn": "",
-                    "last_checked_iso": datetime.now(UTC).isoformat(),
-                })
+                self._state.update(
+                    {
+                        "status": STATUS_OK,
+                        "cert_type": "none",
+                        "days_left": None,
+                        "not_after_iso": "",
+                        "fingerprint_sha256": "",
+                        "subject_cn": "",
+                        "last_checked_iso": datetime.now(UTC).isoformat(),
+                    }
+                )
             return
 
         try:
@@ -172,15 +176,17 @@ class TlsWatcher:
         except (OSError, ValueError) as exc:
             _log.warning("Cert %s nicht lesbar: %s", cert_path, exc)
             with self._lock:
-                self._state.update({
-                    "status": STATUS_EXPIRED,
-                    "cert_type": cert_type,
-                    "days_left": -1,
-                    "not_after_iso": "",
-                    "fingerprint_sha256": "",
-                    "subject_cn": "",
-                    "last_checked_iso": datetime.now(UTC).isoformat(),
-                })
+                self._state.update(
+                    {
+                        "status": STATUS_EXPIRED,
+                        "cert_type": cert_type,
+                        "days_left": -1,
+                        "not_after_iso": "",
+                        "fingerprint_sha256": "",
+                        "subject_cn": "",
+                        "last_checked_iso": datetime.now(UTC).isoformat(),
+                    }
+                )
             return
 
         not_after = _get_not_after(cert)
@@ -210,21 +216,23 @@ class TlsWatcher:
                     try:
                         self._restart_callback()
                         auto_restart_scheduled = True
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         _log.exception("Auto-Restart-Trigger fehlgeschlagen")
 
         # State speichern
         with self._lock:
-            self._state.update({
-                "status": status,
-                "cert_type": cert_type,
-                "days_left": days_left,
-                "not_after_iso": not_after.isoformat(),
-                "fingerprint_sha256": fingerprint_colon,
-                "subject_cn": subject_cn,
-                "last_checked_iso": datetime.now(UTC).isoformat(),
-                "auto_restart_scheduled": auto_restart_scheduled,
-            })
+            self._state.update(
+                {
+                    "status": status,
+                    "cert_type": cert_type,
+                    "days_left": days_left,
+                    "not_after_iso": not_after.isoformat(),
+                    "fingerprint_sha256": fingerprint_colon,
+                    "subject_cn": subject_cn,
+                    "last_checked_iso": datetime.now(UTC).isoformat(),
+                    "auto_restart_scheduled": auto_restart_scheduled,
+                }
+            )
 
         # Audit nur bei Uebergang.
         seen_key = (status, fingerprint_colon)
@@ -249,9 +257,10 @@ class TlsWatcher:
         subject_cn_before: str,
     ):  # type: ignore[no-untyped-def]
         from opn_cockpit.security.self_signed import generate_self_signed  # noqa: PLC0415
+
         try:
             new_gc = generate_self_signed(paths)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.exception("Auto-Cert-Regeneration im Watcher fehlgeschlagen")
             self._audit.append(
                 AuditEventKind.TLS_CERT_EXPIRY_CRITICAL,
@@ -306,8 +315,8 @@ class TlsWatcher:
                 error_kind="tls_expiry_critical",
                 summary=(
                     f"TLS-Cert ({cert_type}, CN={subject_cn}) laeuft in "
-                    f"{days_left} Tagen ab. Server-Restart im UI (\"Server "
-                    "neu starten\") empfohlen."
+                    f'{days_left} Tagen ab. Server-Restart im UI ("Server '
+                    'neu starten") empfohlen.'
                 ),
             )
         elif status == STATUS_EXPIRED:
@@ -346,6 +355,7 @@ def _get_not_after(cert) -> datetime:  # type: ignore[no-untyped-def]
 
 def _common_name(name) -> str:  # type: ignore[no-untyped-def]
     from cryptography.x509.oid import NameOID  # noqa: PLC0415
+
     attrs = name.get_attributes_for_oid(NameOID.COMMON_NAME)
     if attrs:
         return str(attrs[0].value)
@@ -359,6 +369,6 @@ __all__ = [
     "STATUS_EXPIRED",
     "STATUS_OK",
     "STATUS_WARN",
-    "TlsWatcher",
     "WARN_DAYS",
+    "TlsWatcher",
 ]
