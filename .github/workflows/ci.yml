@@ -1,25 +1,25 @@
 name: CI
 
-# Zwei Jobs mit unterschiedlichem Gewicht -- und das ist Absicht.
+# Zwei Jobs, beide hart -- seit dem 13.11.2026 gibt es kein weiches Tor mehr.
 #
-# `tests` ist ein hartes Tor: 1300 Tests, die heute gruen sind. Was sie brechen
-# wuerde, kommt nicht nach main.
+# `tests` ist ein hartes Tor: rund 1300 Tests, die heute gruen sind. Was sie
+# brechen wuerde, kommt nicht nach main.
 #
 # `stil` war weich, weil Lint, Formatierung und Typen am 11.11.2026 zusammen
 # rund 250 Befunde meldeten -- nicht weil der Code verfallen waere, sondern weil
 # ruff und mypy in `pyproject.toml` ohne Obergrenze stehen (`ruff>=0.5`,
 # `mypy>=1.10`) und seither neue Regeln dazugekommen sind.
 #
-# Stand 13.11.2026, zwei Drittel davon abgearbeitet:
+# Stand 13.11.2026, vollstaendig abgearbeitet:
 #   Lint         181 Befunde -> 0   HART, faellt den Lauf
 #   Formatierung 149 Dateien -> 0   HART, faellt den Lauf
-#   Typen         68 Fehler  -> 65  noch weich
+#   Typen         68 Fehler  -> 0   HART, faellt den Lauf
 #
-# Die 65 mypy-Fehler bleiben, weil sie echte Arbeit am Code sind (fehlende
-# Annotationen, generische Typen) und keine Stilkorrektur. Ein Tor, das von Tag
-# eins rot ist, wird nach einer Woche ignoriert -- deshalb bleibt genau dieser
-# eine Schritt weich, bis die 65 weg sind. Dann faellt auch dort das
-# `continue-on-error`, und zwar als letztes.
+# Die Typen waren der letzte weiche Schritt: 65 Fehler, die echte Arbeit am
+# Code waren (fehlende Annotationen, generische Typen, drei davon echte
+# Fehlgriffe) und keine Stilkorrektur. Ein Tor, das von Tag eins rot ist, wird
+# nach einer Woche ignoriert -- deshalb blieb es weich, bis die 65 weg waren.
+# Sie sind weg, und zwar ohne eine einzige `# type: ignore`-Unterdrueckung.
 #
 # Beim Aufraeumen wurden fuenf Regelfamilien in `pyproject.toml` bewusst
 # stillgelegt (PLR0911/0912/0915/0917/PLR2004). Sie verlangen Umbauten, keine
@@ -91,7 +91,7 @@ jobs:
         run: uv run pytest -q -m "not live"
 
   stil:
-    name: Lint · Format (hart) · Typen (noch weich)
+    name: Lint · Format · Typen (hart)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -123,5 +123,4 @@ jobs:
           uv run ruff format --check $ZIELE
 
       - name: Mypy — Typen (strict)
-        continue-on-error: true
         run: uv run mypy
